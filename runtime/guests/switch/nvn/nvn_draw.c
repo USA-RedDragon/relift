@@ -1731,12 +1731,60 @@ int nvn_draw_render_enabled(replay *r, bool *run)
  * @brief Finds the translation of the program bound to stage s (none leaves mods[s] NULL), checks what it reads,
  * binds its textures and notes its module and specialization constants in k.
  */
-static int prepare_stage(replay *r, pipe_key *k, module **mods, uint32_t s)
+/**
+ * @brief The input primitive name of the translation a geometry program needs after a draw of primitive mode (the GPU
+ * takes it from the draw, not the program): NULL for triangles, the program's own key, and for a mode no geometry
+ * program takes (*ok false).
+ */
+static const char *gs_input_name(uint32_t mode, bool *ok)
+{
+    *ok = true;
+    switch (mode) {
+    case 0: return "points";
+    case 1:
+    case 3: return "lines";
+    case NVN_DRAW_TRIANGLES:
+    case NVN_DRAW_TRIANGLE_STRIP:
+    case NVN_DRAW_TRIANGLE_FAN: return NULL;
+    case 10:
+    case 11: return "lines adjacency";
+    case 12:
+    case 13: return "triangles adjacency";
+    default: *ok = false; return NULL;
+    }
+}
+
+bool nvn_draw_geometry_input_ok(uint32_t mode)
+{
+    bool ok;
+    gs_input_name(mode, &ok);
+    return ok;
+}
+
+/** @brief The geometry program at code translated for the input primitive of a draw of primitive mode. */
+static module *geometry_of(replay *r, uint64_t code, uint32_t mode)
+{
+    module *m = module_of(r, code, 2);
+    bool ok;
+    const char *name = gs_input_name(mode, &ok);
+    if (!m || !ok || !name)
+        return m;
+    char key[65], why[200];
+    nvn_shader_gs_key(name, m->key, key);
+    module *v = nvn_module_get(key, 2, why, sizeof why);
+    if (!v)
+        nvn_vk_stop(r, "geometry program %s for %s input: %s", m->key, name, why);
+    else if (v->global_store)
+        nvn_vk_mark_write();
+    return v;
+}
+
+static int prepare_stage(replay *r, pipe_key *k, module **mods, uint32_t s, uint32_t mode)
 {
     nvn_gfx *st = r->st;
     if (!st->code[s])
         return RL_OK;
-    if (!(mods[s] = module_of(r, st->code[s], (int)s)))
+    if (!(mods[s] = s == 2 ? geometry_of(r, st->code[s], mode) : module_of(r, st->code[s], (int)s)))
         return RL_PENDING;
     if (mods[s]->user >> USER_BINDINGS)
         return nvn_vk_stop(r, "program %s reads constant bank c[%d], past the %u user banks the layer binds", mods[s]->key,
@@ -1768,16 +1816,11 @@ static int prepare_stage(replay *r, pipe_key *k, module **mods, uint32_t s)
     return RL_OK;
 }
 
-bool nvn_draw_geometry_input_ok(uint32_t mode)
-{
-    return mode == NVN_DRAW_TRIANGLES || mode == NVN_DRAW_TRIANGLE_STRIP || mode == NVN_DRAW_TRIANGLE_FAN;
-}
 
 /**
  * @brief Checks that the host can run geometry program gs after a draw of primitive mode: the device has geometry
- * shaders, the program writes no viewport index (the layer sets one viewport), and the draw's primitives are the
- * triangles its translation takes as input (the translator's default geometry input, as NVIDIA takes the input
- * primitive from the draw and not from the program header).
+ * shaders, the program writes no viewport index (the layer sets one viewport), and the draw's primitives are ones a
+ * geometry program takes (gs is already the translation for their input primitive, geometry_of).
  */
 static int geometry_draw(replay *r, const module *gs, uint32_t mode)
 {
@@ -1786,7 +1829,7 @@ static int geometry_draw(replay *r, const module *gs, uint32_t mode)
     if (gs->writes_viewport)
         return nvn_vk_stop(r, "geometry program %s writes the viewport index", gs->key);
     if (!nvn_draw_geometry_input_ok(mode))
-        return nvn_vk_stop(r, "geometry program %s after primitive mode %u; its translation takes triangles", gs->key,
+        return nvn_vk_stop(r, "geometry program %s after primitive mode %u, which no geometry program takes", gs->key,
                            mode);
     return RL_OK;
 }
@@ -1892,7 +1935,7 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     k.topology = topo;
     module *mods[NVN_STAGES] = { NULL };
     for (uint32_t s = 0; s < 5; s++) {
-        int prc = prepare_stage(r, &k, mods, s);
+        int prc = prepare_stage(r, &k, mods, s, mode);
         if (prc != RL_OK)
             return prc;
     }
@@ -2320,7 +2363,7 @@ static int draw_mesh(replay *r, uint32_t first, uint32_t count)
     module *mods[NVN_STAGES] = { NULL };
     static const uint32_t used[] = { NVN_STAGE_TASK, NVN_STAGE_MESH, 1 };
     for (uint32_t i = 0; i < sizeof used / sizeof used[0]; i++)
-        if ((rc = prepare_stage(r, &k, mods, used[i])) != RL_OK)
+        if ((rc = prepare_stage(r, &k, mods, used[i], 0)) != RL_OK)
             return rc;
     module *mesh = mods[NVN_STAGE_MESH], *task = mods[NVN_STAGE_TASK];
     nvn_mesh_info mi, ti;

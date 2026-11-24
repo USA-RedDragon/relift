@@ -396,15 +396,22 @@ TEST(nvn_a_geometry_program_that_writes_layer_draws_layered_and_feeds_the_fragme
     nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
 }
 
-TEST(nvn_a_geometry_program_runs_after_triangles_only)
+TEST(nvn_a_geometry_program_runs_after_every_primitive_it_takes)
 {
-    CHECK(nvn_draw_geometry_input_ok(NVN_DRAW_TRIANGLES));
-    CHECK(nvn_draw_geometry_input_ok(NVN_DRAW_TRIANGLE_STRIP));
-    CHECK(nvn_draw_geometry_input_ok(NVN_DRAW_TRIANGLE_FAN));
-    for (uint32_t mode = 0; mode < 4; mode++)
-        CHECK(!nvn_draw_geometry_input_ok(mode));
-    for (uint32_t mode = 10; mode <= NVN_DRAW_PATCHES; mode++)
-        CHECK(!nvn_draw_geometry_input_ok(mode));
+    static const uint32_t ok[] = { 0, 1, 3, NVN_DRAW_TRIANGLES, NVN_DRAW_TRIANGLE_STRIP, NVN_DRAW_TRIANGLE_FAN,
+                                   10, 11, 12, 13 };
+    for (uint32_t i = 0; i < sizeof ok / sizeof ok[0]; i++)
+        CHECK(nvn_draw_geometry_input_ok(ok[i]));
+    for (uint32_t mode = 0; mode <= 15; mode++)
+        if (mode == 2 || (mode >= 7 && mode <= 9) || mode >= NVN_DRAW_PATCHES)
+            CHECK(!nvn_draw_geometry_input_ok(mode));
+}
+
+TEST(nvn_a_geometry_programs_input_primitive_variant_has_the_tables_key)
+{
+    char key[65];
+    nvn_shader_gs_key("points", "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", key);
+    CHECK(!strcmp(key, "008aa8d233739418c9b9a2d7dd7fa6eee7767768a25f3efac5451412843eae26"));
 }
 
 TEST(nvn_a_cuda_launch_gets_the_declared_static_shared_memory_plus_the_dynamic)

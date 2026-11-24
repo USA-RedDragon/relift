@@ -33,7 +33,7 @@ use std::path::Path;
 
 use relift_gpu_nv::translate::build::{Frame, Input, compressed_head, translate_set};
 use relift_gpu_nv::translate::{
-    DeviceCaps, HostProfile, ImageDim, ImageKind, Interface, Math, MeshPath, Options,
+    DeviceCaps, GsInput, HostProfile, ImageDim, ImageKind, Interface, Math, MeshPath, Options,
     XfbGlslcBuffer, XfbLayout, image_binding,
 };
 
@@ -420,6 +420,10 @@ fn compress(words: &[u32]) -> std::io::Result<Vec<u8>> {
 }
 
 /// One program translated and compressed, or why not.
+/// A geometry program's translation for another input primitive: its key,
+/// zstd frame, length in words and interface records.
+type Variant = ([u8; 32], Vec<u8>, u32, Vec<[u32; 4]>);
+
 enum Item {
     Skipped,
     Failed(String),
@@ -430,6 +434,9 @@ enum Item {
         /// The helper modules of a mesh program's compute back end, with
         /// their frames and lengths in words.
         helpers: Vec<([u8; 32], Vec<u8>, u32)>,
+        /// A geometry program's translations for the other input
+        /// primitives ([`gs_input_key`]): key, frame, words and records.
+        variants: Vec<Variant>,
     },
 }
 
@@ -532,24 +539,35 @@ impl Translator {
     }
 
     fn raw(&self, key: [u8; 32], code: Vec<u8>) -> Result<(Vec<u32>, Interface), String> {
+        self.raw_with(key, code, None)
+    }
+
+    /// As [`Translator::raw`], for a geometry program, with `gs_input` as
+    /// its input primitive instead of the pipeline's.
+    fn raw_with(
+        &self,
+        key: [u8; 32],
+        code: Vec<u8>,
+        gs_input: Option<GsInput>,
+    ) -> Result<(Vec<u32>, Interface), String> {
+        let mut options = Options {
+            math: self.math,
+            trace: self.trace.as_ref().and_then(|t| t.of(&key)),
+            xfb: self.xfb.get(&key).cloned(),
+            shared_declared: self.shared.get(&key).map(|k| k.shared),
+            externs: self
+                .shared
+                .get(&key)
+                .map(|k| k.externs.clone())
+                .unwrap_or_default(),
+            ..self.pipes.options(&key)
+        };
+        if let Some(i) = gs_input {
+            options.pipeline.gs_input = i;
+        }
         let mut t = translate_set(
             &self.host,
-            &[Input {
-                key,
-                code,
-                options: Options {
-                    math: self.math,
-                    trace: self.trace.as_ref().and_then(|t| t.of(&key)),
-                    xfb: self.xfb.get(&key).cloned(),
-                    shared_declared: self.shared.get(&key).map(|k| k.shared),
-                    externs: self
-                        .shared
-                        .get(&key)
-                        .map(|k| k.externs.clone())
-                        .unwrap_or_default(),
-                    ..self.pipes.options(&key)
-                },
-            }],
+            &[Input { key, code, options }],
             relift_gpu_sm86::program::parse,
         );
         if let Some(why) = t.failed.remove(&key) {
@@ -565,6 +583,21 @@ impl Translator {
         let Some(code) = programs.code(&key)? else {
             return Ok(Item::Skipped);
         };
+        let geometry = code.len() >= 4
+            && (u32::from_le_bytes([code[0], code[1], code[2], code[3]]) >> 10) & 0xf == 4;
+        let mut variants = Vec::new();
+        if geometry {
+            for (name, input) in GS_INPUTS {
+                if let Ok((w, i)) = self.raw_with(key, code.clone(), Some(input)) {
+                    variants.push((
+                        gs_input_key(name, &key),
+                        compress(&w)?,
+                        w.len() as u32,
+                        records(&i),
+                    ));
+                }
+            }
+        }
         let (words, interface) = match self.raw(key, code) {
             Ok(r) => r,
             Err(why) => return Ok(Item::Failed(why)),
@@ -590,8 +623,30 @@ impl Translator {
             words: words.len() as u32,
             records,
             helpers,
+            variants,
         })
     }
+}
+
+/// The input primitives a geometry program is translated for besides the
+/// triangles its own key holds: the GPU takes the input primitive from the
+/// draw, not from the program, so a draw of another primitive needs the
+/// translation for it. Their names make the keys ([`gs_input_key`]).
+pub const GS_INPUTS: [(&str, GsInput); 4] = [
+    ("points", GsInput::Points),
+    ("lines", GsInput::Lines),
+    ("lines adjacency", GsInput::LinesAdjacency),
+    ("triangles adjacency", GsInput::TrianglesAdjacency),
+];
+
+/// The key of geometry program `key` translated for input primitive
+/// `name` ([`GS_INPUTS`]): the SHA-256 of "relift gs input <name>" and the
+/// key (the runtime makes it alike, nvn_shader_gs_key).
+#[must_use]
+pub fn gs_input_key(name: &str, key: &[u8; 32]) -> [u8; 32] {
+    let mut b = format!("relift gs input {name}").into_bytes();
+    b.extend_from_slice(key);
+    sha256(&b)
 }
 
 /// Translates `programs` for the device `device` describes (the bytes of
@@ -681,9 +736,14 @@ pub fn translate_traced(
                         words,
                         records,
                         helpers,
+                        variants,
                     } => {
                         for (k, f, w) in helpers {
                             extras.insert(k, (f, w));
+                        }
+                        for (k, f, w, r) in variants {
+                            extras.insert(k, (f, w));
+                            interface.push((k, r));
                         }
                         index.push(Frame {
                             key,
@@ -717,6 +777,7 @@ pub fn translate_traced(
         &extras,
     )?;
     let _ = std::fs::remove_file(&spool);
+    interface.sort_by_key(|(k, _)| *k);
     relift_cache::write_if_changed(
         &dir.join(table_file(math, "rlspi")),
         &interface_table(&interface),
@@ -926,6 +987,15 @@ pub fn records(i: &Interface) -> Vec<[u32; 4]> {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn a_geometry_programs_input_variants_have_the_runtimes_keys() {
+        let key: [u8; 32] = std::array::from_fn(|i| i as u8);
+        assert_eq!(
+            hex(&super::gs_input_key("points", &key)),
+            "008aa8d233739418c9b9a2d7dd7fa6eee7767768a25f3efac5451412843eae26"
+        );
+    }
+
     #[test]
     fn the_interface_table_has_the_magic_the_runtime_opens() {
         assert!(super::interface_table(&[]).starts_with(super::INTERFACE_MAGIC));

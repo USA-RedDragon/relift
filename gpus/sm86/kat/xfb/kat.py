@@ -69,11 +69,22 @@ def frames(cache, out):
     open(out, 'wb').write(blob)
 
 
+def gs_flag(case):
+    """xlate's flag for the case's geometry input primitive (default points); none for triangles, its default."""
+    i = case.get('input', 'points')
+    return [] if i == 'triangles' else ['--gs-input', i]
+
+
+def topo_env(env, case):
+    """The draw's primitive for xrun: the geometry input of the case."""
+    return dict(env or os.environ, XRUN_TOPO=case.get('input', 'points'))
+
+
 def capture(work, o, sub, vs, gs, case, env=None):
     d = os.path.join(o, sub)
     os.makedirs(d, exist_ok=True)
     run([os.path.join(work, 'xrun'), vs, gs or '-', str(case['stride']), str(case['count']),
-         os.path.join(work, 'draw.vert.spv'), os.path.join(work, 'draw.frag.spv'), d], env=env)
+         os.path.join(work, 'draw.vert.spv'), os.path.join(work, 'draw.frag.spv'), d], env=topo_env(env, case))
     return [open(os.path.join(d, f), 'rb').read() for f in ('capture.bin', 'count.txt', 'image.raw')]
 
 
@@ -106,7 +117,7 @@ def one(work, name):
     spv = {}
     for k in want:
         spv[k] = os.path.join(o, k + '.spv')
-        flags = (['--xfb', sel] if k == want[-1] else []) + (['--gs-points'] if k == 'geom' else [])
+        flags = (['--xfb', sel] if k == want[-1] else []) + (gs_flag(case) if k == 'geom' else [])
         out = run([XLATE, progs[k][0], spv[k], host] + flags)
         if not out.startswith('ok'):
             sys.exit('%s: the %s program does not translate: %s' % (name, k, out))
@@ -172,7 +183,7 @@ def translate_recorded(work, rec, dest):
         if flags and os.environ.get('KAT_XFB_MEMORY'):
             flags.append('--xfb-memory')
         if k == 'geom':
-            flags.append('--gs-points')
+            flags += gs_flag(case)
         out = run([XLATE, b, spv, host] + flags)
         r = subprocess.run(['spirv-val', '--target-env', 'vulkan1.3', spv], capture_output=True, text=True)
         if not out.startswith('ok') or r.returncode:
@@ -194,8 +205,9 @@ def run_entry(work, d, e):
     env = dict(os.environ)
     if os.environ.get('KAT_DEV'):
         env['XRUN_DEV'] = os.environ['KAT_DEV']
+    env = topo_env(env, case)
     if e['mem']:
-        env['XRUN_MEM'] = '%d:%d' % (stride + 4, count)
+        env['XRUN_MEM'] = '%d:%d' % (stride + 4, case['slots'])
     gs = os.path.join(d, e['geom']) if 'geom' in e else '-'
     run([os.path.join(work, 'xrun'), os.path.join(d, e['vert']), gs, str(stride), str(count),
          os.path.join(work, 'draw.vert.spv'), os.path.join(work, 'draw.frag.spv'), o], env=env)
@@ -248,14 +260,14 @@ def memory(work, o, name, case, progs, want, sel, host, tenv, ref):
     spv = {}
     for k in want:
         spv[k] = os.path.join(o, k + '-mem.spv')
-        flags = ['--xfb', sel, '--xfb-memory', '--gs-points'] if k == 'geom' else []
+        flags = ['--xfb', sel, '--xfb-memory'] + gs_flag(case) if k == 'geom' else []
         out = run([XLATE, progs[k][0], spv[k], host] + flags)
         r = subprocess.run(['spirv-val', '--target-env', 'vulkan1.3', spv[k]], capture_output=True, text=True)
         if not out.startswith('ok') or r.returncode:
             sys.exit('%s: memory path %s: %s %s' % (name, k, out[:300], r.stdout + r.stderr))
     stride = case['stride']
     record = stride + 4
-    env = dict(tenv, XRUN_MEM='%d:%d' % (record, case['count']))
+    env = dict(topo_env(tenv, case), XRUN_MEM='%d:%d' % (record, case['slots']))
     d = os.path.join(o, 'mem')
     os.makedirs(d, exist_ok=True)
     run([os.path.join(work, 'xrun'), spv['vert'], spv['geom'], str(stride), str(case['count']),
@@ -285,7 +297,7 @@ def game(work, path):
         if len(lay) != 1 or not x['raw']:
             sys.exit('%#x: layout %s needs more than the one raw buffer xlate takes' % (h, lay))
         sel = '%d:%s' % (lay[0]['stride'], ','.join(str(a & 0xff) for a in lay[0]['attr']))
-        out = run([XLATE, prog, spv, os.environ.get('KAT_HOST', 'nvidia'), '--xfb', sel, '--gs-points'])
+        out = run([XLATE, prog, spv, os.environ.get('KAT_HOST', 'nvidia'), '--xfb', sel, '--gs-input', 'points'])
         r = subprocess.run(['spirv-val', '--target-env', 'vulkan1.3', spv], capture_output=True, text=True)
         want = 'xfb: [(%d, %d)]' % (lay[0]['stride'], lay[0]['stream'])
         if not out.startswith('ok') or r.returncode or want not in out:

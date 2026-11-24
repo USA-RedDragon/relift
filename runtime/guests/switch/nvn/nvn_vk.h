@@ -1297,8 +1297,9 @@ int nvn_draw_render_enabled(replay *r, bool *run);
 /** @brief NVNdrawPrimitive values a draw takes: triangles, triangle strip, triangle fan and patches. */
 enum { NVN_DRAW_TRIANGLES = 4, NVN_DRAW_TRIANGLE_STRIP = 5, NVN_DRAW_TRIANGLE_FAN = 6, NVN_DRAW_PATCHES = 14 };
 /**
- * @brief Whether a geometry program's translation runs after a draw of primitive mode: it takes triangles (the
- * translator's default geometry input; NVIDIA's geometry stage takes its input primitive from the draw).
+ * @brief Whether a geometry program runs after a draw of primitive mode: points, lines, line strips, triangles, their
+ * strips and fans and the adjacency forms. NVIDIA's geometry stage takes its input primitive from the draw, so the
+ * table holds a translation for each (the triangles one under the program's key, the others under nvn_shader_gs_key).
  */
 bool nvn_draw_geometry_input_ok(uint32_t mode);
 /**

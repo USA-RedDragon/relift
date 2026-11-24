@@ -652,6 +652,12 @@ bool nvn_mesh_info_of(const nvn_iface_rec *recs, uint32_t n, nvn_mesh_info *out)
  */
 void nvn_shader_helper_key(const char *kind, const char *key, char helper_key[65]);
 /**
+ * @brief The key (hex) of geometry program key translated for input primitive name ("points", "lines", "lines
+ * adjacency" or "triangles adjacency"): the SHA-256 of "relift gs input <name>" and the key, as the table's
+ * gs_input_key makes it.
+ */
+void nvn_shader_gs_key(const char *name, const char *key, char gs_key[65]);
+/**
  * @brief Record kind: the program stores or does atomic read-modify-writes through 64-bit global addresses; bank 1 when
  * each such write also marks its page in the written-page bitmap (nvn_mirror_written_pages_address).
  */

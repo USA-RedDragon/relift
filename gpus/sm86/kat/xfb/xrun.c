@@ -6,7 +6,8 @@
 // kat.py. XRUN_DEV picks the device by a part of its name (default NVIDIA); XRUN_CACHE=<file> writes the pipeline
 // cache, from which kat.py carves the driver's code. XRUN_MEM=<record bytes>:<slots> runs a memory path translation
 // instead: no transform feedback, a zeroed scratch of that many records whose device address goes to the push
-// constants at byte 24 (and a written-page bitmap's at byte 16), written to scratch.bin; no draw follows.
+// constants at byte 24 (and a written-page bitmap's at byte 16), written to scratch.bin; no draw follows. XRUN_TOPO
+// (points, lines, triangles, lines-adjacency, triangles-adjacency; default points) is the capture draw's primitive.
 #include <vulkan/vulkan.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -69,6 +70,8 @@ static VkPipelineLayout layout(void) {
 
 /* A point list pipeline: with stride 0 no vertex input and the rasterizer discarding, else attribute 0 a vec4 at byte
    0 of binding 0, drawn into the RGBA32F target. */
+static VkPrimitiveTopology topo = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+
 static VkPipeline pipeline(VkPipelineLayout l, VkShaderModule vs, VkShaderModule gs, VkShaderModule fs, uint32_t stride) {
     VkPipelineShaderStageCreateInfo st[3]; uint32_t ns = 0;
     st[ns++] = (VkPipelineShaderStageCreateInfo){ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, 0, 0, VK_SHADER_STAGE_VERTEX_BIT, vs, "main", 0 };
@@ -78,7 +81,8 @@ static VkPipeline pipeline(VkPipelineLayout l, VkShaderModule vs, VkShaderModule
     VkVertexInputAttributeDescription va = { 0, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 0 };
     VkPipelineVertexInputStateCreateInfo vi = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO, 0, 0,
         stride ? 1u : 0u, &vb, stride ? 1u : 0u, &va };
-    VkPipelineInputAssemblyStateCreateInfo ia = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO, 0, 0, VK_PRIMITIVE_TOPOLOGY_POINT_LIST, 0 };
+    VkPipelineInputAssemblyStateCreateInfo ia = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO, 0, 0,
+        fs ? VK_PRIMITIVE_TOPOLOGY_POINT_LIST : topo, 0 };
     VkViewport vp = { 0, 0, W, H, 0, 1 }; VkRect2D sc = { { 0, 0 }, { W, H } };
     VkPipelineViewportStateCreateInfo vps = { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, 0, 0, 1, &vp, 1, &sc };
     VkPipelineRasterizationStateCreateInfo rs = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO, 0, 0, 0,
@@ -123,6 +127,12 @@ int main(int argc, char **argv) {
     float prio = 1;
     VkDeviceQueueCreateInfo qi = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, 0, 0, 0, 1, &prio };
     VkPhysicalDeviceTransformFeedbackFeaturesEXT fx = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT, 0, 1, 0 };
+    const char *t = getenv("XRUN_TOPO") ? getenv("XRUN_TOPO") : "points";
+    if (!strcmp(t, "lines")) topo = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+    else if (!strcmp(t, "triangles")) topo = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    else if (!strcmp(t, "lines-adjacency")) topo = VK_PRIMITIVE_TOPOLOGY_LINE_LIST_WITH_ADJACENCY;
+    else if (!strcmp(t, "triangles-adjacency")) topo = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST_WITH_ADJACENCY;
+    else if (strcmp(t, "points")) { fprintf(stderr, "XRUN_TOPO %s\n", t); return 1; }
     if (getenv("XRUN_MEM")) sscanf(getenv("XRUN_MEM"), "%d:%d", &mem_rec, &mem_slots);
     VkPhysicalDeviceVulkan12Features f12 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, &fx };
     f12.bufferDeviceAddress = 1;

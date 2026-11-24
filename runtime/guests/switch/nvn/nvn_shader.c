@@ -703,6 +703,22 @@ bool nvn_mesh_info_of(const nvn_iface_rec *recs, uint32_t n, nvn_mesh_info *out)
     return out->present;
 }
 
+void nvn_shader_gs_key(const char *name, const char *key, char gs_key[65])
+{
+    static const char lead[] = "relift gs input ";
+    uint8_t buf[sizeof lead + 32 + 32];
+    size_t n = strlen(lead), m = strlen(name);
+    if (m > 32)
+        m = 32;
+    memcpy(buf, lead, n);
+    memcpy(buf + n, name, m);
+    for (uint32_t i = 0; i < 32; i++) {
+        int hi = hexv(key[2 * i]), lo = hexv(key[2 * i + 1]);
+        buf[n + m + i] = (uint8_t)(hi << 4 | lo);
+    }
+    rl_data_sha256(buf, n + m + 32, gs_key);
+}
+
 void nvn_shader_helper_key(const char *kind, const char *key, char hkey[65])
 {
     static const char scan[] = "relift mesh scan", vertex[] = "relift mesh vertex";

@@ -1,1 +1,1 @@
-{"stride": 16, "count": 16, "select": [32, 33, 34, 36]}
+{"stride": 16, "count": 16, "select": [32, 33, 34, 36], "input": "points", "slots": 16}

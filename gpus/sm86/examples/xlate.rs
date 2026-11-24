@@ -19,8 +19,18 @@ fn main() {
             );
         } else if a == "--debug-info" {
             o.debug_info = true;
-        } else if a == "--gs-points" {
-            o.pipeline.gs_input = relift_gpu_nv::translate::GsInput::Points;
+        } else if a == "--gs-input" {
+            let name = raw.next().unwrap_or_default();
+            use relift_gpu_nv::translate::GsInput;
+            o.pipeline.gs_input = match name.as_str() {
+                "points" => GsInput::Points,
+                "lines" => GsInput::Lines,
+                "lines-adjacency" => GsInput::LinesAdjacency,
+                "triangles-adjacency" => GsInput::TrianglesAdjacency,
+                _ => panic!(
+                    "--gs-input {name}: points, lines, lines-adjacency or triangles-adjacency"
+                ),
+            };
         } else if a == "--xfb-memory" {
             no_xfb_host = true;
         } else if a == "--xfb" {
