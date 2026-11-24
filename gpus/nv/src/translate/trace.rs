@@ -314,27 +314,14 @@ impl Ctx {
         } else {
             self.trace.slots
         };
-        let inc = self.m.emit(op::SELECT, u, &[cond, one, zero]);
-        let hits_at = self.m.c_u32(TRACE_HEADER_WORDS + TRACE_SLOT_WORDS * k);
-        let hits = self.m.emit(op::ACCESS_CHAIN, pu, &[var, zero, hits_at]);
-        let old = self.m.emit(ATOMIC_I_ADD, u, &[hits, scope, sem, inc]);
-        let seq_p = self.m.emit(op::ACCESS_CHAIN, pu, &[var, zero, zero]);
-        let seq = self.m.emit(ATOMIC_I_ADD, u, &[seq_p, scope, sem, inc]);
-        let was_first = self.m.emit(op::I_EQUAL, b, &[old, zero]);
-        let first = self.m.emit(op::LOGICAL_AND, b, &[cond, was_first]);
-        let slot = self.m.c_u32(k);
-        let trash = self.m.c_u32(self.trace.slots);
-        let s = self.m.emit(op::SELECT, u, &[first, slot, trash]);
-        let sw = self.m.c_u32(TRACE_SLOT_WORDS);
-        let hw = self.m.c_u32(TRACE_HEADER_WORDS);
-        let base = self.m.emit(op::I_MUL, u, &[s, sw]);
-        let base = self.m.emit(op::I_ADD, u, &[base, hw]);
+        let _ = one;
+        // Only an invocation that meets the condition touches the buffer, and only the first hit of an instruction
+        // takes a sequence number and writes the record: a device-scope atomic on one shared word for every
+        // invocation of every traced instruction (and every miss storing a record to the trash slot) made a large
+        // fragment program run long enough for the host's watchdog to lose the device.
         let inv = self.trace_invocation();
-        let pc = self.m.c_u32(self.trace.pc as u32);
-        let dst = self.m.c_u32(reg);
         let block = self.m.block();
         let none = self.m.c_u32(u32::MAX);
-        let mut words = vec![seq, pc, dst, val, inv[0], inv[1], inv[2]];
         let srcs: Vec<(u32, u32)> = self
             .trace
             .srcs
@@ -343,6 +330,26 @@ impl Ctx {
             .map(|s| (s.0, s.1))
             .take(SOURCES)
             .collect();
+        let pc = self.m.c_u32(self.trace.pc as u32);
+        let dst = self.m.c_u32(reg);
+        let one = self.m.c_u32(1);
+        let hits_at = self.m.c_u32(TRACE_HEADER_WORDS + TRACE_SLOT_WORDS * k);
+        let (hit, first_l, merge_first, merge_hit) =
+            (self.m.id(), self.m.id(), self.m.id(), self.m.id());
+        self.m.emit_void(op::SELECTION_MERGE, &[merge_hit, 0]);
+        self.m
+            .emit_void(op::BRANCH_CONDITIONAL, &[cond, hit, merge_hit]);
+        self.m.emit_void(op::LABEL, &[hit]);
+        let hits = self.m.emit(op::ACCESS_CHAIN, pu, &[var, zero, hits_at]);
+        let old = self.m.emit(ATOMIC_I_ADD, u, &[hits, scope, sem, one]);
+        let was_first = self.m.emit(op::I_EQUAL, b, &[old, zero]);
+        self.m.emit_void(op::SELECTION_MERGE, &[merge_first, 0]);
+        self.m
+            .emit_void(op::BRANCH_CONDITIONAL, &[was_first, first_l, merge_first]);
+        self.m.emit_void(op::LABEL, &[first_l]);
+        let seq_p = self.m.emit(op::ACCESS_CHAIN, pu, &[var, zero, zero]);
+        let seq = self.m.emit(ATOMIC_I_ADD, u, &[seq_p, scope, sem, one]);
+        let mut words = vec![seq, pc, dst, val, inv[0], inv[1], inv[2]];
         for n in 0..SOURCES {
             match srcs.get(n) {
                 Some(&(id, v)) => {
@@ -352,12 +359,16 @@ impl Ctx {
                 None => words.extend([none, zero]),
             }
         }
+        let base = TRACE_HEADER_WORDS + TRACE_SLOT_WORDS * k;
         for (n, w) in words.into_iter().enumerate() {
-            let off = self.m.c_u32(1 + n as u32);
-            let at = self.m.emit(op::I_ADD, u, &[base, off]);
+            let at = self.m.c_u32(base + 1 + n as u32);
             let p = self.m.emit(op::ACCESS_CHAIN, pu, &[var, zero, at]);
             self.m.emit_void(op::STORE, &[p, w]);
         }
+        self.m.emit_void(op::BRANCH, &[merge_first]);
+        self.m.emit_void(op::LABEL, &[merge_first]);
+        self.m.emit_void(op::BRANCH, &[merge_hit]);
+        self.m.emit_void(op::LABEL, &[merge_hit]);
     }
 }
 

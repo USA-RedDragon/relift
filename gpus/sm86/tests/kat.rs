@@ -938,6 +938,35 @@ fn trace_mode_keeps_every_output() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// An invocation that meets no condition leaves the trace buffer as it was: no sequence number taken, no record
+/// written to the trash slot. On the device every miss used to take a device-scope atomic on one shared word and
+/// store a record, which made a long fragment program run long enough for the host to lose the device.
+#[test]
+fn trace_misses_leave_the_buffer_alone() {
+    let spec = Trace::parse("nan").unwrap();
+    let host = unmirrored("nvidia");
+    let f = file::load("fadd");
+    let v = &f.variants[0];
+    let p = relift_gpu_sm86::program::parse(&v.code);
+    let o = Options {
+        host: host.clone(),
+        exact_mufu: true,
+        trace: Some(spec),
+        ..Options::default()
+    };
+    let traced = translate_with(&p, &o).unwrap();
+    let m = Module::parse(&traced.spirv);
+    let d = behaviors(&m, &host)[0];
+    let words = traced.interface.trace_words;
+    let finite = f
+        .rows
+        .iter()
+        .find(|r| r.iter().all(|&x| x & 0x7f80_0000 != 0x7f80_0000))
+        .expect("a row of finite inputs");
+    let (_, t) = exec_traced(&m, d, host.canonical_nan, finite, v.outs, words);
+    assert!(t.iter().all(|&b| b == 0), "a miss wrote the trace buffer");
+}
+
 /// One slot of a trace buffer (see `Options::trace`): hits, sequence
 /// number, PC, destination, value, invocation id and source pairs.
 fn slot(t: &[u8], k: usize) -> Vec<u32> {
