@@ -10,6 +10,8 @@ use crate::Error;
 /// the registry pin and hooks of a later file win.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Config {
+    /// The guest ABI the output is for (`a64` when no file names one).
+    pub abi: String,
     /// The registry tag the output was generated from (`v1.4.363`).
     pub registry_tag: String,
     /// Where CI downloads vk.xml from.
@@ -82,9 +84,17 @@ impl Config {
             .parse()
             .map_err(|e| Error(format!("configuration: {e}")))?;
         for key in t.keys() {
-            if !["registry", "api", "thunks", "hooks"].contains(&key.as_str()) {
+            if !["target", "registry", "api", "thunks", "hooks"].contains(&key.as_str()) {
                 return Err(Error(format!("configuration: unknown section [{key}]")));
             }
+        }
+        if let Some(r) = table(&t, "target")?
+            && let Some(v) = r.get("abi")
+        {
+            self.abi = v
+                .as_str()
+                .ok_or_else(|| Error("target.abi must be a string".into()))?
+                .to_string();
         }
         if let Some(r) = table(&t, "registry")? {
             let get = |k: &str| r.get(k).and_then(|v| v.as_str()).map(str::to_string);
@@ -151,5 +161,7 @@ mod tests {
         assert_eq!(c.before["vkQueueSubmit"], "f");
         assert_eq!(c.check["vkCreateImage"], "g");
         assert!(c.merge("[nope]\n").is_err());
+        c.merge("[target]\nabi = \"i386\"\n").unwrap();
+        assert_eq!(c.abi, "i386");
     }
 }

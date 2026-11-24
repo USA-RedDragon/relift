@@ -62,7 +62,7 @@ fn out_fn(m: &Model, t: &str) -> String {
 }
 
 /// Translates a `len` attribute to a C expression; `field` maps a name to its value expression.
-fn len_expr(
+pub(crate) fn len_expr(
     len: Option<&str>,
     field: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Option<String>, Error> {

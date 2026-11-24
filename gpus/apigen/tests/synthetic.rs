@@ -2,6 +2,7 @@
 //! layouts, translation classes, thunk and converter shapes, and the errors
 //! it must raise.
 
+use relift_gpu_apigen::abi::I386;
 use relift_gpu_apigen::model::Model;
 use relift_gpu_apigen::registry::Registry;
 use relift_gpu_apigen::select::Selection;
@@ -147,6 +148,47 @@ fn layouts_follow_lp64() {
     assert!(!m.plain("VkFooInfoOut"));
     assert_eq!(m.kind_of("VkCommandBuffer"), 1);
     assert_eq!(m.kind_of("VkFoo"), 0);
+}
+
+#[test]
+fn layouts_follow_i386() {
+    let x = xml();
+    let reg = Registry::parse(&x).unwrap();
+    let cfg = config();
+    let sel = Selection::new(&reg, &cfg).unwrap();
+    let mut m = Model::for_abi(&reg, &sel, &cfg, I386).unwrap();
+    let item = m.struct_layout("VkItem").unwrap();
+    assert_eq!(item.offsets, [0, 4, 12]);
+    assert_eq!((item.layout.size, item.layout.align), (20, 4));
+    assert_eq!(m.host_layout("VkItem").unwrap().layout.size, 24);
+    let ci = m.struct_layout("VkFooCreateInfo").unwrap();
+    assert_eq!(ci.offsets, [0, 4, 8, 12, 16, 20, 24, 28, 32]);
+    assert_eq!(ci.layout.size, 44);
+    assert!(
+        !m.plain("VkItem"),
+        "a struct whose i386 layout differs from the host's is converted"
+    );
+}
+
+#[test]
+fn i386_thunks_read_stack_slots() {
+    let mut cfg = config();
+    cfg.merge("[target]\nabi = \"i386\"\n").unwrap();
+    let files = generate(&xml(), &cfg).unwrap();
+    let layout = file(&files, "vki_layout.c");
+    assert!(layout.contains("_Static_assert(sizeof(VkItem) == 20 && _Alignof(VkItem) == 4"));
+    let th = file(&files, "vki.c");
+    assert!(th.contains(
+        "VkCommandBuffer a0 = (VkCommandBuffer)tg_unhandle(tg_arg32(k, 0), \"vkCmdFoo\");"
+    ));
+    assert!(th.contains("uint32_t b = tg_arg32(k, 4);"));
+    assert!(th.contains("uint32_t a9 = (uint32_t)tg_arg32(k, 36);"));
+    assert!(th.contains("memcpy(&h->size, k->mem + g + 4, sizeof h->size);"));
+    assert!(th.contains("h->pBuffers = (const VkCommandBuffer *)vki_unwrap_n(k, (uint32_t)tg_ld(k->mem + g + 24, 4), h->bufferCount);"));
+    assert!(th.contains("tg_st(k->mem + g + 8, 4, tg_handle(h->owner));"));
+    assert!(th.contains("{\"vkCreateFooKHR\", vki_vkCreateFoo},"));
+    let types = file(&files, "vkg_types.h");
+    assert!(types.contains("VKG_NON_DISPATCHABLE(VkFoo);"));
 }
 
 #[test]

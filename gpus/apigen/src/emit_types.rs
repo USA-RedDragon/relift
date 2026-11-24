@@ -1,6 +1,7 @@
 //! `vkg_types.h`: the Vulkan types of the selection, written from the
 //! registry so the runtime needs no host Vulkan headers, plus static asserts
-//! that pin every struct to its guest layout.
+//! that pin every struct to its LP64 layout on a 64-bit compiler: the host
+//! layout, which is also the AArch64 guest's.
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
@@ -88,9 +89,22 @@ pub fn emit(m: &mut Model, tag: &str) -> Result<String, Error> {
             writeln!(w, "typedef struct {t} {t};").ok();
         }
     }
+    writeln!(
+        w,
+        "#if UINTPTR_MAX > 0xFFFFFFFFu\n#define VKG_NON_DISPATCHABLE(t) typedef struct t##_T *t\n#else\n#define VKG_NON_DISPATCHABLE(t) typedef uint64_t t\n#endif"
+    )
+    .ok();
     for t in &types {
-        if let Some(Kind::Handle { .. }) = kind(t) {
-            writeln!(w, "typedef struct {t}_T *{t};").ok();
+        match kind(t) {
+            Some(Kind::Handle { dispatchable: true }) => {
+                writeln!(w, "typedef struct {t}_T *{t};").ok();
+            }
+            Some(Kind::Handle {
+                dispatchable: false,
+            }) => {
+                writeln!(w, "VKG_NON_DISPATCHABLE({t});").ok();
+            }
+            _ => {}
         }
     }
     writeln!(w).ok();
@@ -215,8 +229,9 @@ pub fn emit(m: &mut Model, tag: &str) -> Result<String, Error> {
     for t in &structs {
         visit(m, t, &mut done, w);
     }
+    writeln!(w, "#if UINTPTR_MAX > 0xFFFFFFFFu").ok();
     for t in &structs {
-        let l = m.struct_layout(t)?;
+        let l = m.host_layout(t)?;
         writeln!(
             w,
             "_Static_assert(sizeof({t}) == {} && _Alignof({t}) == {}, \"{t} guest layout\");",
@@ -232,6 +247,7 @@ pub fn emit(m: &mut Model, tag: &str) -> Result<String, Error> {
             .ok();
         }
     }
+    writeln!(w, "#endif").ok();
     writeln!(w).ok();
     for (def, (names, _)) in &sel.commands {
         let c = &reg.commands[def];

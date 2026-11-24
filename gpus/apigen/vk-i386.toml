@@ -1,0 +1,27 @@
+# relift-vkgen configuration for an i386 guest (Linux): core Vulkan 1.0 to
+# 1.3 through the host's loader and driver, with the i386 core of
+# runtime/gpuapi/i386 (tg.h). Same registry pin as vkgen.toml.
+
+[target]
+abi = "i386"
+
+[registry]
+tag = "v1.4.363"
+url = "https://raw.githubusercontent.com/KhronosGroup/Vulkan-Headers/v1.4.363/registry/vk.xml"
+sha256 = "55ec60950cfb18c3575dcf5fd52741b2bb70eb1e466408f803a91049973ee6fb"
+
+[api]
+features = ["VK_VERSION_1_0", "VK_VERSION_1_1", "VK_VERSION_1_2", "VK_VERSION_1_3"]
+extensions = []
+
+[thunks]
+# Written by hand in runtime/gpuapi/i386/vulkan_hand.c as tgh_<name>:
+# function lookup gives guest thunk addresses; host-visible memory must be
+# mapped inside the guest window (VK_EXT_map_memory_placed).
+hand_commands = [
+    "vkGetInstanceProcAddr",
+    "vkGetDeviceProcAddr",
+    "vkMapMemory",
+]
+# Host allocation callbacks are never forwarded: the driver allocates.
+drop_types = ["VkAllocationCallbacks"]

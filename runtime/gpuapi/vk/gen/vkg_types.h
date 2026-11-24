@@ -149,39 +149,44 @@ typedef uint64_t VkDeviceSize;
 typedef uint32_t VkFlags;
 typedef uint64_t VkFlags64;
 typedef uint32_t VkSampleMask;
-typedef struct VkBuffer_T *VkBuffer;
-typedef struct VkBufferView_T *VkBufferView;
+#if UINTPTR_MAX > 0xFFFFFFFFu
+#define VKG_NON_DISPATCHABLE(t) typedef struct t##_T *t
+#else
+#define VKG_NON_DISPATCHABLE(t) typedef uint64_t t
+#endif
+VKG_NON_DISPATCHABLE(VkBuffer);
+VKG_NON_DISPATCHABLE(VkBufferView);
 typedef struct VkCommandBuffer_T *VkCommandBuffer;
-typedef struct VkCommandPool_T *VkCommandPool;
-typedef struct VkDebugReportCallbackEXT_T *VkDebugReportCallbackEXT;
-typedef struct VkDebugUtilsMessengerEXT_T *VkDebugUtilsMessengerEXT;
-typedef struct VkDescriptorPool_T *VkDescriptorPool;
-typedef struct VkDescriptorSet_T *VkDescriptorSet;
-typedef struct VkDescriptorSetLayout_T *VkDescriptorSetLayout;
-typedef struct VkDescriptorUpdateTemplate_T *VkDescriptorUpdateTemplate;
+VKG_NON_DISPATCHABLE(VkCommandPool);
+VKG_NON_DISPATCHABLE(VkDebugReportCallbackEXT);
+VKG_NON_DISPATCHABLE(VkDebugUtilsMessengerEXT);
+VKG_NON_DISPATCHABLE(VkDescriptorPool);
+VKG_NON_DISPATCHABLE(VkDescriptorSet);
+VKG_NON_DISPATCHABLE(VkDescriptorSetLayout);
+VKG_NON_DISPATCHABLE(VkDescriptorUpdateTemplate);
 typedef struct VkDevice_T *VkDevice;
-typedef struct VkDeviceMemory_T *VkDeviceMemory;
-typedef struct VkEvent_T *VkEvent;
-typedef struct VkFence_T *VkFence;
-typedef struct VkFramebuffer_T *VkFramebuffer;
-typedef struct VkImage_T *VkImage;
-typedef struct VkImageView_T *VkImageView;
+VKG_NON_DISPATCHABLE(VkDeviceMemory);
+VKG_NON_DISPATCHABLE(VkEvent);
+VKG_NON_DISPATCHABLE(VkFence);
+VKG_NON_DISPATCHABLE(VkFramebuffer);
+VKG_NON_DISPATCHABLE(VkImage);
+VKG_NON_DISPATCHABLE(VkImageView);
 typedef struct VkInstance_T *VkInstance;
 typedef struct VkPhysicalDevice_T *VkPhysicalDevice;
-typedef struct VkPipeline_T *VkPipeline;
-typedef struct VkPipelineCache_T *VkPipelineCache;
-typedef struct VkPipelineLayout_T *VkPipelineLayout;
-typedef struct VkPrivateDataSlot_T *VkPrivateDataSlot;
-typedef struct VkQueryPool_T *VkQueryPool;
+VKG_NON_DISPATCHABLE(VkPipeline);
+VKG_NON_DISPATCHABLE(VkPipelineCache);
+VKG_NON_DISPATCHABLE(VkPipelineLayout);
+VKG_NON_DISPATCHABLE(VkPrivateDataSlot);
+VKG_NON_DISPATCHABLE(VkQueryPool);
 typedef struct VkQueue_T *VkQueue;
-typedef struct VkRenderPass_T *VkRenderPass;
-typedef struct VkSampler_T *VkSampler;
-typedef struct VkSamplerYcbcrConversion_T *VkSamplerYcbcrConversion;
-typedef struct VkSemaphore_T *VkSemaphore;
-typedef struct VkShaderEXT_T *VkShaderEXT;
-typedef struct VkShaderModule_T *VkShaderModule;
-typedef struct VkSurfaceKHR_T *VkSurfaceKHR;
-typedef struct VkSwapchainKHR_T *VkSwapchainKHR;
+VKG_NON_DISPATCHABLE(VkRenderPass);
+VKG_NON_DISPATCHABLE(VkSampler);
+VKG_NON_DISPATCHABLE(VkSamplerYcbcrConversion);
+VKG_NON_DISPATCHABLE(VkSemaphore);
+VKG_NON_DISPATCHABLE(VkShaderEXT);
+VKG_NON_DISPATCHABLE(VkShaderModule);
+VKG_NON_DISPATCHABLE(VkSurfaceKHR);
+VKG_NON_DISPATCHABLE(VkSwapchainKHR);
 
 typedef enum VkAccessFlagBits {
     VK_ACCESS_COLOR_ATTACHMENT_READ_BIT = 0x00000080,
@@ -5988,6 +5993,7 @@ struct VkWriteDescriptorSetInlineUniformBlock {
     const void* pData;
 };
 
+#if UINTPTR_MAX > 0xFFFFFFFFu
 _Static_assert(sizeof(VkAcquireNextImageInfoKHR) == 56 && _Alignof(VkAcquireNextImageInfoKHR) == 8, "VkAcquireNextImageInfoKHR guest layout");
 _Static_assert(offsetof(VkAcquireNextImageInfoKHR, sType) == 0, "VkAcquireNextImageInfoKHR.sType guest offset");
 _Static_assert(offsetof(VkAcquireNextImageInfoKHR, pNext) == 8, "VkAcquireNextImageInfoKHR.pNext guest offset");
@@ -8534,6 +8540,7 @@ _Static_assert(offsetof(VkWriteDescriptorSetInlineUniformBlock, pData) == 24, "V
 _Static_assert(sizeof(VkXYColorEXT) == 8 && _Alignof(VkXYColorEXT) == 4, "VkXYColorEXT guest layout");
 _Static_assert(offsetof(VkXYColorEXT, x) == 0, "VkXYColorEXT.x guest offset");
 _Static_assert(offsetof(VkXYColorEXT, y) == 4, "VkXYColorEXT.y guest offset");
+#endif
 
 typedef VkResult (VKAPI_PTR *PFN_vkAcquireNextImage2KHR)(VkDevice device, const VkAcquireNextImageInfoKHR* pAcquireInfo, uint32_t* pImageIndex);
 typedef VkResult (VKAPI_PTR *PFN_vkAcquireNextImageKHR)(VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout, VkSemaphore semaphore, VkFence fence, uint32_t* pImageIndex);

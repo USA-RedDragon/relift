@@ -1,14 +1,17 @@
 //! Guest layout and translation classes of the selected types.
 //!
-//! The guest is AArch64 LP64 (AAPCS64): pointers, handles and size_t are 8
-//! bytes, enums 4, and every scalar is aligned to its size. The generator
-//! computes every struct's size, alignment and member offsets under those
-//! rules and emits them as static asserts, so a host whose C layout differs
-//! fails to compile instead of corrupting guest memory.
+//! The guest's data model comes from its [`Abi`]: on AArch64 LP64 pointers,
+//! handles and size_t are 8 bytes and every scalar is aligned to its size;
+//! on i386 they are 4 bytes and 8-byte scalars align to 4 in structs. The
+//! generator computes every struct's size, alignment and member offsets
+//! under those rules and emits them as static asserts, so a compiler whose
+//! layout differs fails instead of corrupting guest memory. The host layout
+//! is the [`A64`] one (every host is LP64).
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::Error;
+use crate::abi::{A64, Abi};
 use crate::config::Config;
 use crate::registry::{Decl, Kind, Registry};
 use crate::select::Selection;
@@ -39,33 +42,52 @@ pub struct Model<'r> {
     pub sel: &'r Selection,
     /// The configuration.
     pub cfg: &'r Config,
+    /// The guest ABI.
+    pub abi: Abi,
     /// Guest layouts of the selected structs and unions.
     pub structs: BTreeMap<String, StructLayout>,
+    /// Host (LP64) layouts, filled only for a guest whose layout differs.
+    pub host_structs: BTreeMap<String, StructLayout>,
     /// Structs and unions that cannot be passed to the host as guest bytes.
     pub converted: BTreeSet<String>,
     /// The dispatchable handle types, in kind order (kind = index + 1).
     pub dispatchable: Vec<String>,
 }
 
-fn prim(name: &str) -> Option<Layout> {
+fn prim(abi: Abi, name: &str) -> Option<Layout> {
     let s = match name {
         "char" | "int8_t" | "uint8_t" => 1,
         "int16_t" | "uint16_t" => 2,
         "int32_t" | "uint32_t" | "float" | "int" => 4,
-        "int64_t" | "uint64_t" | "double" | "size_t" => 8,
+        "int64_t" | "uint64_t" | "double" => 8,
+        "size_t" => abi.word,
         _ => return None,
     };
-    Some(Layout { size: s, align: s })
+    let (size, align) = abi.scalar(s);
+    Some(Layout { size, align })
 }
 
 impl<'r> Model<'r> {
-    /// Builds the model, failing on anything the forwarding cannot express.
+    /// Builds the model for the AArch64 guest.
     pub fn new(reg: &'r Registry, sel: &'r Selection, cfg: &'r Config) -> Result<Model<'r>, Error> {
+        Model::for_abi(reg, sel, cfg, A64)
+    }
+
+    /// Builds the model for one guest ABI, failing on anything the
+    /// forwarding cannot express.
+    pub fn for_abi(
+        reg: &'r Registry,
+        sel: &'r Selection,
+        cfg: &'r Config,
+        abi: Abi,
+    ) -> Result<Model<'r>, Error> {
         let mut m = Model {
             reg,
             sel,
             cfg,
+            abi,
             structs: BTreeMap::new(),
+            host_structs: BTreeMap::new(),
             converted: BTreeSet::new(),
             dispatchable: Vec::new(),
         };
@@ -75,6 +97,9 @@ impl<'r> Model<'r> {
                     Kind::Handle { dispatchable: true } => m.dispatchable.push(t.clone()),
                     Kind::Struct { .. } => {
                         m.struct_layout(t)?;
+                        if !abi.is_host() {
+                            m.layout_in(A64, t)?;
+                        }
                     }
                     _ => {}
                 }
@@ -116,7 +141,12 @@ impl<'r> Model<'r> {
 
     /// The guest layout of a type used by value.
     pub fn type_layout(&mut self, ty: &str) -> Result<Layout, Error> {
-        if let Some(l) = prim(ty) {
+        self.type_layout_in(self.abi, ty)
+    }
+
+    /// The layout of a type used by value under one ABI.
+    pub fn type_layout_in(&mut self, abi: Abi, ty: &str) -> Result<Layout, Error> {
+        if let Some(l) = prim(abi, ty) {
             return Ok(l);
         }
         let t = self.reg.resolve(ty).to_string();
@@ -127,16 +157,25 @@ impl<'r> Model<'r> {
             .map(|x| x.kind.clone())
             .ok_or_else(|| Error(format!("unknown type {ty}")))?;
         match kind {
-            Kind::Base(Some(b)) => self.type_layout(&b),
+            Kind::Base(Some(b)) => self.type_layout_in(abi, &b),
             Kind::Base(None) => Err(Error(format!("opaque type {ty} used by value"))),
-            Kind::Bitmask { over, .. } => self.type_layout(&over),
-            Kind::Handle { .. } | Kind::FuncPtr { .. } => Ok(Layout { size: 8, align: 8 }),
+            Kind::Bitmask { over, .. } => self.type_layout_in(abi, &over),
+            Kind::Handle {
+                dispatchable: false,
+            } => {
+                let (size, align) = abi.scalar(8);
+                Ok(Layout { size, align })
+            }
+            Kind::Handle { .. } | Kind::FuncPtr { .. } => Ok(Layout {
+                size: abi.word,
+                align: abi.word,
+            }),
             Kind::Enum => {
                 let w = self.reg.enum_width.get(&t).copied().unwrap_or(32);
                 let s = u64::from(w / 8);
                 Ok(Layout { size: s, align: s })
             }
-            Kind::Struct { .. } => Ok(self.struct_layout(&t)?.layout),
+            Kind::Struct { .. } => Ok(self.layout_in(abi, &t)?.layout),
             Kind::Alias(_) | Kind::Other => Err(Error(format!("type {ty} has no layout"))),
         }
     }
@@ -163,15 +202,23 @@ impl<'r> Model<'r> {
         Ok(n)
     }
 
-    /// The guest layout of one declaration (a pointer is 8 bytes).
+    /// The guest layout of one declaration.
     pub fn decl_layout(&mut self, d: &Decl) -> Result<Layout, Error> {
+        self.decl_layout_in(self.abi, d)
+    }
+
+    /// The layout of one declaration under one ABI.
+    pub fn decl_layout_in(&mut self, abi: Abi, d: &Decl) -> Result<Layout, Error> {
         if d.bitfield.is_some() {
             return Err(Error(format!("bitfield {} is not supported", d.text)));
         }
         let one = if d.ptr > 0 {
-            Layout { size: 8, align: 8 }
+            Layout {
+                size: abi.word,
+                align: abi.word,
+            }
         } else {
-            self.type_layout(&d.ty)?
+            self.type_layout_in(abi, &d.ty)?
         };
         let n = self.elems(d)?;
         Ok(Layout {
@@ -182,8 +229,26 @@ impl<'r> Model<'r> {
 
     /// The guest layout of a struct or union.
     pub fn struct_layout(&mut self, name: &str) -> Result<StructLayout, Error> {
+        self.layout_in(self.abi, name)
+    }
+
+    /// The host layout of a struct or union.
+    pub fn host_layout(&mut self, name: &str) -> Result<StructLayout, Error> {
+        self.layout_in(A64, name)
+    }
+
+    fn cache(&mut self, abi: Abi) -> &mut BTreeMap<String, StructLayout> {
+        if abi == self.abi {
+            &mut self.structs
+        } else {
+            &mut self.host_structs
+        }
+    }
+
+    /// The layout of a struct or union under one ABI (the guest's or the host's).
+    pub fn layout_in(&mut self, abi: Abi, name: &str) -> Result<StructLayout, Error> {
         let name = self.reg.resolve(name).to_string();
-        if let Some(l) = self.structs.get(&name) {
+        if let Some(l) = self.cache(abi).get(&name) {
             return Ok(l.clone());
         }
         let Some(Kind::Struct { members, union, .. }) =
@@ -196,7 +261,7 @@ impl<'r> Model<'r> {
         let mut align: u64 = 1;
         let mut offsets = Vec::new();
         for m in &members {
-            let l = self.decl_layout(m)?;
+            let l = self.decl_layout_in(abi, m)?;
             align = align.max(l.align);
             if union {
                 offsets.push(0);
@@ -213,7 +278,7 @@ impl<'r> Model<'r> {
             layout: Layout { size, align },
             offsets,
         };
-        self.structs.insert(name, l.clone());
+        self.cache(abi).insert(name, l.clone());
         Ok(l)
     }
 
@@ -244,7 +309,10 @@ impl<'r> Model<'r> {
             return Ok(*v);
         }
         memo.insert(name.to_string(), false);
-        let mut need = self.cfg.hand_structs.iter().any(|h| h == name);
+        let mut need = self.cfg.hand_structs.iter().any(|h| h == name)
+            || (!self.abi.is_host()
+                && self.structs.get(name).map(|l| (&l.layout, &l.offsets))
+                    != self.host_structs.get(name).map(|l| (&l.layout, &l.offsets)));
         for m in self.members(name) {
             let t = self.reg.resolve(&m.ty);
             let direct = m.ptr > 0
