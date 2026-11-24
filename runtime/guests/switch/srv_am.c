@@ -104,6 +104,8 @@ void rl_am_set_operation_mode(bool docked)
         enqueue(RL_AM_MSG_PERFORMANCE_MODE_CHANGED);
         sync_event();
         rl_hos_event_signal(am_res_event);
+        rl_log(RL_LOG_INFO, "am", "console mode: %s (operation and performance mode change messages queued)",
+               docked ? "docked" : "handheld");
     }
     pthread_mutex_unlock(&am_mu);
 }
@@ -426,6 +428,7 @@ void rl_srv_install_am(void)
     am_qcount = 0;
     am_focus = RL_AM_FOCUS_IN;
     am_docked = rl_setting_enum("system.console_mode") == 1;
+    rl_log(RL_LOG_INFO, "am", "console mode at start: %s", am_docked ? "docked" : "handheld");
     am_language = RL_AM_LANGUAGE_CODE_EN_US;
     am_user_high = 1;
     am_user_low = 0;
