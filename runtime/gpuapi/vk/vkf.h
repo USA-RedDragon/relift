@@ -126,6 +126,8 @@ struct vkf_inst {
     bool nn_layer;
     /** @brief The host physical device the guest sees, chosen on first enumeration. */
     void *physical;
+    /** @brief The host instance is the core's (vk_share.c): never destroyed by the guest. */
+    bool shared;
 };
 
 /** @brief Number of formats the layer can decode: R4G4 and BC1 to BC7. */
@@ -154,6 +156,8 @@ struct vkf_dev {
     pthread_mutex_t lock;
     /** @brief Queues of the Switch family the guest created, and the host family 0 queues behind them. */
     uint32_t guest_queues, host_queues;
+    /** @brief The host device is the core's (vk_share.c): never destroyed by the guest; every guest queue is the core's guest queue. */
+    bool shared;
     /** @brief Held by every queue operation while guest queues share host queues. */
     pthread_mutex_t queue_lock;
     /** @brief Held shared by every queue operation while each guest queue has a host queue of its own, and exclusive by vkf_device_wait_idle. */
@@ -628,6 +632,25 @@ typedef struct vkf_present_id {
 void vkf_flip_device_setup(vkf_call *k, void *phys, const char ***exts, uint32_t *n_exts, void **pnext);
 /** @brief Looks up vkWaitForPresentKHR once the device exists, when setup enabled the extensions. */
 void vkf_flip_device_ready(vkf_dev *d, VkDevice dev, bool enabled);
+
+/** @brief Asks the core device for what forwarded Vulkan needs (vk_share.c), before the core device is made. */
+void vkf_share_ask(void);
+/** @brief The core's instance for a guest vkCreateInstance with this final create info, or NULL to make its own. */
+VkInstance vkf_share_instance(const VkInstanceCreateInfo *ci);
+/** @brief A guest instance that shared the core's is gone. */
+void vkf_share_instance_done(void);
+/** @brief The core's physical device for a shared instance, or NULL. */
+VkPhysicalDevice vkf_share_physical(const vkf_inst *inst);
+/** @brief Whether a guest vkCreateDevice with this final create info fits the core's device. */
+bool vkf_share_device_fits(VkPhysicalDevice pd, const VkDeviceCreateInfo *ci);
+/** @brief Takes the core's device for d (after vkf_share_device_fits). */
+VkDevice vkf_share_device_take(vkf_dev *d);
+/** @brief A guest device that shared the core's is gone. */
+void vkf_share_device_done(void);
+/** @brief The core's guest queue. */
+VkQueue vkf_share_queue(void);
+/** @brief vkDeviceWaitIdle for a shared device: waits for the guest queue only. */
+VkResult VKAPI_PTR vkf_share_device_wait_idle(VkDevice dev);
 /** @brief Puts present id into p chained before next when the device waits for presents; else returns next. */
 const void *vkf_flip_chain(const vkf_dev *d, vkf_present_id *p, const void *next, uint64_t id);
 /** @brief Hands a host present with this id to the watcher, which reports to vi_host_flip when it is shown. */

@@ -171,6 +171,8 @@ RL_RUNTIME_API uint32_t rl_vk_swapchain_repaints(uint64_t guest_swapchain);
 RL_RUNTIME_API void rl_vk_capture(const char *spec);
 /** @brief The map mode the device behind a guest VkDevice handle uses, or -1. */
 RL_RUNTIME_API int rl_vk_device_map_mode(uint64_t guest_device);
+/** @brief 1 when a guest device runs on the core's host device (vk_share.c), 0 when on its own, -1 for no device. */
+RL_RUNTIME_API int rl_vk_device_shared(uint64_t guest_device);
 /** @brief Chunks of tracked shadow mappings the guest's accesses have opened so far (0 where none are tracked). */
 RL_RUNTIME_API uint64_t rl_vk_shadow_chunks_opened(void);
 

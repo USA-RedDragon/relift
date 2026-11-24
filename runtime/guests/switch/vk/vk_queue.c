@@ -9,6 +9,7 @@
  * queue lock.
  */
 #include "vkf.h"
+#include "vkdev.h"
 
 #include "hos.h"
 
@@ -89,7 +90,7 @@ VkResult vkf_queue_create_infos(vkf_call *k, VkPhysicalDevice pd, VkDeviceCreate
         d->guest_queues = q[i].queueCount;
         if (q[i].queueCount > host.queueCount)
             q[i].queueCount = host.queueCount;
-        d->host_queues = q[i].queueCount;
+        d->host_queues = d->shared ? 1 : q[i].queueCount;
     }
     ci->pQueueCreateInfos = q;
     if (d->host_queues < d->guest_queues)
@@ -104,6 +105,8 @@ static VkQueue host_queue(vkf_call *k, VkDevice dev, uint32_t family, uint32_t i
         rl_log(RL_LOG_ERROR, "vk", "vkGetDeviceQueue: no queue %u of family %u on this device", index, family);
         return NULL;
     }
+    if (d->shared)
+        return vkf_share_queue();
     VkQueue q = NULL;
     VKF_FN(k->fns, vkGetDeviceQueue)(dev, 0, index % d->host_queues, &q);
     return q;
@@ -142,7 +145,10 @@ static _Thread_local uint32_t t_queue_ops;
 void vkf_queue_lock(vkf_call *k)
 {
     vkf_dev *d = k->obj->dev;
-    if (d->host_queues < d->guest_queues)
+    if (d->shared) {
+        if (!t_queue_ops)
+            rl_vkdev_guest_queue_lock();
+    } else if (d->host_queues < d->guest_queues)
         pthread_mutex_lock(&d->queue_lock);
     else if (!t_queue_ops)
         pthread_rwlock_rdlock(&d->idle_lock);
@@ -153,7 +159,10 @@ void vkf_queue_unlock(vkf_call *k)
 {
     vkf_dev *d = k->obj->dev;
     t_queue_ops--;
-    if (d->host_queues < d->guest_queues)
+    if (d->shared) {
+        if (!t_queue_ops)
+            rl_vkdev_guest_queue_unlock();
+    } else if (d->host_queues < d->guest_queues)
         pthread_mutex_unlock(&d->queue_lock);
     else if (!t_queue_ops)
         pthread_rwlock_unlock(&d->idle_lock);
@@ -161,6 +170,14 @@ void vkf_queue_unlock(vkf_call *k)
 
 void vkf_device_wait_idle(vkf_dev *d, const vkf_fns *fns, VkDevice dev)
 {
+    if (d->shared) {
+        if (!t_queue_ops)
+            rl_vkdev_guest_queue_lock();
+        VKF_FN(fns, vkDeviceWaitIdle)(dev);
+        if (!t_queue_ops)
+            rl_vkdev_guest_queue_unlock();
+        return;
+    }
     if (d->host_queues < d->guest_queues) {
         if (!t_queue_ops)
             pthread_mutex_lock(&d->queue_lock);

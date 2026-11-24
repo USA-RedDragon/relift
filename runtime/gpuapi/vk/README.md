@@ -59,7 +59,29 @@ group of it (`vk_device.c`), chosen when the instance first enumerates them.
 host device whose queue family 0 has graphics and compute and, when the guest
 enabled `VK_NN_vi_surface`, that can present through the surface provider
 (`rl_vk_surface_provider.presents`; the headless provider has none, every
-device takes it).
+device takes it). When the instance is the core's (below), the physical
+device is the core's.
+
+## One host device with the core
+
+A program that loads forwarded Vulkan shares the core's Vulkan instance and
+device (`core/vkdev.h`) with the presenter and the picture pipeline
+(`vk_share.c`). At `rl_vk_init`, before the core device exists, the layer
+asks for its instance extensions, the profile's and its own device
+extensions, and the host's features, minus `robustBufferAccess`,
+`robustImageAccess` and multi-device buffer addresses. A program that
+never loads it asks for nothing, so its core device is unchanged.
+
+The guest's `vkCreateInstance` and `vkCreateDevice` take the core's objects
+when the final request fits what the core enabled (and the core's queue
+family is 0); otherwise the guest gets its own host objects as before, with
+a log line naming what did not fit. A guest that enables a robustness
+feature always gets its own device, so the core never runs a guest with
+robustness it did not ask for. Feature and property queries show the
+profile filter either way (test: `vk_a_device_on_the_cores_shows_the_guest_what_its_own_shows`).
+On a shared device every guest queue is the core's guest queue, the guest
+never destroys the shared objects, and `vkDeviceWaitIdle` waits for the
+guest queue only.
 
 ## Device properties
 

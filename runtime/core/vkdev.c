@@ -16,7 +16,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_INSTANCE_EXTS 16
+#define MAX_INSTANCE_EXTS 48
+#define MAX_WANTED_INSTANCE_EXTS 32
 
 /** @brief VkPhysicalDeviceProperties up to the device name; rest covers the remainder of the real structure. */
 typedef struct rlvk_device_properties {
@@ -36,7 +37,7 @@ static rlvk_dev g_dev;
 static bool g_tried, g_ok;
 
 #define MAX_REQUIRES 8
-#define MAX_DEVICE_EXTS 48
+#define MAX_DEVICE_EXTS 160
 
 typedef struct require {
     const char *who;
@@ -52,6 +53,11 @@ static bool g_shared_queue;
 static const char *g_no_surface;
 /** @brief The instance was made with VK_EXT_debug_utils (rlvk_dev.debug_utils). */
 static bool g_debug_utils;
+static const char *g_want_inst[MAX_WANTED_INSTANCE_EXTS];
+static uint32_t g_nwant_inst;
+/** @brief The extension lists the instance and the device were made with (rlvk_dev points at them). */
+static const char *g_inst_exts[MAX_INSTANCE_EXTS];
+static const char *g_dev_exts[MAX_DEVICE_EXTS];
 
 static bool fail(const char *what, rlvk_result r)
 {
@@ -133,6 +139,13 @@ static uint32_t instance_exts(rlvk_gipa_fn gipa, const char *out[MAX_INSTANCE_EX
             count = first;
         *surfaces = all;
     }
+    for (uint32_t w = 0; w < g_nwant_inst && count < MAX_INSTANCE_EXTS; w++) {
+        bool have = false;
+        for (uint32_t i = 0; i < count && !have; i++)
+            have = !strcmp(out[i], g_want_inst[w]);
+        if (!have && listed(e, n, g_want_inst[w]))
+            out[count++] = g_want_inst[w];
+    }
     free(e);
     return count;
 }
@@ -173,6 +186,10 @@ static bool make_instance(rlvk_dev *d)
     rlvk_result r = create(&ci, NULL, &d->instance);
     if (r != RLVK_SUCCESS)
         return fail("vkCreateInstance", r);
+    for (uint32_t i = 0; i < n; i++)
+        g_inst_exts[i] = exts[i];
+    d->instance_exts = g_inst_exts;
+    d->ninstance_exts = n;
 #define RLVK_LOAD_I(name, ret, args)                                                                                 \
     d->name = (ret(RLVK_CALL *) args)d->gipa(d->instance, #name);                                                    \
     if (!d->name)                                                                                                    \
@@ -273,7 +290,15 @@ static bool add_present_wait(rlvk_dev *d, rl_vkdev_build *b)
         return false;
     if (!rl_vkdev_add_ext(b, "VK_KHR_present_id") || !rl_vkdev_add_ext(b, "VK_KHR_present_wait"))
         return false;
-    rl_vkdev_chain(b, &g_present_id_feat);
+    bool have_id = false, have_wait = false;
+    for (const present_feature *l = b->pnext; l; l = l->next) {
+        have_id = have_id || l->sType == g_present_id_feat.sType;
+        have_wait = have_wait || l->sType == g_present_wait_feat.sType;
+    }
+    if (have_id != have_wait)
+        return false;
+    if (!have_id)
+        rl_vkdev_chain(b, &g_present_id_feat);
     return true;
 }
 
@@ -314,6 +339,11 @@ static bool make_device(rlvk_dev *d)
     rlvk_result r = d->vkCreateDevice(d->phys, &ci, NULL, &d->device);
     if (r != RLVK_SUCCESS)
         return fail("vkCreateDevice", r);
+    for (uint32_t i = 0; i < b.nexts; i++)
+        g_dev_exts[i] = exts[i];
+    d->device_exts = g_dev_exts;
+    d->ndevice_exts = b.nexts;
+    d->device_pnext = b.pnext;
 #define RLVK_LOAD_D(name, ret, args)                                                                                 \
     d->name = (ret(RLVK_CALL *) args)d->vkGetDeviceProcAddr(d->device, #name);                                       \
     if (!d->name)                                                                                                    \
@@ -354,6 +384,27 @@ void rl_vkdev_require(const char *who, uint32_t api_version, uint32_t queue_flag
     }
     g_req[g_nreq++] = (require){ who, api_version, queue_flags, hook, user };
     pthread_mutex_unlock(&g_lock);
+}
+
+void rl_vkdev_want_instance_ext(const char *who, const char *name)
+{
+    pthread_mutex_lock(&g_lock);
+    if (g_tried || g_nwant_inst == MAX_WANTED_INSTANCE_EXTS) {
+        rl_log(RL_LOG_ERROR, "vulkan", "%s asked for the instance extension %s %s", who, name,
+               g_tried ? "after the device was made: it came too late" : "but too many were asked for");
+        pthread_mutex_unlock(&g_lock);
+        abort();
+    }
+    g_want_inst[g_nwant_inst++] = name;
+    pthread_mutex_unlock(&g_lock);
+}
+
+bool rl_vkdev_made(void)
+{
+    pthread_mutex_lock(&g_lock);
+    bool t = g_tried;
+    pthread_mutex_unlock(&g_lock);
+    return t;
 }
 
 void rl_vkdev_chain(rl_vkdev_build *b, void *head)

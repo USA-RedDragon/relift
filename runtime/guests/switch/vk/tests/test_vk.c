@@ -2509,6 +2509,47 @@ TEST(vk_guest_sees_the_switch_driver)
     finish(dev);
 }
 
+/** @brief The guest's vkGetPhysicalDeviceFeatures. */
+static VkPhysicalDeviceFeatures guest_features(uint64_t pd)
+{
+    uint64_t gf = galloc(sizeof(VkPhysicalDeviceFeatures));
+    G("vkGetPhysicalDeviceFeatures", pd, gf);
+    VkPhysicalDeviceFeatures f;
+    memcpy(&f, g_mem + gf, sizeof f);
+    return f;
+}
+
+TEST(vk_a_device_on_the_cores_shows_the_guest_what_its_own_shows)
+{
+    CHECK_EQ(boot(NULL), 0);
+    CHECK(make_instance(NULL, 0, 0) != 0);
+    uint64_t pd = 0;
+    CHECK_EQ(physical_devices(&pd, 1), 1);
+    VkPhysicalDeviceFeatures before = guest_features(pd);
+    const VkBool32 *b = (const VkBool32 *)&before, *sw = (const VkBool32 *)&vkf_switch.features;
+    for (unsigned i = 0; i < sizeof before / sizeof(VkBool32); i++)
+        CHECK(!b[i] || sw[i]);
+    uint64_t dev;
+    CHECK_EQ(create_device(pd, 0, &dev), VK_SUCCESS);
+    CHECK_EQ(rl_vk_device_shared(dev), 1);
+    VkPhysicalDeviceFeatures shared = guest_features(pd);
+    CHECK(!memcmp(&shared, &before, sizeof before));
+    G("vkDestroyDevice", dev, 0);
+    if (before.robustBufferAccess) {
+        VkPhysicalDeviceFeatures robust = { .robustBufferAccess = VK_TRUE };
+        CHECK_EQ(create_device(pd, gput(&robust, sizeof robust), &dev), VK_SUCCESS);
+        CHECK_EQ(rl_vk_device_shared(dev), 0);
+        VkPhysicalDeviceFeatures own = guest_features(pd);
+        CHECK(!memcmp(&own, &before, sizeof before));
+        G("vkDestroyDevice", dev, 0);
+    } else {
+        printf("  the host has no robustBufferAccess: the own-device case is skipped\n");
+    }
+    CHECK_EQ(create_device(pd, 0, &dev), VK_SUCCESS);
+    CHECK_EQ(rl_vk_device_shared(dev), 1);
+    finish(dev);
+}
+
 static void large_host(VkPhysicalDeviceLimits *l)
 {
     l->maxBoundDescriptorSets = 64;

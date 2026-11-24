@@ -43,6 +43,14 @@ typedef struct rlvk_dev {
      */
     bool debug_utils;
     rlvk_result(RLVK_CALL *vkWaitForPresentKHR)(rlvk_handle device, rlvk_handle swapchain, uint64_t id, uint64_t timeout);
+    /** @brief The instance extensions the instance was made with (its API version is instance_api). */
+    const char *const *instance_exts;
+    uint32_t ninstance_exts;
+    /** @brief The device extensions the device was made with. */
+    const char *const *device_exts;
+    uint32_t ndevice_exts;
+    /** @brief The pNext chain of the VkDeviceCreateInfo the device was made with (the features the hooks enabled). */
+    const void *device_pnext;
 } rlvk_dev;
 
 /** @brief A buffer and its memory; map is set for a host-visible one. */
@@ -81,6 +89,13 @@ typedef bool rl_vkdev_hook(void *user, rl_vkdev_build *b);
  * late and aborts, so the order is fixed instead of papered over.
  */
 void rl_vkdev_require(const char *who, uint32_t api_version, uint32_t queue_flags, rl_vkdev_hook *hook, void *user);
+/**
+ * @brief Asks for an instance extension, enabled when the loader lists it. Like rl_vkdev_require, it must come before
+ * the device is made; a call after that logs who came too late and aborts.
+ */
+void rl_vkdev_want_instance_ext(const char *who, const char *name);
+/** @brief Whether the device was made (or tried) already, so a requirement now would come too late. */
+bool rl_vkdev_made(void);
 /** @brief Enables a device extension from a hook; false when the list is full. */
 bool rl_vkdev_add_ext(rl_vkdev_build *b, const char *name);
 /** @brief Takes the guest queue for a submit (the core's queue lock when the guest shares that queue). */

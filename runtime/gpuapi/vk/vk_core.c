@@ -5,6 +5,8 @@
  * the hand-written instance and device commands.
  */
 #include "vkf.h"
+
+#include "vkdev.h"
 #include "hostlib.h"
 #include "vi.h"
 
@@ -593,6 +595,7 @@ int rl_vk_init(const rl_vk_config *cfg)
         .name = "vulkan-forwarding",
     };
     g_ready = true;
+    vkf_share_ask();
     return 0;
 }
 
@@ -640,6 +643,12 @@ uint64_t rl_vk_guest_addr(const char *name)
 {
     int c = cmd_of(name);
     return c < 0 || !vkg_thunks[c] ? 0 : vkf.cfg.thunk_base + 4u * (uint64_t)c;
+}
+
+int rl_vk_device_shared(uint64_t guest_device)
+{
+    vkf_obj *o = vkf_obj_of(guest_device, VKG_KIND_VkDevice);
+    return o && o->dev ? o->dev->shared : -1;
 }
 
 int rl_vk_device_map_mode(uint64_t guest_device)
@@ -971,8 +980,9 @@ uint64_t vkh_vkCreateInstance(rl_ctx *restrict c, uint8_t *mem)
     if (app->apiVersion < want)
         app->apiVersion = want;
     ci->pApplicationInfo = app;
-    VkInstance inst = NULL;
-    VkResult r = VKF_FN(&vkf.global, vkCreateInstance)(ci, NULL, &inst);
+    VkInstance inst = ci->pNext ? NULL : vkf_share_instance(ci);
+    bool shared = inst != NULL;
+    VkResult r = shared ? VK_SUCCESS : VKF_FN(&vkf.global, vkCreateInstance)(ci, NULL, &inst);
     if (r < 0) {
         vkf_cb_release(0);
         c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateInstance, r);
@@ -981,7 +991,8 @@ uint64_t vkh_vkCreateInstance(rl_ctx *restrict c, uint8_t *mem)
     vkf_inst *st = calloc(1, sizeof *st);
     if (!st)
         abort();
-    st->api_version = app->apiVersion;
+    st->api_version = shared ? rl_vkdev()->instance_api : app->apiVersion;
+    st->shared = shared;
     st->vi_surface = vi;
     st->nn_layer = nn;
     vkf_load_instance(&st->fns, inst);
@@ -1003,7 +1014,10 @@ uint64_t vkh_vkDestroyInstance(rl_ctx *restrict c, uint8_t *mem)
     if (!inst)
         return vkf_bad_handle(&k, VKG_vkDestroyInstance, c->x[0]);
     vkf_obj *o = k.obj;
-    VKF_FN(k.fns, vkDestroyInstance)(inst, NULL);
+    if (o->inst->shared)
+        vkf_share_instance_done();
+    else
+        VKF_FN(k.fns, vkDestroyInstance)(inst, NULL);
     vkf_cb_release((uint64_t)(uintptr_t)inst);
     vkf_obj_remove_children(o);
     vkf_inst *st = o->inst;
@@ -1126,8 +1140,11 @@ uint64_t vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
     }
     vkf_depth_device_extend(&k, d, ci);
     VkDevice dev = NULL;
+    bool share = pobj->parent && pobj->parent->inst && pobj->parent->inst->shared && vkf_share_device_fits(pd, ci);
     r = vkf_queue_create_infos(&k, pd, ci, d);
-    if (r >= 0)
+    if (r >= 0 && share)
+        dev = vkf_share_device_take(d);
+    else if (r >= 0)
         r = VKF_FN(k.fns, vkCreateDevice)(pd, ci, NULL, &dev);
     if (r < 0) {
         free_decode_maps(d);
@@ -1144,6 +1161,10 @@ uint64_t vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
         return vkf_end(&k);
     }
     vkf_load_device(&d->fns, k.fns, dev);
+    if (d->shared) {
+        PFN_vkDeviceWaitIdle w = vkf_share_device_wait_idle;
+        memcpy(&d->fns.f[VKG_vkDeviceWaitIdle], &w, sizeof w);
+    }
     d->host_dev = dev;
     if (fault) {
         PFN_vkVoidFunction f = VKF_FN(k.fns, vkGetDeviceProcAddr)(dev, "vkGetDeviceFaultInfoEXT");
@@ -1180,7 +1201,12 @@ uint64_t vkh_vkDestroyDevice(rl_ctx *restrict c, uint8_t *mem)
     vkf_desc_device_teardown(&k, d, dev);
     vkf_wrap_device_teardown(k.fns, dev, d);
     vkf_image_device_teardown(k.fns, dev, d);
-    VKF_FN(k.fns, vkDestroyDevice)(dev, NULL);
+    if (d->shared) {
+        vkf_share_device_wait_idle(dev);
+        vkf_share_device_done();
+    } else {
+        VKF_FN(k.fns, vkDestroyDevice)(dev, NULL);
+    }
     vkf_mem_device_teardown(d);
     vkf_obj_remove_children(o);
     vkf_obj_remove(o);

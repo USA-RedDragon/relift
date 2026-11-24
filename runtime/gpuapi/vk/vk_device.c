@@ -77,6 +77,8 @@ static uint64_t the_device(vkf_call *k, VkInstance inst)
 {
     vkf_inst *vi = k->obj->inst;
     if (!vi->physical)
+        vi->physical = vi->shared ? vkf_share_physical(vi) : NULL;
+    if (!vi->physical)
         vi->physical = choose(k, inst);
     return vkf_wrap(k, VKG_KIND_VkPhysicalDevice, vi->physical);
 }
