@@ -174,6 +174,16 @@ int64_t hio_fchmod(int fd, uint32_t mode);
 /** @brief The extended attribute calls, by what: 's'et, 'g'et, 'l'ist or 'r'emove; on path (nofollow for the l* calls) or, with path NULL, on descriptor fd. get and list return the size (with size 0, the size needed). flags are Linux's XATTR_CREATE (1) and XATTR_REPLACE (2). */
 int64_t hio_xattr(char what, int fd, const char *path, bool nofollow, const char *name, void *value, size_t size, int flags);
 
+/**
+ * @brief A POSIX record lock (fcntl F_GETLK or F_SETLK, the open file
+ * description's own with ofd) in Linux's terms: type F_RDLCK 0, F_WRLCK 1,
+ * F_UNLCK 2. get fills type, start, len and pid with a conflicting lock
+ * (type F_UNLCK when none). Never blocks: a held lock gives -EAGAIN.
+ */
+int64_t hio_lock(int fd, bool get, bool ofd, int16_t *type, int16_t whence, int64_t *start, int64_t *len, int32_t *pid);
+/** @brief flock(2) with Linux LOCK_SH 1, LOCK_EX 2, LOCK_UN 8; never blocks (-EAGAIN when held). */
+int64_t hio_flock(int fd, int op);
+
 /** @brief Removes name from the process's environment. */
 void hio_unsetenv(const char *name);
 /** @brief The host signal of Linux signal sig, 0 for one the host does not have. */

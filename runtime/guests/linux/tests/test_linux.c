@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #ifndef _WIN32
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -810,6 +811,49 @@ TEST(a_child_a_fatal_signal_ends_dies_by_it_quickly_and_without_a_core_dump)
     CHECK(pid > 0);
     CHECK_EQ(wait_status(c, pid), L_SIGABRT);
     CHECK(rl_clock_ns() - t0 < 2000000000ull);
+}
+
+TEST(record_locks_conflict_between_processes_and_flock_too)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    const uint64_t m = 0x401000;
+    char cwd[1024], file[1100];
+    CHECK(getcwd(cwd, sizeof cwd) != NULL);
+    snprintf(file, sizeof file, "%s/lock.%d", cwd, (int)getpid());
+    write_text(file, "x");
+    put_str(m, file);
+    int64_t fd = sys(c, NR_openat, (uint64_t)(int64_t)L_AT_FDCWD, m, 2, 0, 0, 0);
+    CHECK(fd >= 3);
+    uint8_t fl[32] = { 0 };
+    int16_t wr = 1;
+    memcpy(fl, &wr, 2);
+    rl_vm_kernel_write(&lx.vm, m + 0x200, fl, sizeof fl);
+    CHECK_EQ(sys(c, NR_fcntl, (uint64_t)fd, 6, m + 0x200, 0, 0, 0), 0);
+#if defined(__linux__)
+    /* On macOS a flock and a record lock of one process conflict, as the host's locks are one kind there. */
+    CHECK_EQ(sys(c, NR_flock, (uint64_t)fd, 2 | 4, 0, 0, 0, 0), 0);
+#endif
+    int64_t pid = sys(c, NR_clone, L_SIGCHLD, 0, 0, 0, 0, 0);
+    if (pid == 0) {
+        int h = open(file, O_RDWR);
+        int16_t t = 1, w = 0;
+        int64_t s = 0, l = 0;
+        int32_t holder = 0;
+        bool held = hio_lock(h, false, false, &t, w, &s, &l, &holder) == -L_EAGAIN;
+        t = 1;
+        bool seen = hio_lock(h, true, false, &t, w, &s, &l, &holder) == 0 && t == 1 && holder == (int32_t)hio_ppid();
+#if defined(__linux__)
+        bool flocked = hio_flock(h, 2) == -L_EAGAIN;
+#else
+        bool flocked = true;
+#endif
+        _exit(held && seen && flocked ? 0 : 1);
+    }
+    CHECK(pid > 0);
+    CHECK_EQ(wait_status(c, pid), 0);
+    sys(c, NR_close, (uint64_t)fd, 0, 0, 0, 0, 0);
+    unlink(file);
 }
 
 TEST(execve_of_another_program_finds_nothing)

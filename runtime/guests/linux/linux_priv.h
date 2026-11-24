@@ -282,6 +282,8 @@ lx_sys_fn *lx_proc_call(uint32_t nr);
 lx_sys_fn *lx_process_call(uint32_t nr);
 /** @brief write(2) of a host buffer to guest descriptor fd, with write's blocking, signal and SIGPIPE rules. */
 int64_t lx_fd_write(int fd, const uint8_t *buf, uint64_t n);
+/** @brief fcntl's record locks (F_GETLK 5, F_SETLK 6, F_SETLKW 7 and the OFD ones 36 to 38) on host descriptor h with the guest's struct flock at addr; a blocking one waits so a signal interrupts it. */
+int64_t lx_record_lock(int h, uint32_t cmd, uint64_t addr);
 /** @brief The file system calls of fsx.c (ownership, extended attributes, fchmod, fchmodat2, sendfile, pselect6), or NULL. */
 lx_sys_fn *lx_fsx_call(uint32_t nr);
 /** @brief The socket system calls of net.c, or NULL. */

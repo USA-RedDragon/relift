@@ -1122,13 +1122,13 @@ static int64_t sys_fcntl(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     }
     case L_F_SETFL:
         return hio_set_status_flags(h, (uint32_t)a[2]);
-    case 5: {
-        uint16_t unlocked = 2;
-        return lx_put(a[2], &unlocked, sizeof unlocked) ? 0 : -L_EFAULT;
-    }
+    case 5:
     case 6:
     case 7:
-        return 0;
+    case 36:
+    case 37:
+    case 38:
+        return lx_record_lock(h, (uint32_t)a[1], a[2]);
     default:
         return -L_EINVAL;
     }

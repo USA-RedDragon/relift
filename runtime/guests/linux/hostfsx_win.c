@@ -36,6 +36,26 @@ int64_t hio_fchmod(int fd, uint32_t mode)
     return 0;
 }
 
+int64_t hio_lock(int fd, bool get, bool ofd, int16_t *type, int16_t whence, int64_t *start, int64_t *len, int32_t *pid)
+{
+    (void)fd;
+    (void)ofd;
+    (void)whence;
+    (void)start;
+    (void)len;
+    (void)pid;
+    if (get)
+        *type = 2;
+    return 0;
+}
+
+int64_t hio_flock(int fd, int op)
+{
+    (void)fd;
+    (void)op;
+    return 0;
+}
+
 int64_t hio_xattr(char what, int fd, const char *path, bool nofollow, const char *name, void *value, size_t size, int flags)
 {
     (void)what;

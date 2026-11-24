@@ -10,6 +10,8 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <string.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -31,6 +33,39 @@ int64_t hio_chown(int dir, const char *path, int64_t uid, int64_t gid, bool nofo
 int64_t hio_fchown(int fd, int64_t uid, int64_t gid) { return fchown(fd, (uid_t)uid, (gid_t)gid) < 0 ? fail() : 0; }
 
 int64_t hio_fchmod(int fd, uint32_t mode) { return fchmod(fd, (mode_t)mode) < 0 ? fail() : 0; }
+
+int64_t hio_lock(int fd, bool get, bool ofd, int16_t *type, int16_t whence, int64_t *start, int64_t *len, int32_t *pid)
+{
+    struct flock f;
+    memset(&f, 0, sizeof f);
+    f.l_type = (short)(*type == 0 ? F_RDLCK : *type == 1 ? F_WRLCK : F_UNLCK);
+    f.l_whence = whence;
+    f.l_start = (off_t)*start;
+    f.l_len = (off_t)*len;
+    int cmd = get ? F_GETLK : F_SETLK;
+#if defined(F_OFD_SETLK)
+    if (ofd)
+        cmd = get ? F_OFD_GETLK : F_OFD_SETLK;
+#else
+    if (ofd)
+        return -L_EINVAL;
+#endif
+    if (fcntl(fd, cmd, &f) < 0)
+        return errno == EACCES ? -L_EAGAIN : fail();
+    if (get) {
+        *type = (int16_t)(f.l_type == F_RDLCK ? 0 : f.l_type == F_WRLCK ? 1 : 2);
+        *start = (int64_t)f.l_start;
+        *len = (int64_t)f.l_len;
+        *pid = (int32_t)f.l_pid;
+    }
+    return 0;
+}
+
+int64_t hio_flock(int fd, int op)
+{
+    int o = (op & 1 ? LOCK_SH : 0) | (op & 2 ? LOCK_EX : 0) | (op & 8 ? LOCK_UN : 0) | LOCK_NB;
+    return flock(fd, o) < 0 ? fail() : 0;
+}
 
 int64_t hio_xattr(char what, int fd, const char *path, bool nofollow, const char *name, void *value, size_t size, int flags)
 {

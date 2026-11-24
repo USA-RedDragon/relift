@@ -51,6 +51,7 @@ enum rl_linux_nr {
     NR_ftruncate = 46,
     NR_faccessat = 48,
     NR_chdir = 49,
+    NR_flock = 32,
     NR_fchmod = 52,
     NR_fchmodat = 53,
     NR_fchownat = 54,

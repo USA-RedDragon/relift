@@ -279,6 +279,59 @@ static int64_t sys_pselect6(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     return ready;
 }
 
+/** @brief How long a blocking lock waits between tries; a signal ends the wait at the next one. */
+#define LOCK_POLL_NS 2000000
+
+int64_t lx_record_lock(int h, uint32_t cmd, uint64_t addr)
+{
+    /* struct flock of the guest: type, whence, 4 bytes of padding, start, len, pid. */
+    uint8_t f[32];
+    if (!lx_get(f, addr, sizeof f))
+        return -L_EFAULT;
+    int16_t type, whence;
+    int64_t start, len;
+    int32_t pid = 0;
+    memcpy(&type, f, 2);
+    memcpy(&whence, f + 2, 2);
+    memcpy(&start, f + 8, 8);
+    memcpy(&len, f + 16, 8);
+    bool ofd = cmd >= 36, get = cmd == 5 || cmd == 36, wait = cmd == 7 || cmd == 38;
+    if (type < 0 || type > 2 || whence < 0 || whence > 2)
+        return -L_EINVAL;
+    int64_t r;
+    for (;;) {
+        r = hio_lock(h, get, ofd, &type, whence, &start, &len, &pid);
+        if (r != -L_EAGAIN || !wait)
+            break;
+        if (lx_wait(-1, 0, LOCK_POLL_NS) == -L_EINTR)
+            return -L_ERESTARTSYS;
+    }
+    if (r < 0 || !get)
+        return r;
+    memcpy(f, &type, 2);
+    memcpy(f + 8, &start, 8);
+    memcpy(f + 16, &len, 8);
+    memcpy(f + 24, &pid, 4);
+    return lx_put(addr, f, sizeof f) ? 0 : -L_EFAULT;
+}
+
+static int64_t sys_flock(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
+{
+    (void)c;
+    (void)mem;
+    int h = lx_host_fd((int)a[0]);
+    if (h < 0)
+        return -L_EBADF;
+    int op = (int)a[1];
+    for (;;) {
+        int64_t r = hio_flock(h, op);
+        if (r != -L_EAGAIN || (op & 4))
+            return r;
+        if (lx_wait(-1, 0, LOCK_POLL_NS) == -L_EINTR)
+            return -L_ERESTARTSYS;
+    }
+}
+
 lx_sys_fn *lx_fsx_call(uint32_t nr)
 {
     switch (nr) {
@@ -300,6 +353,7 @@ lx_sys_fn *lx_fsx_call(uint32_t nr)
     case NR_sendfile: return sys_sendfile;
     case NR_pselect6: return sys_pselect6;
     case NR_fchmodat2: return sys_fchmodat2;
+    case NR_flock: return sys_flock;
     default: return NULL;
     }
 }
