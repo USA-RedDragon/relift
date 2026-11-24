@@ -439,6 +439,8 @@ typedef struct nvn_gfx {
     bool primitive_restart;
     bool rasterizer_discard;
     bool conservative_raster;
+    /** @brief The bound fragment program's sample shading (nvn_program_sample_shading). */
+    uint32_t sample_shading;
     /** @brief Conservative raster dilate in quarter pixels (0 to 3), as the driver stores it. */
     uint32_t conservative_dilate;
     /** @brief The sample mask (nvnCommandBufferSetSampleMask), 16 bits as the driver writes it. */

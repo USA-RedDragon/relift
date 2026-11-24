@@ -52,6 +52,8 @@ typedef struct nvn_pipe_key {
     uint32_t sample_mask, conservative_dilate, viewport_swizzle, provoking_last;
     /** @brief The samples of each pixel the draw rasterizes, as a VkSampleCountFlagBits; 0 for one sample. */
     uint32_t samples;
+    /** @brief The fragment program runs once per sample (nvnProgramSetSampleShading's forced mode). */
+    uint32_t sample_shading;
     /**
      * @brief The samples of a draw with alpha to coverage, plus NVN_A2C_DITHER with the dither, 0 without: the
      * host's own where it is the console's (nvn_a2c_native), the fragment program's (A2C_SPEC) elsewhere.

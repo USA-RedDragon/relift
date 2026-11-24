@@ -791,6 +791,9 @@ static int fixed_state(replay *r, pipe_key *k)
     if (drawn > 1 && !g.standard_samples)
         return nvn_vk_stop(r, "a draw of %u samples on a host device without the standard sample positions", drawn);
     k->samples = drawn > 1 ? drawn : 0;
+    k->sample_shading = drawn > 1 && st->sample_shading == 1;
+    if (k->sample_shading && !g.sample_shading)
+        return nvn_vk_stop(r, "a program forced to shade per sample on a host device without sample rate shading");
     /*
      * The driver's BindMultisampleState sets SET_ANTI_ALIAS_ALPHA_CONTROL from the enable and the dither footprint
      * from the dither flag (PIXELS_2X2 with it, PIXELS_1X1 without; SDK 22.2.8, sdk 0x69a0f0). Only the dithered
@@ -2914,6 +2917,8 @@ static int bind_program(replay *r, const nvn_cmd *e)
     const uint64_t *code = e->x[1] ? nvn_program_code(e->x[1], &n, &consts, &control) : NULL;
     if (e->x[1] && !code)
         return nvn_vk_stop(r, "nvnCommandBufferBindProgram: 0x%llx is not a program", (unsigned long long)e->x[1]);
+    if (mask & (1u << 1))
+        r->st->sample_shading = e->x[1] ? nvn_program_sample_shading(e->x[1]) : 0;
     for (uint32_t s = 0; s < NVN_STAGES; s++) {
         if (!(mask & (1u << s)))
             continue;

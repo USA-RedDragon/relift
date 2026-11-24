@@ -484,6 +484,8 @@ static void fill_state(state *s, const nvn_pipe_key *k)
     s->ms = (VkPipelineMultisampleStateCreateInfo){ .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
                                                      .rasterizationSamples = k->samples ? (VkSampleCountFlagBits)k->samples
                                                                                         : VK_SAMPLE_COUNT_1_BIT,
+                                                     .sampleShadingEnable = k->sample_shading != 0,
+                                                     .minSampleShading = 1.0f,
                                                      .alphaToCoverageEnable = nvn_a2c_native(k->alpha_to_coverage),
                                                      .pSampleMask = &s->sample_mask };
     s->ds = (VkPipelineDepthStencilStateCreateInfo){ .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
@@ -519,14 +521,14 @@ typedef struct stage_key {
     uint32_t depth_bounds;
     /** @brief The pre-raster stage's library has the shading-rate image on (its viewport state). */
     uint32_t shading_rate;
-    uint32_t samples, alpha_to_coverage;
+    uint32_t samples, alpha_to_coverage, sample_shading;
 } stage_key;
 
 typedef struct fo_key {
     uint32_t ncolor;
     VkFormat color[MAX_RT], depth, stencil;
     VkPipelineColorBlendAttachmentState blend[MAX_RT];
-    uint32_t sample_mask, samples, alpha_to_coverage;
+    uint32_t sample_mask, samples, alpha_to_coverage, sample_shading;
 } fo_key;
 
 static void vi_of(const nvn_pipe_key *k, vi_key *o)
@@ -550,6 +552,7 @@ static void stage_of(const nvn_pipe_key *k, uint32_t s, stage_key *o)
     o->shading_rate = s == 0 ? k->shading_rate : 0;
     o->samples = s == 1 ? k->samples : 0;
     o->alpha_to_coverage = s == 1 ? k->alpha_to_coverage : 0;
+    o->sample_shading = s == 1 ? k->sample_shading : 0;
     memcpy(o->map, k->spec_map[s], k->nspec[s] * sizeof o->map[0]);
     memcpy(o->val, k->spec[s], k->nspec[s] * sizeof o->val[0]);
     nvn_spec_sort(&o->nspec, o->map, o->val);
@@ -574,6 +577,7 @@ static void fo_of(const nvn_pipe_key *k, fo_key *o)
     o->sample_mask = k->sample_mask;
     o->samples = k->samples;
     o->alpha_to_coverage = k->alpha_to_coverage;
+    o->sample_shading = k->sample_shading;
     memcpy(o->blend, k->blend, k->ncolor * sizeof o->blend[0]);
 }
 

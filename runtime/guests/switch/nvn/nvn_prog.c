@@ -38,6 +38,8 @@ typedef struct nvn_program {
     uint64_t control[NVN_PROGRAM_STAGES];
     uint32_t n;
     uint64_t sets;
+    /** @brief The NVNsampleShadingMode nvnProgramSetSampleShading last set, and the one SetShaders took up. */
+    uint32_t shading_mode, shading;
 } nvn_program;
 
 /** @brief nvnProgramInitialize(NVNprogram *, NVNdevice *): NVNboolean. */
@@ -74,6 +76,7 @@ static uint64_t set_stages(rl_ctx *c, uint8_t *mem, nvn_program *p, uint64_t pro
 {
     c->x[0] = prog;
     p->n = (uint32_t)n;
+    p->shading = p->shading_mode;
     for (uint32_t i = 0; i < p->n; i++) {
         char key[65];
         uint64_t code = nvn_gpu_guest(p->stages[i].data);
@@ -140,14 +143,16 @@ uint64_t nvnh_nvnProgramSetShadersExt(rl_ctx *c, uint8_t *mem)
 /**
  * @brief nvnProgramInitializeFromBuilder(NVNprogram *, const NVNprogramBuilder *):
  * NVNboolean. As the driver: an initialized program given the builder's
- * shaders. Ray tracing modules (asked of drivers that have their count
+ * shaders and sample shading mode. Ray tracing modules (asked of drivers that have their count
  * getter; older ones have none) and subroutine linkage are not implemented
  * and stop.
  */
 uint64_t nvnh_nvnProgramInitializeFromBuilder(rl_ctx *c, uint8_t *mem)
 {
-    uint64_t prog = c->x[0], builder = c->x[1], count = 0, shaders = 0, modules = 0, links = 0;
+    uint64_t prog = c->x[0], builder = c->x[1], count = 0, shaders = 0, modules = 0, links = 0, shading = 0;
     int rc = nvn_driver_call(c, mem, "nvnProgramBuilderGetShaderCount", &builder, 1, &count);
+    if (rc == RL_OK)
+        rc = nvn_driver_call(c, mem, "nvnProgramBuilderGetSampleShading", &builder, 1, &shading);
     if (rc == RL_OK)
         rc = nvn_driver_call(c, mem, "nvnProgramBuilderGetShaders", &builder, 1, &shaders);
     if (rc == RL_OK)
@@ -164,10 +169,13 @@ uint64_t nvnh_nvnProgramInitializeFromBuilder(rl_ctx *c, uint8_t *mem)
                                         "nvnProgramInitializeFromBuilder(0x%llx): %d ray tracing modules and %d "
                                         "subroutine linkages are not implemented",
                                         (unsigned long long)prog, (int32_t)modules, (int32_t)links);
-    if (!nvn_obj_publish(nvn_obj_new(prog, NVN_PROGRAM, sizeof(nvn_program)))) {
+    nvn_program *p = (nvn_program *)nvn_obj_publish(nvn_obj_new(prog, NVN_PROGRAM, sizeof(nvn_program)));
+    if (!p) {
         c->x[0] = 0;
         return nvn_ret(c);
     }
+    /* the driver copies the builder's mode into the program before it takes the shaders (sdk 0x661f64) */
+    p->shading_mode = (uint32_t)shading & 0xfu;
     return set_shaders(c, mem, prog, (int32_t)count, shaders);
 }
 
@@ -341,9 +349,23 @@ uint64_t nvnh_nvnProgramSetDebugLabel(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
-/** @brief nvnProgramSetSampleShading(NVNprogram *, NVNsampleShadingMode). */
+/**
+ * @brief nvnProgramSetSampleShading(NVNprogram *, NVNsampleShadingMode): keeps the mode, which the program's next
+ * nvnProgramSetShaders takes up, as the driver's does (SDK 22.2.8: the setter stores it in bits 28 to 31 of the
+ * program's word 0x80 at sdk 0x661d30; SetShaders reads it for the fragment stage at 0x661094 and sets the program's
+ * per-sample flag for mode 1 and clears it for mode 2, keeping the program's own for any other).
+ */
 uint64_t nvnh_nvnProgramSetSampleShading(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
+    nvn_program *p = (nvn_program *)nvn_obj_get(c->x[0], NVN_PROGRAM);
+    if (p)
+        p->shading_mode = (uint32_t)c->x[1] & 0xfu;
     return nvn_ret(c);
+}
+
+uint32_t nvn_program_sample_shading(uint64_t prog)
+{
+    nvn_program *p = (nvn_program *)nvn_obj_get(prog, NVN_PROGRAM);
+    return p && (p->shading == 1 || p->shading == 2) ? p->shading : 0;
 }

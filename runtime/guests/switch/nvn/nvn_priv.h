@@ -833,6 +833,12 @@ typedef struct nvn_consts {
  * control section (0 for none).
  */
 const uint64_t *nvn_program_code(uint64_t prog, uint32_t *n, const nvn_consts **consts, const uint64_t **control);
+/**
+ * @brief The sample shading of the program at guest address prog as its last nvnProgramSetShaders took it up: 1
+ * forced per sample, 2 forced per fragment, 0 the program's own (which the translation decides: a program reading
+ * per-sample values shades per sample on the host as on the console).
+ */
+uint32_t nvn_program_sample_shading(uint64_t prog);
 
 /** @brief DLSS network procs relift implements (nvn_dlss.c); the builder and parameter procs stay the driver's. */
 #define NVN_DLSS_PROCS(X)                                                                                              \
