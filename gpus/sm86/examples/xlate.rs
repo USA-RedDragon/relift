@@ -18,6 +18,8 @@ fn main() {
             );
         } else if a == "--debug-info" {
             o.debug_info = true;
+        } else if a == "--gs-points" {
+            o.pipeline.gs_input = relift_gpu_nv::translate::GsInput::Points;
         } else if a == "--xfb-memory" {
             no_xfb_host = true;
         } else if a == "--xfb" {

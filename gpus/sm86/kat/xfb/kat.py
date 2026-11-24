@@ -14,7 +14,23 @@ the packed bytes and the count must be the reference's too.
 
 Needs glslangValidator, spirv-val, zstd, a C compiler with the Vulkan headers, and
 `cargo build --release -p relift-switch-shaders -p relift-gpu-sm86 --example xlate` in CARGO_TARGET_DIR (default
-target/). KAT_DEV=<device name part> runs the translation on another device (the reference stays NVIDIA's).
+target/).     python3 -I kat/xfb/kat.py <absolute work dir> --record tests/kat/xfb.txt [case ...]
+
+also writes, for each case that passes, its programs and the NVIDIA capture (bytes and count) to the record.
+
+    python3 -I kat/xfb/kat.py <absolute work dir> --replay tests/kat/xfb.txt [--export <dir>]
+
+with KAT_DEV and KAT_HOST translates the recorded programs for the host (no NVIDIA device, glslangValidator or zstd
+needed), validates them, captures on KAT_DEV through the path the translation takes (KAT_XFB_MEMORY=1 takes the
+memory path on a host that has transform feedback too) (the host's transform feedback,
+or the memory path packed as nvn_xfb_pack packs it) and requires the recorded NVIDIA bytes and count word for word.
+With --export it only translates, into <dir> with run.json, for a device without the build (the Mac):
+
+    python3 -I kat.py <absolute work dir> --run <dir>      (beside xrun.c, draw.vert.spv and draw.frag.spv in <dir>)
+
+KAT_DEV=<device name part> with KAT_HOST=<preset> runs the translation, made for that host preset, on another device;
+the reference stays NVIDIA's unless KAT_REF_DEV names another (CI: KAT_DEV=llvmpipe KAT_HOST=lavapipe
+KAT_REF_DEV=llvmpipe, the capture of the GLSL on lavapipe as the reference).
 
     python3 -I kat/xfb/kat.py <absolute work dir> --game <module or file>
 
@@ -35,7 +51,9 @@ SHADERS = os.path.join(TARGET, 'release/relift-shaders')
 def run(args, **kw):
     r = subprocess.run(args, capture_output=True, text=True, **kw)
     if r.returncode:
-        sys.exit('%s failed: %s %s' % (os.path.basename(args[0]), r.stdout[-2000:], r.stderr[-2000:]))
+        how = 'signal %d' % -r.returncode if r.returncode < 0 else 'exit status %d' % r.returncode
+        sys.exit('%s failed (%s): %s\n%s %s' % (os.path.basename(args[0]), how, ' '.join(args), r.stdout[-2000:],
+                                               r.stderr[-2000:]))
     return r.stdout
 
 
@@ -70,6 +88,8 @@ def one(work, name):
         run(['glslangValidator', '-V', '--target-env', 'vulkan1.3', '-o', os.path.join(o, s + '.spv'), os.path.join(d, s)])
     gs = os.path.join(o, 'c.geom.spv') if 'c.geom' in stages else None
     env = dict(os.environ, XRUN_CACHE=os.path.join(o, 'c.bin'))
+    if os.environ.get('KAT_REF_DEV'):
+        env['XRUN_DEV'] = os.environ['KAT_REF_DEV']
     ref = capture(work, o, 'ref', os.path.join(o, 'c.vert.spv'), gs, case, env)
     frames(os.path.join(o, 'c.bin'), os.path.join(o, 'tree/romfs/Lib/c.bin'))
     run([SHADERS, 'scan', os.path.join(o, 'tree'), '--out', os.path.join(o, 'scan'), '-j', '2'])
@@ -86,7 +106,7 @@ def one(work, name):
     spv = {}
     for k in want:
         spv[k] = os.path.join(o, k + '.spv')
-        flags = ['--xfb', sel] if k == want[-1] else []
+        flags = (['--xfb', sel] if k == want[-1] else []) + (['--gs-points'] if k == 'geom' else [])
         out = run([XLATE, progs[k][0], spv[k], host] + flags)
         if not out.startswith('ok'):
             sys.exit('%s: the %s program does not translate: %s' % (name, k, out))
@@ -105,8 +125,106 @@ def one(work, name):
     print('%s: %s bytes captured (reference %s); %d capture words and %d image words differ; %d pixels lit' % (
         name, got[1].decode().strip(), ref[1].decode().strip(), dc, di, lit))
     mem_ok = memory(work, o, name, case, progs, want, sel, host, tenv, ref)
+    ok = dc == 0 and di == 0 and same_count and lit > 0 and mem_ok
+    if ok and RECORD is not None:
+        RECORD.append('case %s %s' % (name, json.dumps(case, separators=(',', ':'))))
+        for k in want:
+            RECORD.append('program %s %s' % (k, open(progs[k][0], 'rb').read().hex()))
+        RECORD.append('answer %s %s' % (ref[1].decode().strip(), ref[0].hex()))
     subprocess.run(['rm', '-rf', os.path.join(o, 'tree'), os.path.join(o, 'c.bin')])
-    return dc == 0 and di == 0 and same_count and lit > 0 and mem_ok
+    return ok
+
+
+RECORD = None
+
+
+def recorded(path):
+    """The record's cases: name, case, programs by stage, answer bytes and count."""
+    out, cur = [], None
+    for line in open(path):
+        kind, rest = line.rstrip('\n').split(' ', 1)
+        if kind == 'case':
+            name, js = rest.split(' ', 1)
+            cur = {'name': name, 'case': json.loads(js), 'progs': {}}
+            out.append(cur)
+        elif kind == 'program':
+            k, hx = rest.split(' ')
+            cur['progs'][k] = bytes.fromhex(hx)
+        elif kind == 'answer':
+            n, hx = rest.split(' ')
+            cur['count'], cur['answer'] = int(n), bytes.fromhex(hx)
+    return out
+
+
+def translate_recorded(work, rec, dest):
+    """Translates a recorded case for KAT_HOST into dest; returns its run entry."""
+    host = os.environ['KAT_HOST']
+    case = rec['case']
+    sel = '%d:%s' % (case['stride'], ','.join(str(b) for b in case['select']))
+    entry = {'name': rec['name'], 'case': case, 'count': rec['count'], 'answer': rec['answer'].hex(), 'mem': False}
+    for k in ('vert', 'geom'):
+        if k not in rec['progs']:
+            continue
+        b = os.path.join(work, '%s-%s.bin' % (rec['name'], k))
+        open(b, 'wb').write(rec['progs'][k])
+        spv = os.path.join(dest, '%s-%s.spv' % (rec['name'], k))
+        flags = ['--xfb', sel] if k == ('geom' if 'geom' in rec['progs'] else 'vert') else []
+        if flags and os.environ.get('KAT_XFB_MEMORY'):
+            flags.append('--xfb-memory')
+        if k == 'geom':
+            flags.append('--gs-points')
+        out = run([XLATE, b, spv, host] + flags)
+        r = subprocess.run(['spirv-val', '--target-env', 'vulkan1.3', spv], capture_output=True, text=True)
+        if not out.startswith('ok') or r.returncode:
+            sys.exit('%s: %s does not translate for %s: %s %s' % (rec['name'], k, host, out[:300], r.stdout + r.stderr))
+        entry[k] = os.path.basename(spv)
+        if flags:
+            entry['mem'] = 'xfb_memory: Some' in out
+            if 'xfb: [(%d, 0)]' % case['stride'] not in out:
+                sys.exit('%s: the translation for %s captures nothing: %s' % (rec['name'], host, out[:300]))
+    return entry
+
+
+def run_entry(work, d, e):
+    """Captures entry e on XRUN_DEV through its path; whether it matches the recorded answer."""
+    case = e['case']
+    stride, count = case['stride'], case['count']
+    o = os.path.join(work, e['name'] + '-run')
+    os.makedirs(o, exist_ok=True)
+    env = dict(os.environ)
+    if os.environ.get('KAT_DEV'):
+        env['XRUN_DEV'] = os.environ['KAT_DEV']
+    if e['mem']:
+        env['XRUN_MEM'] = '%d:%d' % (stride + 4, count)
+    gs = os.path.join(d, e['geom']) if 'geom' in e else '-'
+    run([os.path.join(work, 'xrun'), os.path.join(d, e['vert']), gs, str(stride), str(count),
+         os.path.join(work, 'draw.vert.spv'), os.path.join(work, 'draw.frag.spv'), o], env=env)
+    answer = bytes.fromhex(e['answer'])
+    if e['mem']:
+        got, n = pack(open(os.path.join(o, 'scratch.bin'), 'rb').read(), stride + 4, stride, case['select'],
+                      len(answer))
+    else:
+        got, n = open(os.path.join(o, 'capture.bin'), 'rb').read(), int(open(os.path.join(o, 'count.txt')).read())
+    words = lambda b: struct.unpack('<%dI' % (len(b) // 4), b)
+    dw = sum(1 for x, y in zip(words(answer), words(got)) if x != y)
+    print('%s: %s path: %d bytes (recorded %d); %d words differ from the NVIDIA capture' % (
+        e['name'], 'memory' if e['mem'] else 'transform feedback', n, e['count'], dw))
+    return dw == 0 and n == e['count'] and len(got) == len(answer)
+
+
+def prepare(work, d=None):
+    d = d or HERE
+    inc = ['-I' + i for i in os.environ.get('KAT_VK_INCLUDE', '').split()]
+    run(['cc', '-O1'] + inc + ['-o', os.path.join(work, 'xrun'), os.path.join(d, 'xrun.c')] + XRUN_LIBS)
+    for s in ('draw.vert', 'draw.frag'):
+        if os.path.exists(os.path.join(d, s + '.spv')):
+            subprocess.run(['cp', os.path.join(d, s + '.spv'), work])
+        else:
+            run(['glslangValidator', '-V', '--target-env', 'vulkan1.3', '-o', os.path.join(work, s + '.spv'),
+                 os.path.join(d, s)])
+
+
+XRUN_LIBS = os.environ.get('XRUN_LIBS', '-lvulkan').split()
 
 
 def pack(scratch, record, stride, select, size):
@@ -130,7 +248,7 @@ def memory(work, o, name, case, progs, want, sel, host, tenv, ref):
     spv = {}
     for k in want:
         spv[k] = os.path.join(o, k + '-mem.spv')
-        flags = ['--xfb', sel, '--xfb-memory'] if k == 'geom' else []
+        flags = ['--xfb', sel, '--xfb-memory', '--gs-points'] if k == 'geom' else []
         out = run([XLATE, progs[k][0], spv[k], host] + flags)
         r = subprocess.run(['spirv-val', '--target-env', 'vulkan1.3', spv[k]], capture_output=True, text=True)
         if not out.startswith('ok') or r.returncode:
@@ -167,7 +285,7 @@ def game(work, path):
         if len(lay) != 1 or not x['raw']:
             sys.exit('%#x: layout %s needs more than the one raw buffer xlate takes' % (h, lay))
         sel = '%d:%s' % (lay[0]['stride'], ','.join(str(a & 0xff) for a in lay[0]['attr']))
-        out = run([XLATE, prog, spv, os.environ.get('KAT_HOST', 'nvidia'), '--xfb', sel])
+        out = run([XLATE, prog, spv, os.environ.get('KAT_HOST', 'nvidia'), '--xfb', sel, '--gs-points'])
         r = subprocess.run(['spirv-val', '--target-env', 'vulkan1.3', spv], capture_output=True, text=True)
         want = 'xfb: [(%d, %d)]' % (lay[0]['stride'], lay[0]['stream'])
         if not out.startswith('ok') or r.returncode or want not in out:
@@ -179,18 +297,59 @@ def game(work, path):
 
 
 def main():
+    if os.environ.get('KAT_DEV') and not os.environ.get('KAT_HOST'):
+        sys.exit('KAT_DEV=%s needs KAT_HOST=<preset of that device>: a translation runs only on the host it was made '
+                 'for' % os.environ['KAT_DEV'])
     work = sys.argv[1]
     os.makedirs(work, exist_ok=True)
-    if sys.argv[2:3] == ['--game']:
-        return game(work, sys.argv[3])
-    run(['cc', '-O1', '-o', os.path.join(work, 'xrun'), os.path.join(HERE, 'xrun.c'), '-lvulkan'])
-    for s in ('draw.vert', 'draw.frag'):
-        run(['glslangValidator', '-V', '--target-env', 'vulkan1.3', '-o', os.path.join(work, s + '.spv'),
-             os.path.join(HERE, s)])
-    names = sys.argv[2:] or sorted(os.listdir(os.path.join(HERE, 'cases')))
+    args = sys.argv[2:]
+    if args[:1] == ['--game']:
+        return game(work, args[1])
+    if args[:1] == ['--run']:
+        d = os.path.abspath(args[1])
+        prepare(work, d)
+        entries = json.load(open(os.path.join(d, 'run.json')))
+        bad = [e['name'] for e in entries if not run_entry(work, d, e)]
+        if bad:
+            sys.exit('differ: %s' % ' '.join(bad))
+        return
+    if args[:1] == ['--replay']:
+        if not os.environ.get('KAT_HOST'):
+            sys.exit('--replay needs KAT_HOST=<preset of the device>')
+        recs = recorded(args[1])
+        export = args[3] if args[2:3] == ['--export'] else None
+        d = os.path.abspath(export) if export else os.path.join(work, 'spv')
+        os.makedirs(d, exist_ok=True)
+        entries = [translate_recorded(work, rec, d) for rec in recs]
+        if not entries:
+            sys.exit('no cases in %s' % args[1])
+        json.dump(entries, open(os.path.join(d, 'run.json'), 'w'))
+        if export:
+            prepare(work)
+            for f in ('xrun.c',):
+                subprocess.run(['cp', os.path.join(HERE, f), d])
+            for f in ('draw.vert.spv', 'draw.frag.spv'):
+                subprocess.run(['cp', os.path.join(work, f), d])
+            subprocess.run(['cp', os.path.abspath(__file__), d])
+            print('%d cases translated for %s into %s' % (len(entries), os.environ['KAT_HOST'], d))
+            return
+        prepare(work)
+        bad = [e['name'] for e in entries if not run_entry(work, d, e)]
+        if bad:
+            sys.exit('differ: %s' % ' '.join(bad))
+        return
+    global RECORD
+    record = None
+    if args[:1] == ['--record']:
+        record, args = args[1], args[2:]
+        RECORD = []
+    prepare(work)
+    names = args or sorted(os.listdir(os.path.join(HERE, 'cases')))
     bad = [n for n in names if not one(work, n)]
     if bad:
         sys.exit('differ: %s' % ' '.join(bad))
+    if record:
+        open(record, 'w').write('\n'.join(RECORD) + '\n')
 
 
 if __name__ == '__main__':

@@ -341,7 +341,7 @@ jobs:
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
 
   mesh-kat:
-    name: task, mesh and compute known answers on lavapipe
+    name: task, mesh, compute and transform feedback known answers on lavapipe
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

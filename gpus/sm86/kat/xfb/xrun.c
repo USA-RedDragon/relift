@@ -6,7 +6,7 @@
 // kat.py. XRUN_DEV picks the device by a part of its name (default NVIDIA); XRUN_CACHE=<file> writes the pipeline
 // cache, from which kat.py carves the driver's code. XRUN_MEM=<record bytes>:<slots> runs a memory path translation
 // instead: no transform feedback, a zeroed scratch of that many records whose device address goes to the push
-// constants at byte 24, written to scratch.bin; no draw follows.
+// constants at byte 24 (and a written-page bitmap's at byte 16), written to scratch.bin; no draw follows.
 #include <vulkan/vulkan.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -85,9 +85,9 @@ static VkPipeline pipeline(VkPipelineLayout l, VkShaderModule vs, VkShaderModule
         fs ? VK_FALSE : VK_TRUE, VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0, 0, 0, 0, 1 };
     VkPipelineMultisampleStateCreateInfo ms = { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO, 0, 0, VK_SAMPLE_COUNT_1_BIT };
     VkPipelineColorBlendAttachmentState ba = { 0 }; ba.colorWriteMask = 0xf;
-    VkPipelineColorBlendStateCreateInfo cb = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO, 0, 0, 0, 0, 1, &ba };
+    VkPipelineColorBlendStateCreateInfo cb = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO, 0, 0, 0, 0, fs ? 1u : 0u, &ba };
     VkFormat fmt = VK_FORMAT_R32G32B32A32_SFLOAT;
-    VkPipelineRenderingCreateInfo ri = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO, 0, 0, 1, &fmt };
+    VkPipelineRenderingCreateInfo ri = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO, 0, 0, fs ? 1u : 0u, &fmt };
     VkGraphicsPipelineCreateInfo pi = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, &ri, 0, ns, st, &vi, &ia, 0, &vps, &rs, &ms, 0, &cb, 0, l };
     VkPipeline p; CK(vkCreateGraphicsPipelines(dev, pcache, 1, &pi, 0, &p)); return p;
 }
@@ -172,7 +172,8 @@ int main(int argc, char **argv) {
     VkRenderingInfo rinfo = { VK_STRUCTURE_TYPE_RENDERING_INFO, 0, 0, { { 0, 0 }, { W, H } }, 1, 0, 1, &att };
     uint8_t push[128] = { 0 };
     float one = 1.0f; memcpy(push, &one, 4);
-    vkCmdBeginRendering(cb, &rinfo);
+    VkRenderingInfo cinfo = { VK_STRUCTURE_TYPE_RENDERING_INFO, 0, 0, { { 0, 0 }, { W, H } }, 1, 0, 0, 0 };
+    vkCmdBeginRendering(cb, &cinfo);
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, cap);
     vkCmdPushConstants(cb, l, VK_SHADER_STAGE_ALL_GRAPHICS, 0, sizeof push, push);
     VkDeviceSize zero = 0, size = (VkDeviceSize)stride * count;
@@ -182,6 +183,12 @@ int main(int argc, char **argv) {
         VkBufferDeviceAddressInfo bai = { VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, 0, sc.b };
         uint64_t a = vkGetBufferDeviceAddress(dev, &bai);
         memcpy(push + 24, &a, 8);
+        /* A translation for a host that mirrors guest memory marks the pages it stores to in a bitmap (1 << 20
+           bits) whose address is at byte 16. */
+        Buf pages = mkbuf(1u << 17, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+        VkBufferDeviceAddressInfo pai = { VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, 0, pages.b };
+        uint64_t pa = vkGetBufferDeviceAddress(dev, &pai);
+        memcpy(push + 16, &pa, 8);
         vkCmdPushConstants(cb, l, VK_SHADER_STAGE_ALL_GRAPHICS, 0, sizeof push, push);
         vkCmdDraw(cb, count, 1, 0, 0);
         vkCmdEndRendering(cb);
