@@ -15,17 +15,15 @@
 #define VK(name) VKF_FN(&g.fns, name)
 
 /**
- * @brief Batches recorded or in flight at once: the layer records the next batch into one slot while the host device
- * runs the ones before from the others, as the console's CPU builds commands while its GPU runs earlier ones. Android
- * has 4: a game submits several batches a frame there, and with 2 the replay waited for the batch before last
- * (Turnip, Adreno 740: replay 42 to 7 ms a present). A build may set its own count.
+ * @brief The most batches recorded or in flight at once. The layer records the next batch into a free slot while the
+ * host device runs the ones before from the others, as the console's CPU builds commands while its GPU runs earlier
+ * ones; a console submit never waits for an old batch, its queue holds what the game's command memory holds. So the
+ * slots in use grow on demand: when the next slot's batch has not finished, a new slot is made (its upload arena and
+ * descriptor pool on first use) up to this many, and only then does a submit wait for the oldest batch. A build may
+ * set its own count.
  */
 #ifndef NVN_SLOTS
-#if defined(__ANDROID__)
-#define NVN_SLOTS 4u
-#else
-#define NVN_SLOTS 2u
-#endif
+#define NVN_SLOTS 16u
 #endif
 #define MAX_RT 8u
 /** @brief Graphics, compute, task and mesh stages, in NVNshaderStage order. */
@@ -296,6 +294,8 @@ typedef struct nvn_vkdev {
     /** @brief Each slot's arena and how much of it its batch used; arena and arena_used are the recording slot's. */
     staging arenas[NVN_SLOTS];
     uint64_t arena_used_of[NVN_SLOTS];
+    /** @brief Batch slots made so far (they grow on demand, see NVN_SLOTS) and the most made at once. */
+    uint32_t slots_made, slots_peak;
     /** @brief Whether the batch holds a GPU write of guest uniform data that guest memory does not show yet. */
     bool uniform_pending;
     /** @brief The device probes' results, as device.json reports them. */
@@ -977,6 +977,8 @@ int nvn_separate_handles(replay *r, uint32_t s);
 /** @brief Frees what draws of slot's batch held (its descriptor pool); called once that batch has finished. */
 void nvn_draw_reset(uint32_t slot);
 /** @brief Makes slot the one draws take descriptor sets for. */
+/** @brief Makes what batch slot slot needs from the draw module (on its first use); false when the device refused. */
+bool nvn_draw_slot_ready(uint32_t slot);
 void nvn_draw_slot(uint32_t slot);
 /** @brief Runs a recorded nvnCommandBufferEvaluateDlss with the player's upscaler (nvn_dlss.c); RL_OK or a pending stop. */
 int nvn_dlss_run(replay *r, const nvn_cmd *e);

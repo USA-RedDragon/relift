@@ -181,6 +181,9 @@ static module *module_helper(replay *r, const char *kind, const module *mesh, in
     return m;
 }
 
+static bool slot_pool(uint32_t i);
+static bool slot_mstatus(uint32_t i);
+
 /** @brief Binds the batch slot's pool table (set NVN_POOL_SET) where the layout has it. */
 static void bind_pools(VkPipelineBindPoint at, VkPipelineLayout layout, VkDescriptorSetLayout has)
 {
@@ -250,19 +253,36 @@ static bool layouts(void)
                                        .pPushConstantRanges = &fixed };
     if (VK(vkCreatePipelineLayout)(g.dev, &pli, NULL, &d.layout) != VK_SUCCESS)
         return false;
+    if (!slot_pool(d.slot))
+        return false;
+    d.pool = d.pools[d.slot];
+    d.ready = true;
+    nvn_pipe_set_layouts(d.layout, d.clayout);
+    return true;
+}
+
+/** @brief Makes batch slot i's descriptor pool, the first time the slot is used. */
+static bool slot_pool(uint32_t i)
+{
+    if (d.pools[i])
+        return true;
     VkDescriptorPoolSize ps[2] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, SET_POOL_SETS * 8 },
                                    { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, SET_POOL_SETS / 2 * NVN_STORAGE_SLOTS * NVN_STAGES } };
     VkDescriptorPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
                                        .maxSets = SET_POOL_SETS,
                                        .poolSizeCount = 2,
                                        .pPoolSizes = ps };
-    for (uint32_t i = 0; i < NVN_SLOTS; i++)
-        if (VK(vkCreateDescriptorPool)(g.dev, &pci, NULL, &d.pools[i]) != VK_SUCCESS)
-            return false;
-    d.pool = d.pools[d.slot];
-    d.ready = true;
-    nvn_pipe_set_layouts(d.layout, d.clayout);
+    if (VK(vkCreateDescriptorPool)(g.dev, &pci, NULL, &d.pools[i]) != VK_SUCCESS) {
+        d.pools[i] = NULL;
+        return false;
+    }
     return true;
+}
+
+/** @brief Makes batch slot i's mesh status buffer, the first time the slot is used. */
+static bool slot_mstatus(uint32_t i)
+{
+    return d.mstatus_of[i].buf || nvn_vk_staging_new(&d.mstatus_of[i], 16ull * MESH_STATUS_SLOTS);
 }
 
 /**
@@ -329,9 +349,8 @@ static bool mesh_layouts(void)
         bytes = (uint64_t)g.max_index_value * 4;
     if (!nvn_vk_gpu_buffer(&d.mbuf, &d.mmem, bytes))
         return false;
-    for (uint32_t i = 0; i < NVN_SLOTS; i++)
-        if (!nvn_vk_staging_new(&d.mstatus_of[i], 16ull * MESH_STATUS_SLOTS))
-            return false;
+    if (!slot_mstatus(d.slot))
+        return false;
     d.mstatus = d.mstatus_of[d.slot];
     VkDescriptorPoolSize ps = { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 };
     VkDescriptorPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
@@ -381,6 +400,11 @@ void nvn_draw_reset(uint32_t slot)
         mesh_flushed(slot);
     if (d.pools[slot])
         VK(vkResetDescriptorPool)(g.dev, d.pools[slot], 0);
+}
+
+bool nvn_draw_slot_ready(uint32_t slot)
+{
+    return (!d.ready || slot_pool(slot)) && (!d.mready || slot_mstatus(slot));
 }
 
 void nvn_draw_slot(uint32_t slot)

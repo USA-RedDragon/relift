@@ -600,11 +600,11 @@ static void bring_up(void)
             g.placed_align = hos.vm.host_page;
         g.placed = VK(vkMapMemory2KHR) && VK(vkUnmapMemory2KHR);
     }
-    for (uint32_t s = 0; s < NVN_SLOTS; s++)
-        if (!nvn_vk_staging_new(&g.arenas[s], 64ull << 20)) {
-            rl_log(RL_LOG_ERROR, "nvn", "cannot allocate the upload arena");
-            return;
-        }
+    if (!nvn_vk_staging_new(&g.arenas[0], 64ull << 20)) {
+        rl_log(RL_LOG_ERROR, "nvn", "cannot allocate the upload arena");
+        return;
+    }
+    g.slots_made = 1;
     g.arena = g.arenas[0];
     nvn_pipe_init();
     rl_log(RL_LOG_INFO, "nvn", "NVN2 device on %s (queue family %u)", g.name, g.family);
@@ -2072,7 +2072,8 @@ static struct {
     bool on;
     bool readback, copies;
     write_set w;
-    uint64_t seq;
+    /** @brief The timeline value the batch signals (0 without the timeline). */
+    uint64_t seq, signal;
     int64_t t1;
 } pending[NVN_SLOTS];
 static uint64_t g_submitted, g_finished;
@@ -2130,6 +2131,75 @@ static void use_slot(uint32_t s)
     nvn_counters_slot(s);
 }
 
+/**
+ * @brief Each slot's last finished batch number, written by the GPU at the end of the batch after all its work
+ * (done_mark). The CPU learns that a batch finished by reading it: on kgsl every driver query (vkGetFenceStatus,
+ * vkGetSemaphoreCounterValue) blocks until the GPU gets there, so it cannot be asked without waiting. The word only
+ * picks the next slot; reusing one still waits for its fence (wait_slot), which stays the authority.
+ */
+static staging done_buf;
+
+/** @brief Records the write of batch number seq into slot s's word of done_buf, after all the batch's work. */
+static void done_mark(uint32_t s, uint64_t seq)
+{
+    if (!done_buf.buf && !nvn_vk_readback_new(&done_buf, 4 * NVN_SLOTS))
+        return;
+    VkMemoryBarrier all = { .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                            .srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+                            .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT };
+    VK(vkCmdPipelineBarrier)(g.cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &all, 0, NULL, 0,
+                             NULL);
+    VK(vkCmdFillBuffer)(g.cb, done_buf.buf, 4 * s, 4, (uint32_t)seq);
+    VkMemoryBarrier b = { .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                          .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                          .dstAccessMask = VK_ACCESS_HOST_READ_BIT };
+    VK(vkCmdPipelineBarrier)(g.cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &b, 0, NULL, 0, NULL);
+}
+
+/** @brief Whether slot s's batch is known finished without waiting (the GPU wrote its number); false when unsure. */
+static bool slot_done(uint32_t s)
+{
+    if (!pending[s].on)
+        return true;
+    if (!done_buf.map)
+        return false;
+    uint32_t v = __atomic_load_n((const uint32_t *)(const void *)done_buf.map + s, __ATOMIC_ACQUIRE);
+    return (int32_t)(v - (uint32_t)pending[s].seq) >= 0;
+}
+
+/** @brief Makes slot s's command buffer, fence, upload arena and per-module state; false when the device refused. */
+static bool make_slot(uint32_t s)
+{
+    if (!g.arenas[s].buf && !nvn_vk_staging_new(&g.arenas[s], 64ull << 20))
+        return false;
+    return nvn_draw_slot_ready(s);
+}
+
+/**
+ * @brief The slot after s to record into: the next one in use when its batch finished, else a new slot (up to
+ * NVN_SLOTS), else the next one, which the caller waits for. RELIFT_NVN_SLOTS caps the slots for A/B runs.
+ */
+static uint32_t next_slot(uint32_t s)
+{
+    static uint32_t cap;
+    if (!cap) {
+        const char *e = getenv("RELIFT_NVN_SLOTS");
+        cap = e && atoi(e) >= 2 && (uint32_t)atoi(e) <= NVN_SLOTS ? (uint32_t)atoi(e) : NVN_SLOTS;
+    }
+    uint32_t next = (s + 1) % g.slots_made;
+    if (next == s || (!slot_done(next) && g.slots_made < cap)) {
+        if (g.slots_made < cap && make_slot(g.slots_made)) {
+            next = g.slots_made++;
+            if (g.slots_made > g.slots_peak) {
+                g.slots_peak = g.slots_made;
+                rl_log(RL_LOG_INFO, "nvn", "batch slots grow to %u: the host device is %u batches behind", g.slots_made,
+                       g.slots_made - 1);
+            }
+        }
+    }
+    return next;
+}
+
 /** @brief Ends the command buffer and submits it with the slot's fence; false (logged) when the device refuses. */
 static bool submit_recorded(replay *r)
 {
@@ -2144,6 +2214,7 @@ static bool submit_recorded(replay *r)
         VK(vkCmdWriteTimestamp)(g.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gpu_ts.pool, 2 * g.slot + 1);
     bool copies = nvn_mirror_readback_pending();
     bool readback = nvn_mirror_record_readback(g.cb);
+    done_mark(g.slot, __atomic_load_n(&g_submitted, __ATOMIC_ACQUIRE) + 1);
     VkResult vr = VK(vkEndCommandBuffer)(g.cb);
     if (vr != VK_SUCCESS) {
         rl_log(RL_LOG_ERROR, "nvn", "vkEndCommandBuffer failed (%d)", (int)vr);
@@ -2175,6 +2246,7 @@ static bool submit_recorded(replay *r)
     pending[s].t1 = now_ns();
     if (g.timeline_ok)
         g.timeline_value = signal;
+    pending[s].signal = g.timeline_ok ? signal : 0;
     nvn_counters_submitted(g.timeline_ok ? g.timeline_value : 0);
     tm.submit_ns += (uint64_t)(pending[s].t1 - t0);
     pending[s].on = true;
@@ -2188,7 +2260,7 @@ static bool submit_recorded(replay *r)
     pending[s].seq = __atomic_add_fetch(&g_submitted, 1, __ATOMIC_ACQ_REL);
     g.arena_used = 0;
     g.flushes++;
-    uint32_t next = (s + 1) % NVN_SLOTS;
+    uint32_t next = next_slot(s);
     nvn_wait_site = "the next batch slot";
     bool ok = wait_slot(next);
     use_slot(next);
@@ -2411,6 +2483,86 @@ static VkFence long_batch(replay *r, staging *big, uint32_t n, int writer)
     return nvn_vk_submit(r) ? f : NULL;
 }
 
+int nvn_vk_done_word_check(void)
+{
+    pthread_once(&g.once, bring_up);
+    if (!g.ok)
+        return -1;
+    nvn_lock();
+    nvn_vk_settle();
+    staging big, out;
+    if (!nvn_vk_staging_new(&big, 64ull << 20) || !nvn_vk_readback_new(&out, 4096)) {
+        nvn_unlock();
+        return 1;
+    }
+    memset(out.map, 0, 4096);
+    replay r = { 0 };
+    nvn_vk_begin(&r);
+    for (uint32_t i = 0; i < 64; i++) {
+        VK(vkCmdFillBuffer)(g.cb, big.buf, 0, big.size, i);
+        nvn_vk_barrier(g.cb);
+    }
+    VK(vkCmdFillBuffer)(g.cb, out.buf, 0, 4096, 0x5a5a5a5au);
+    uint32_t s = g.slot;
+    VkFence f = g.fence;
+    int rc = nvn_vk_submit(&r) ? 0 : 2;
+    bool seen_running = false;
+    /* Until the fence signals: the word may say done only once the batch's last write is visible. */
+    for (int64_t t0 = now_ns(); !rc && VK(vkGetFenceStatus)(g.dev, f) == VK_NOT_READY;) {
+        bool done = slot_done(s);
+        uint32_t last = __atomic_load_n((const uint32_t *)(const void *)out.map + 1023, __ATOMIC_ACQUIRE);
+        if (done && last != 0x5a5a5a5au)
+            rc = 3;
+        seen_running |= !done;
+        if (now_ns() - t0 > 10000000000ll)
+            rc = 4;
+    }
+    if (!rc && !slot_done(s))
+        rc = 5; /* the fence signaled and the word still says running */
+    if (!rc && !seen_running)
+        printf("  done word: the batch finished before the first poll\n");
+    if (!nvn_vk_settle() && !rc)
+        rc = 6;
+    nvn_vk_staging_free(&big);
+    nvn_vk_staging_free(&out);
+    nvn_unlock();
+    return rc;
+}
+
+int nvn_vk_grow_check(void)
+{
+    pthread_once(&g.once, bring_up);
+    if (!g.ok)
+        return -1;
+    nvn_lock();
+    nvn_vk_settle();
+    staging big;
+    if (!nvn_vk_staging_new(&big, 64ull << 20)) {
+        nvn_unlock();
+        return 1;
+    }
+    replay r = { 0 };
+    uint32_t before = g.slots_made;
+    VkFence a = long_batch(&r, &big, 64, 0);
+    int rc = a ? 0 : 2;
+    for (uint32_t i = 0; !rc && i < 5; i++) {
+        nvn_vk_begin(&r);
+        VK(vkCmdFillBuffer)(g.cb, big.buf, 0, 4096, i);
+        nvn_vk_barrier(g.cb);
+        if (!nvn_vk_submit(&r))
+            rc = 3;
+    }
+    if (!rc && VK(vkGetFenceStatus)(g.dev, a) != VK_NOT_READY)
+        rc = 4; /* a submit waited for the long batch */
+    if (!rc && g.slots_made < 6 && g.slots_made <= before)
+        rc = 5; /* no slot was made for the batches behind it */
+    if (!nvn_vk_settle() && !rc)
+        rc = 6;
+    nvn_vk_staging_free(&big);
+    nvn_unlock();
+    return rc;
+}
+
 static bool nvn_pending_check(uint64_t at) { return nvn_vk_pending_write(at, 0x20); }
 
 int nvn_vk_ring_check(void)
@@ -2430,7 +2582,7 @@ int nvn_vk_ring_check(void)
     VkFence a = long_batch(&r, &big, 64, 0), b = NULL;
     if (!a)
         rc = 2;
-    /* The batches after a fill the other slots; the last of them reuses a's slot, so its submit waits for a. */
+    /* The batches after a go into other slots (new ones while a runs, see nvn_vk_grow_check); none waits for a. */
     for (uint32_t i = 1; !rc && i < NVN_SLOTS; i++) {
         nvn_vk_begin(&r);
         VK(vkCmdFillBuffer)(g.cb, out.buf, 0, 4096, 0x11111111u);
@@ -2441,8 +2593,6 @@ int nvn_vk_ring_check(void)
         if (!rc && !nvn_vk_submit(&r))
             rc = 4;
     }
-    if (!rc && VK(vkGetFenceStatus)(g.dev, a) != VK_SUCCESS)
-        rc = 5;
     if (!rc && (!nvn_vk_settle() || VK(vkGetFenceStatus)(g.dev, b) != VK_SUCCESS || ((uint32_t *)out.map)[1023] != 0x11111111u))
         rc = 6;
     VkFence c = rc ? NULL : long_batch(&r, &big, 64, 0);

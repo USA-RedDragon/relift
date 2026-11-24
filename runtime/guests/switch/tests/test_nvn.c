@@ -1536,6 +1536,26 @@ TEST(nvn_the_next_batch_is_recorded_while_one_runs_and_writers_are_waited_for)
     CHECK_EQ(nvn_vk_ring_check(), 0);
 }
 
+TEST(nvn_a_submit_never_waits_for_an_old_batch_while_a_slot_can_be_made)
+{
+    nvn_probes p;
+    if (!nvn_vk_probes(&p)) {
+        fprintf(stderr, "nvn_a_submit_never_waits_for_an_old_batch_while_a_slot_can_be_made: no host Vulkan device, skipped\n");
+        return;
+    }
+    CHECK_EQ(nvn_vk_grow_check(), 0);
+}
+
+TEST(nvn_a_batch_reads_done_only_once_its_writes_are_visible)
+{
+    nvn_probes p;
+    if (!nvn_vk_probes(&p)) {
+        fprintf(stderr, "nvn_a_batch_reads_done_only_once_its_writes_are_visible: no host Vulkan device, skipped\n");
+        return;
+    }
+    CHECK_EQ(nvn_vk_done_word_check(), 0);
+}
+
 TEST(nvn_a_submit_returns_before_the_device_finished_and_a_settle_sees_its_results)
 {
     nvn_probes p;
