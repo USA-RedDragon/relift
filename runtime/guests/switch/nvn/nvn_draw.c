@@ -2958,6 +2958,87 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
     return RL_OK;
 }
 
+int nvn_cuda_dispatch(replay *r, const char *key, const uint8_t *params, uint32_t nparams, const uint32_t grid[3],
+                      const uint32_t block[3], uint32_t dynamic_shared)
+{
+    char why[256] = "";
+    count_command();
+    if (!compute_layouts())
+        return nvn_vk_stop(r, "cannot make the compute pipeline layout");
+    module *m = nvn_module_get(key, NVN_STAGE_COMPUTE, why, sizeof why);
+    if (!m)
+        return nvn_vk_stop(r, "CUDA kernel %s: %s", key, why);
+    if (m->other_sets || m->user)
+        return nvn_vk_stop(r, "CUDA kernel %s reads %s, which the CUDA launch does not bind yet", key,
+                           m->other_sets ? "a guest memory set" : "a constant bank of its module");
+    note_last("cuda launch", &m, 1);
+    uint8_t c0[NVN_BANK2_BYTES];
+    memset(c0, 0, sizeof c0);
+    if (nparams > sizeof c0 - NVN_CUDA_PARAMS)
+        return nvn_vk_stop(r, "CUDA kernel %s takes %u parameter bytes, more than c[0] holds", key, nparams);
+    for (int i = 0; i < 3; i++) {
+        rl_st32(c0, 4u * (uint32_t)i, block[i]);
+        rl_st32(c0, 0xcu + 4u * (uint32_t)i, grid[i]);
+    }
+    rl_st32(c0, 0x28, NVN_CUDA_LOCAL_BYTES);
+    memcpy(c0 + NVN_CUDA_PARAMS, params, nparams);
+    VkSpecializationMapEntry map[MAX_SPECS];
+    uint32_t vals[MAX_SPECS], n = 4;
+    for (uint32_t i = 0; i < 3; i++) {
+        map[i] = (VkSpecializationMapEntry){ i, 4 * i, 4 };
+        vals[i] = block[i];
+    }
+    map[3] = (VkSpecializationMapEntry){ NVN_SHARED_SPEC, 4 * 3, 4 };
+    if (!nvn_cuda_shared_words(m, dynamic_shared, g.max_compute_shared, &vals[3]))
+        return nvn_vk_stop(r, "CUDA kernel %s: no declared shared size, or %u dynamic bytes past the device's %u", key,
+                           dynamic_shared, g.max_compute_shared);
+    nvn_vk_dispatch_reset();
+    for (uint32_t i = 0; i < m->nrecs; i++)
+        if (nvn_dispatch_unbounded(m->recs[i].kind))
+            nvn_vk_dispatch_anywhere();
+    for (uint32_t j = 0; j < m->ncbase; j++) {
+        void *buf;
+        uint64_t boff, gpu, bytes;
+        if (compute_base_span(c0, m->cbase[j], &buf, &boff, &gpu, &bytes))
+            nvn_vk_dispatch_buffer(nvn_gpu_guest(gpu), (uint32_t)(bytes > UINT32_MAX ? UINT32_MAX : bytes),
+                                   m->stores_guest);
+    }
+    int rc = m->register_handles ? nvn_texset_sync_registered(r) : RL_OK;
+    if (rc != RL_OK)
+        return rc;
+    if ((rc = bind_handle_sources(r, m, NVN_STAGE_COMPUTE, c0, sizeof c0)) != RL_OK)
+        return rc;
+    nvn_spec_sort(&n, map, vals);
+    VkPipeline p = nvn_pipe_compute(m->m, n, map, vals);
+    if (!p)
+        return nvn_vk_stop(r, "the host driver cannot make a compute pipeline for CUDA kernel %s", m->key);
+    nvn_pipe_record_compute(m->key, n, map, vals);
+    dispatch_data dd = { .m = m, .c0 = c0, .c0_at = { 0 } };
+    if ((rc = nvn_vk_stage(r, stage_dispatch, &dd, "a CUDA launch")) != RL_OK)
+        return rc;
+    for (uint32_t j = 0; m->stores_guest && j < m->ncbase; j++) {
+        void *buf;
+        uint64_t boff, gpu, bytes;
+        if (compute_base_span(c0, m->cbase[j], &buf, &boff, &gpu, &bytes)) {
+            nvn_mirror_written(gpu, bytes);
+            nvn_vk_mark_write_range(nvn_gpu_guest(gpu), bytes);
+        }
+    }
+    if (m->marks_pages)
+        nvn_mirror_written_marked();
+    else if (m->global_store)
+        nvn_mirror_written_all();
+    nvn_vk_begin_dispatch(r);
+    VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, p);
+    VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, d.clayout, 0, 3, dd.sets, 0, NULL);
+    bind_pools(VK_PIPELINE_BIND_POINT_COMPUTE, d.clayout, d.cset_layout[4]);
+    fixed_push fp = { .written_pages = nvn_mirror_written_pages_address() };
+    VK(vkCmdPushConstants)(g.cb, d.clayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof fp, &fp);
+    VK(vkCmdDispatch)(g.cb, grid[0], grid[1], grid[2]);
+    nvn_vk_dispatched();
+    return RL_OK;
+}
+
 static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z) { return dispatch_from(r, x, y, z, NULL, 0); }
 
 /**

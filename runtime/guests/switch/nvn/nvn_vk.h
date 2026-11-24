@@ -40,6 +40,9 @@
  * buffers of x * y * z cells that its lighting pass indexes in the same order.
  */
 #define NVN_C0_GROUPS 0x4u
+/** @brief Where a CUDA kernel's c[0] holds its parameters, and the local window it gets at c[0] byte 0x28 (the translator's default local words, times 4). */
+#define NVN_CUDA_PARAMS 0x160u
+#define NVN_CUDA_LOCAL_BYTES 0x1000u
 /** @brief Offset in c[2] of the handle bound to texture slot 0 (nvnCommandBufferBindTexture, sdk 0x6022e0). */
 /** @brief Bytes of a graphics stage's driver bank c[0] the layer fills. */
 #define NVN_GFX_C0_BYTES 0x1000u
@@ -1168,6 +1171,8 @@ bool nvn_draw_slot_ready(uint32_t slot);
 void nvn_draw_slot(uint32_t slot);
 /** @brief Runs a recorded nvnCommandBufferEvaluateDlss with the player's upscaler (nvn_dlss.c); RL_OK or a pending stop. */
 int nvn_dlss_run(replay *r, const nvn_cmd *e);
+/** @brief Replays an NVN_CMD_CUDA_LAUNCH of the console DLSS library (nvn_dlss.c). */
+int nvn_dlss_launch(replay *r, const nvn_cmd *e);
 /** @brief Frees what DLSS evaluations held for slot's batch (called once that batch has finished). */
 void nvn_dlss_reset(uint32_t slot);
 /** @brief Makes slot the one DLSS evaluations hold their views for. */
@@ -1256,6 +1261,14 @@ void nvn_graphics_table(const nvn_gfx *st, uint32_t s, uint8_t c0[NVN_GFX_C0_BYT
  * reach), rounded up to a word, at least one word. False when it is more than limit bytes, the device's
  * maxComputeSharedMemorySize: the program cannot run with its shared memory there.
  */
+/**
+ * @brief Records a CUDA kernel launch into the batch: the translation key, its parameter bytes (at c[0] byte
+ * NVN_CUDA_PARAMS), the grid and block sizes (c[0] bytes 0 and 0xc as the CUDA ABI has them) and the dynamic shared
+ * bytes (added to the kernel's declared static size, nvn_cuda_shared_words). RL_OK or a stop.
+ */
+int nvn_cuda_dispatch(replay *r, const char *key, const uint8_t *params, uint32_t nparams, const uint32_t grid[3],
+                      const uint32_t block[3], uint32_t dynamic_shared);
+
 bool nvn_compute_shared_words(const uint8_t *mem, uint64_t ctl, uint32_t limit, uint32_t *words);
 
 bool nvn_compute_table(const nvn_gfx *st, const uint32_t groups[3], uint32_t nubo, uint32_t nssbo, uint32_t ntex,

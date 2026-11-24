@@ -1098,6 +1098,12 @@ enum nvn_cmd_op {
 #define NVN_CMD_ENUM(op, proc) op,
     NVN_RECORDED(NVN_CMD_ENUM)
 #undef NVN_CMD_ENUM
+    /**
+     * @brief A CUDA kernel launch the console DLSS library records (its callback 19): x1 the kernel's index, x2 grid
+     * x | y << 32, x3 the parameter bytes (kept), x4 their size, x5 grid z | dynamic shared bytes << 32, x6 block x
+     * | y << 16 | z << 32.
+     */
+    NVN_CMD_CUDA_LAUNCH,
     NVN_CMD_COUNT
 };
 
@@ -1423,6 +1429,16 @@ int nvn_os_library_symbol(rl_ctx *c, uint8_t *mem, const char *lib, const char *
 
 /** @brief The guest address of the DLSS driver callback object (its vtable written now); 0 before the layer is up. */
 uint64_t nvn_dlss_callbacks(uint8_t *mem);
+
+/** @brief The game's own DLSS library is up and picture.upscaler chooses it. */
+bool nvn_dlss_game(void);
+
+/**
+ * @brief nvnCommandBufferEvaluateDlss(cmd, network, params) with the game's own DLSS: runs the library's Evaluate at
+ * record time as the driver does (sdk 0x6594c0), which records its work into cmd through the callbacks. Returns as a
+ * proc does.
+ */
+uint64_t nvn_dlss_evaluate(rl_ctx *c, uint8_t *mem);
 
 /** @brief The host function of callback slot i (nvn_dlss.c). */
 rl_fn nvn_dlss_callback(uint32_t i);

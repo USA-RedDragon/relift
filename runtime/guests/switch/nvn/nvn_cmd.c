@@ -120,6 +120,7 @@ static const nvn_snap_rule snap_rules[] = {
     { NVN_CMD_COPY_TEXTURE_TO_BUFFER, 2, ONE, NVN_VIEW_BYTES },
     { NVN_CMD_COPY_TEXTURE_TO_BUFFER, 3, ONE, sizeof(nvn_region) },
     { NVN_CMD_EVALUATE_DLSS, 2, ONE, NVN_DLSS_PARAMS_BYTES },
+    { NVN_CMD_CUDA_LAUNCH, 3, 4, 1 },
 };
 #undef ONE
 
@@ -455,6 +456,8 @@ uint64_t nvnh_nvnCommandBufferEndRecording(rl_ctx *c, uint8_t *mem)
 
 uint64_t nvn_cmd_record(rl_ctx *c, uint8_t *mem, uint32_t op)
 {
+    if (op == NVN_CMD_EVALUATE_DLSS && nvn_dlss_game())
+        return nvn_dlss_evaluate(c, mem);
     nvn_cmdbuf *b = cb_of(c);
     if (!b)
         return (uint64_t)rl_guest_fatal(c, "nvn", "%s on 0x%llx, not a command buffer", nvn_cmd_name(op),
@@ -536,6 +539,7 @@ static const char *const cmd_names[] = {
 #define NVN_CMD_NAME(op, proc) [op] = #proc,
     NVN_RECORDED(NVN_CMD_NAME)
 #undef NVN_CMD_NAME
+    [NVN_CMD_CUDA_LAUNCH] = "cuLaunchKernel (console DLSS)",
 };
 
 const char *nvn_cmd_name(uint32_t op)

@@ -5566,6 +5566,14 @@ static int run_one(replay *r, const nvn_cmd *e)
             nvn_gpuprof_mark("upscaler (DLSS evaluation)");
         return rc;
     }
+    case NVN_CMD_CUDA_LAUNCH: {
+        if (g_recording && !open_pass.open)
+            nvn_gpuprof_mark_kinds();
+        int rc = nvn_dlss_launch(r, e);
+        if (rc == RL_OK && g_recording && !open_pass.open)
+            nvn_gpuprof_mark("console DLSS (CUDA kernels)");
+        return rc;
+    }
     case NVN_CMD_BARRIER:
         nvn_vk_game_barrier(r);
         return RL_OK;

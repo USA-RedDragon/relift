@@ -82,14 +82,10 @@ static uint64_t callback_probe(rl_ctx *c, uint32_t slot)
         (void)mem;                                                                                                     \
         return callback_probe(c, i);                                                                                   \
     }
-CALLBACK(6)
-CALLBACK(9)
-CALLBACK(11)
 CALLBACK(12)
 CALLBACK(15)
 CALLBACK(16)
 CALLBACK(17)
-CALLBACK(19)
 CALLBACK(20)
 #undef CALLBACK
 
@@ -525,6 +521,11 @@ static uint64_t callback_13(rl_ctx *c, uint8_t *mem)
     c->x[0] = 0x808;
     return nvn_ret(c);
 }
+
+static uint64_t callback_6(rl_ctx *c, uint8_t *mem);
+static uint64_t callback_9(rl_ctx *c, uint8_t *mem);
+static uint64_t callback_11(rl_ctx *c, uint8_t *mem);
+static uint64_t callback_19(rl_ctx *c, uint8_t *mem);
 
 rl_fn nvn_dlss_callback(uint32_t i)
 {
@@ -1032,6 +1033,305 @@ static int side_view(replay *r, uint64_t tex, uint64_t v, rl_upscale_image *out)
     out->handle = (uint64_t)(uintptr_t)view;
     describe(im, has ? &nv : NULL, out);
     return RL_OK;
+}
+
+/** @brief The vtable word of relift's texture wrappers for the library (callbacks 6 and 9 know them by it). */
+#define WRAP_TAG 0x7772617000000000ull
+
+/** @brief Library vtable slot of Evaluate(lib, struct). */
+enum { LIB_EVALUATE = 7 };
+
+bool nvn_dlss_game(void) { return g_library && rl_upscale_resolve(rl_setting_enum("picture.upscaler"), true, false) == RL_UPSCALE_GAME; }
+
+/**
+ * @brief Writes the 0x40-byte texture wrapper the driver gives the library for one input or output (vtable at +0, 1 at
+ * +8, id at +0x2c, the texture and view at +0x30 and +0x38) at w, and registers the texture under id in the network's
+ * texture pool (sdk 0x6594c0; the driver writes the descriptor through the command buffer, relift's pool registers it).
+ */
+static int wrap(rl_ctx *c, uint8_t *mem, uint64_t w, uint64_t pool, uint32_t id, uint64_t tex, uint64_t view)
+{
+    memset(mem + w, 0, 0x40);
+    rl_st64(mem, w, WRAP_TAG);
+    mem[w + 8] = 1;
+    rl_st32(mem, w + 0x2c, id);
+    rl_st64(mem, w + 0x30, tex);
+    rl_st64(mem, w + 0x38, view);
+    if (!tex)
+        return RL_OK;
+    return proc(c, mem, "nvnTexturePoolRegisterTexture", NULL, 4, pool, (uint64_t)id, tex, view);
+}
+
+uint64_t nvn_dlss_evaluate(rl_ctx *c, uint8_t *mem)
+{
+    uint64_t cmd = c->x[0], net = c->x[1], prm = c->x[2];
+    uint64_t lib_net = rl_ld64(mem, net + 0xa0), pool = rl_ld64(mem, net + 0x10);
+    if (!lib_net || !prm)
+        return (uint64_t)rl_guest_fatal(c, "nvn",
+                                        "nvnCommandBufferEvaluateDlss(0x%llx) on a network the game's DLSS did not create",
+                                        (unsigned long long)net);
+    uint64_t sp = c->sp, base = (sp - 0x300) & ~15ull, S = base, W0 = base + 0x100;
+    c->sp = base;
+    memset(mem + S, 0, 0xc0);
+    /* params byte offset, network id offset, struct offset: color, output, motion, depth, bias, exposure */
+    static const uint32_t tex[6][3] = { { 0x00, 0x18, 0x00 }, { 0x30, 0x1c, 0x08 }, { 0x20, 0x20, 0x10 },
+                                        { 0x40, 0x24, 0x18 }, { 0x10, 0x28, 0x20 }, { 0x68, 0x2c, 0x28 } };
+    uint32_t flags = rl_ld32(mem, net + 0x250);
+    int rc = RL_OK;
+    for (int i = 0; i < 6 && rc == RL_OK; i++) {
+        uint64_t t = rl_ld64(mem, prm + tex[i][0]), v = rl_ld64(mem, prm + tex[i][0] + 8), w = W0 + 0x40u * (uint64_t)i;
+        rc = wrap(c, mem, w, pool, rl_ld32(mem, net + tex[i][1]), t, v);
+        bool give = i < 3 || i == 4 || (i == 3 && t) || (i == 5 && !(flags & 0x41) && t);
+        if (give)
+            rl_st64(mem, S + tex[i][2], w);
+    }
+    if (rc == RL_OK) {
+        rl_st64(mem, S + 0x30, cmd);
+        rl_st64(mem, S + 0x38, lib_net);
+        memcpy(mem + S + 0x40, mem + prm + 0x50, 8);
+        rl_st32(mem, S + 0x48, mem[prm + 0x78]);
+        memcpy(mem + S + 0x4c, mem + prm + 0x58, 8);
+        if (!(flags & 0x41))
+            memcpy(mem + S + 0x54, mem + prm + 0x60, 4);
+        uint32_t w = rl_ld32(mem, prm + 0x80), h = rl_ld32(mem, prm + 0x84);
+        if (!(w | h)) {
+            uint64_t ww = 0, hh = 0, color = rl_ld64(mem, prm);
+            rc = proc(c, mem, "nvnTextureGetWidth", &ww, 1, color);
+            if (rc == RL_OK)
+                rc = proc(c, mem, "nvnTextureGetHeight", &hh, 1, color);
+            w = (uint32_t)ww, h = (uint32_t)hh;
+        }
+        rl_st32(mem, S + 0x58, w);
+        rl_st32(mem, S + 0x5c, h);
+        memcpy(mem + S + 0x60, mem + prm + 0x88, 16);
+        memcpy(mem + S + 0x70, mem + prm + 0x98, 16);
+        if (flags & (1u << 28))
+            memcpy(mem + S + 0x80, mem + prm + 0xa8, 8);
+        rl_st32(mem, S + 0x88, rl_ld32(mem, rl_ld64(mem, net + 8)) == 0);
+        memcpy(mem + S + 0x8c, mem + prm + 0xb0, 16);
+        memcpy(mem + S + 0x9c, mem + net + 0x210, 32);
+    }
+    if (rc == RL_OK) {
+        g_current = net;
+        rc = library_call(c, mem, LIB_EVALUATE, &S, 1, NULL);
+        g_current = 0;
+    }
+    c->sp = sp;
+    if (rc != RL_OK)
+        return (uint64_t)rc;
+    return nvn_ret(c);
+}
+
+/**
+ * @brief Callback 6(cb, obj, is_image, filtered, &handle): the texture or image handle of a texture wrapper of an
+ * evaluate, as its driver method does (vtable 0xe76700 +0x20, sdk 0x65b0b0): an image handle of the wrapper's id, or a
+ * texture handle of it with sampler 2 when filtered, else 0. True.
+ */
+static uint64_t callback_6(rl_ctx *c, uint8_t *mem)
+{
+    uint64_t obj = c->x[1], out = c->x[4], h = 0, device = g_current ? rl_ld64(mem, g_current + 8) : 0;
+    if (!obj) {
+        rl_st64(mem, out, 0);
+        c->x[0] = 1;
+        return nvn_ret(c);
+    }
+    const dlss_res *r = res_of(obj);
+    uint64_t id;
+    if (r && r->texture) {
+        /* A texture of callback 4 takes the next free one of the game's texture ids in the network's pool once per
+         * network (sdk 0x65ab60, 0x65b3a0: the bitmap at +0x98, the ids at +0x18). */
+        uint64_t net = g_current;
+        if (rl_ld64(mem, obj + 0x1b8) != net || !rl_ld32(mem, obj + 0x2c)) {
+            uint32_t used = rl_ld32(mem, net + 0x98), bit = 0;
+            while (bit < 32 && (used & (1u << bit)))
+                bit++;
+            if (bit == 32)
+                return (uint64_t)rl_guest_fatal(c, "nvn", "the console DLSS network has no free texture id left");
+            rl_st32(mem, net + 0x98, used | 1u << bit);
+            rl_st32(mem, obj + 0x2c, rl_ld32(mem, net + 0x18 + 4u * bit));
+            rl_st64(mem, obj + 0x1b8, net);
+            int rc = proc(c, mem, "nvnTexturePoolRegisterTexture", NULL, 4, rl_ld64(mem, net + 0x10),
+                          (uint64_t)rl_ld32(mem, obj + 0x2c), obj + 0x130, (uint64_t)0);
+            if (rc != RL_OK)
+                return (uint64_t)rc;
+        }
+        id = rl_ld32(mem, obj + 0x2c);
+    } else if (rl_ld64(mem, obj) == WRAP_TAG) {
+        id = rl_ld32(mem, obj + 0x2c);
+    } else {
+        return (uint64_t)rl_guest_fatal(c, "nvn", "the console DLSS library asks a handle of 0x%llx, which relift never made (callback 6)",
+                                        (unsigned long long)obj);
+    }
+    int rc = c->x[2] & 1 ? proc(c, mem, "nvnDeviceGetImageHandle", &h, 2, device, id)
+                         : proc(c, mem, "nvnDeviceGetTextureHandle", &h, 3, device, id, (uint64_t)((uint32_t)c->x[3] ? 2 : 0));
+    if (rc != RL_OK)
+        return (uint64_t)rc;
+    rl_st64(mem, out, h);
+    c->x[0] = 1;
+    return nvn_ret(c);
+}
+
+/**
+ * @brief Callback 9(cb, obj, out): describes a texture for the library, as the driver's method does (vtables
+ * 0xe76700 and 0xe76610 +0x28, sdk 0x65ac50): width at +0, height at +4, the NVN format (the view's when it sets one)
+ * at +8, the library's format code at +0xc, levels at +0x10, bits 0 and 2 set at +0x30, 1 at +0x34. obj is an
+ * evaluate's texture wrapper or a texture of callback 4. True.
+ */
+static uint64_t callback_9(rl_ctx *c, uint8_t *mem)
+{
+    uint64_t obj = c->x[1], out = c->x[2], tex = 0, view = 0;
+    const dlss_res *r = res_of(obj);
+    if (r && r->texture)
+        tex = obj + 0x130;
+    else if (rl_ld64(mem, obj) == WRAP_TAG)
+        tex = rl_ld64(mem, obj + 0x30), view = rl_ld64(mem, obj + 0x38);
+    if (!tex)
+        return (uint64_t)rl_guest_fatal(c, "nvn", "the console DLSS library describes 0x%llx, which is no texture (callback 9)",
+                                        (unsigned long long)obj);
+    uint64_t w = 0, h = 0, fmt = 0, levels = 0, has = 0;
+    int rc = proc(c, mem, "nvnTextureGetWidth", &w, 1, tex);
+    if (rc == RL_OK)
+        rc = proc(c, mem, "nvnTextureGetHeight", &h, 1, tex);
+    if (rc == RL_OK)
+        rc = proc(c, mem, "nvnTextureGetLevels", &levels, 1, tex);
+    uint64_t sp = c->sp, tmp = (sp - 16) & ~15ull;
+    c->sp = tmp;
+    rl_st32(mem, tmp, 0);
+    if (rc == RL_OK && view)
+        rc = proc(c, mem, "nvnTextureViewGetFormat", &has, 2, view, tmp);
+    c->sp = sp;
+    if (rc == RL_OK && view && (has & 1))
+        fmt = rl_ld32(mem, tmp);
+    else if (rc == RL_OK)
+        rc = proc(c, mem, "nvnTextureGetFormat", &fmt, 1, tex);
+    if (rc != RL_OK)
+        return (uint64_t)rc;
+    static const uint32_t codes[][2] = { { 0x2e, 1 }, { 0x29, 2 }, { 0x11, 5 }, { 5, 6 },
+                                         { 0x3f, 0xe }, { 0x25, 0xf }, { 0x3d, 0x13 } };
+    uint32_t code = 0;
+    for (size_t i = 0; i < sizeof codes / sizeof codes[0]; i++)
+        if (codes[i][0] == (uint32_t)fmt)
+            code = codes[i][1];
+    rl_st32(mem, out + 0x30, rl_ld32(mem, out + 0x30) | 5u);
+    rl_st32(mem, out, (uint32_t)w);
+    rl_st32(mem, out + 4, (uint32_t)h & 0xffffu);
+    rl_st32(mem, out + 8, (uint32_t)fmt);
+    rl_st32(mem, out + 0xc, code);
+    rl_st32(mem, out + 0x10, (uint32_t)(int8_t)levels);
+    mem[out + 0x34] = 1;
+    c->x[0] = 1;
+    return nvn_ret(c);
+}
+
+/**
+ * @brief Callback 11(cb, cmd, obj, color, rects, count, skip): clears a texture of callback 4 or an evaluate's texture
+ * wrapper (with its view) in cmd, as their driver method does (vtables 0xe76610 and 0xe76700 +0x38, sdk 0x65ade0): each of count rectangles ({x0, y0, x1, y1}, 16 bytes) or, with
+ * none, the whole texture, with the four floats at color and all four channels. False for a buffer, or when skip has
+ * bit 0 (the driver then clears nothing).
+ */
+static uint64_t callback_11(rl_ctx *c, uint8_t *mem)
+{
+    uint64_t cmd = c->x[1], obj = c->x[2], color = c->x[3], rects = c->x[4], n = (uint32_t)c->x[5];
+    const dlss_res *r = res_of(obj);
+    uint64_t tex = 0, view = 0;
+    if (r && r->texture)
+        tex = obj + 0x130;
+    else if (!r && rl_ld64(mem, obj) == WRAP_TAG)
+        tex = rl_ld64(mem, obj + 0x30), view = rl_ld64(mem, obj + 0x38);
+    else if (!r)
+        return (uint64_t)rl_guest_fatal(c, "nvn", "the console DLSS library clears 0x%llx, which relift never made",
+                                        (unsigned long long)obj);
+    c->x[0] = 0;
+    if (!tex || (c->x[6] & 1))
+        return nvn_ret(c);
+    uint64_t sp = c->sp, reg = (sp - 32) & ~15ull, w = 0, h = 0;
+    c->sp = reg;
+    int rc = RL_OK;
+    for (uint64_t i = 0; i < (n ? n : 1) && rc == RL_OK; i++) {
+        uint32_t x = 0, y = 0;
+        if (n) {
+            uint64_t q = rects + 16 * i;
+            x = rl_ld32(mem, q), y = rl_ld32(mem, q + 4);
+            w = rl_ld32(mem, q + 8) - x, h = rl_ld32(mem, q + 12) - y;
+        } else {
+            rc = proc(c, mem, "nvnTextureGetWidth", &w, 1, tex);
+            if (rc == RL_OK)
+                rc = proc(c, mem, "nvnTextureGetHeight", &h, 1, tex);
+            h &= 0xffffu;
+        }
+        rl_st32(mem, reg, x);
+        rl_st32(mem, reg + 4, y);
+        rl_st32(mem, reg + 8, 0);
+        rl_st32(mem, reg + 12, (uint32_t)w);
+        rl_st32(mem, reg + 16, (uint32_t)h);
+        rl_st32(mem, reg + 20, 1);
+        if (rc == RL_OK)
+            rc = proc(c, mem, "nvnCommandBufferClearTexture", NULL, 6, cmd, tex, view, reg, color, (uint64_t)0xf);
+    }
+    c->sp = sp;
+    if (rc != RL_OK)
+        return (uint64_t)rc;
+    c->x[0] = 1;
+    return nvn_ret(c);
+}
+
+/**
+ * @brief Callback 19(cb, cmd, function, gx, gy, gz, bx, by, [sp] bz, [sp+8] dynamic shared, [sp+16] extra): a CUDA
+ * kernel launch into cmd (on the console cuLaunchKernel through the CUDA library, sdk 0x65a710). extra is
+ * {1, parameter buffer, 2, &parameter bytes, 0} (CU_LAUNCH_PARAM_BUFFER_POINTER and _SIZE). relift records it with
+ * the parameter bytes copied now, and runs it as a compute dispatch of the kernel's translation. True.
+ */
+static uint64_t callback_19(rl_ctx *c, uint8_t *mem)
+{
+    uint64_t fn = c->x[2], sp = c->sp, extra = rl_ld64(mem, sp + 16);
+    uint32_t i = (uint32_t)(fn & 0xffffffffu), bz = rl_ld32(mem, sp), dyn = rl_ld32(mem, sp + 8);
+    if ((fn & ~0xffffffffull) != KERNEL_TAG || i >= g_nkernels)
+        return (uint64_t)rl_guest_fatal(c, "nvn", "the console DLSS library launches 0x%llx, which is no kernel it loaded",
+                                        (unsigned long long)fn);
+    uint64_t params = 0, size = 0;
+    for (uint64_t at = extra; at && rl_ld64(mem, at); at += 16) {
+        uint64_t tag = rl_ld64(mem, at), val = rl_ld64(mem, at + 8);
+        if (tag == 1)
+            params = val;
+        else if (tag == 2)
+            size = rl_ld64(mem, val);
+        else
+            return (uint64_t)rl_guest_fatal(c, "nvn", "a CUDA launch of the console DLSS library has extra tag 0x%llx",
+                                            (unsigned long long)tag);
+    }
+    uint64_t saved[8];
+    memcpy(saved, c->x, sizeof saved);
+    uint64_t gx = c->x[3], gy = c->x[4], gz = c->x[5], bx = c->x[6], by = c->x[7];
+    c->x[0] = c->x[1];
+    c->x[1] = i;
+    c->x[2] = (gx & 0xffffffffu) | gy << 32;
+    c->x[3] = params;
+    c->x[4] = size;
+    c->x[5] = (gz & 0xffffffffu) | (uint64_t)dyn << 32;
+    c->x[6] = (bx & 0xffffu) | (by & 0xffffu) << 16 | (uint64_t)bz << 32;
+    if (rl_cfg()->trace_os)
+        rl_log(RL_LOG_INFO, "nvn", "DLSS launch %s grid %llux%llux%llu block %llux%llux%u shared +%u, %llu parameter bytes",
+               g_kernels[i].name, (unsigned long long)gx, (unsigned long long)gy, (unsigned long long)gz,
+               (unsigned long long)bx, (unsigned long long)by, bz, dyn, (unsigned long long)size);
+    uint64_t ret = c->x[30];
+    uint64_t rc = nvn_cmd_record(c, mem, NVN_CMD_CUDA_LAUNCH);
+    if (rc != ret)
+        return rc;
+    memcpy(c->x, saved, sizeof saved);
+    c->x[0] = 1;
+    return nvn_ret(c);
+}
+
+int nvn_dlss_launch(replay *r, const nvn_cmd *e)
+{
+    uint32_t i = (uint32_t)e->x[1];
+    if (i >= g_nkernels)
+        return nvn_vk_stop(r, "a recorded CUDA launch names kernel %u, which the library never loaded", i);
+    const uint8_t *params = nvn_cmd_bytes(r->s, e->x[3]);
+    if (e->x[4] && !params)
+        return nvn_vk_stop(r, "a recorded CUDA launch of %s lost its parameters", g_kernels[i].name);
+    uint32_t grid[3] = { (uint32_t)e->x[2], (uint32_t)(e->x[2] >> 32), (uint32_t)e->x[5] };
+    uint32_t block[3] = { (uint32_t)(e->x[6] & 0xffffu), (uint32_t)((e->x[6] >> 16) & 0xffffu), (uint32_t)(e->x[6] >> 32) };
+    return nvn_cuda_dispatch(r, g_kernels[i].key, params, (uint32_t)e->x[4], grid, block, (uint32_t)(e->x[5] >> 32));
 }
 
 int nvn_dlss_run(replay *r, const nvn_cmd *e)
