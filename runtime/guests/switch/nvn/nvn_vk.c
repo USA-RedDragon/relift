@@ -2451,8 +2451,9 @@ static void fault_report(void)
  * number of the last batch known finished.
  */
 /**
- * @brief Guest byte ranges a batch's GPU work may write, kept exactly: the arrays grow as a batch notes more ranges
- * (from WRITE_RANGES), so a batch that writes many places still names them, and only a failed allocation makes it all.
+ * @brief Guest byte ranges a batch's GPU work may write, kept exactly, sorted by address and merged where they touch:
+ * the arrays grow as a batch notes more ranges (from WRITE_RANGES), so a batch that writes many places still names
+ * them and a lookup is a binary search; only a failed allocation makes it all.
  */
 #define WRITE_RANGES 64u
 typedef struct write_set {
@@ -2478,44 +2479,69 @@ static write_set g_writes;
 
 void nvn_vk_mark_write(void) { g_writes.all = true; }
 
+/** @brief The first range of the set (sorted by address, none touching another) that ends at or after lo, or n. */
+static uint32_t first_ending_from(const write_set *w, uint64_t lo)
+{
+    uint32_t a = 0, b = w->n;
+    while (a < b) {
+        uint32_t m = a + (b - a) / 2;
+        if (w->hi[m] < lo)
+            a = m + 1;
+        else
+            b = m;
+    }
+    return a;
+}
+
 void nvn_vk_mark_write_range(uint64_t guest, uint64_t size)
 {
     nvn_wwatch_note(guest, size, "a GPU batch (storage buffer, uniform update or copy)");
     if (!size || g_writes.all)
         return;
     uint64_t lo = guest, hi = guest + size;
-    for (uint32_t i = 0; i < g_writes.n; i++)
-        if (lo <= g_writes.hi[i] && g_writes.lo[i] <= hi) {
-            g_writes.lo[i] = lo < g_writes.lo[i] ? lo : g_writes.lo[i];
-            g_writes.hi[i] = hi > g_writes.hi[i] ? hi : g_writes.hi[i];
-            return;
-        }
-    if (g_writes.n == g_writes.cap) {
-        uint32_t cap = g_writes.cap ? 2 * g_writes.cap : WRITE_RANGES;
-        uint64_t *l = realloc(g_writes.lo, sizeof *l * cap);
-        if (l)
-            g_writes.lo = l;
-        uint64_t *h = l ? realloc(g_writes.hi, sizeof *h * cap) : NULL;
-        if (h)
-            g_writes.hi = h;
-        if (!l || !h) {
-            g_writes.all = g_writes.overflow = true;
-            return;
-        }
-        g_writes.cap = cap;
+    /* The ranges stay sorted and apart, so a range that touches the new one is next to its place: they merge. */
+    uint32_t i = first_ending_from(&g_writes, lo), j = i;
+    while (j < g_writes.n && g_writes.lo[j] <= hi) {
+        lo = lo < g_writes.lo[j] ? lo : g_writes.lo[j];
+        hi = hi > g_writes.hi[j] ? hi : g_writes.hi[j];
+        j++;
     }
-    g_writes.lo[g_writes.n] = lo;
-    g_writes.hi[g_writes.n++] = hi;
+    if (j == i) {
+        if (g_writes.n == g_writes.cap) {
+            uint32_t cap = g_writes.cap ? 2 * g_writes.cap : WRITE_RANGES;
+            uint64_t *l = realloc(g_writes.lo, sizeof *l * cap);
+            if (l)
+                g_writes.lo = l;
+            uint64_t *h = l ? realloc(g_writes.hi, sizeof *h * cap) : NULL;
+            if (h)
+                g_writes.hi = h;
+            if (!l || !h) {
+                g_writes.all = g_writes.overflow = true;
+                return;
+            }
+            g_writes.cap = cap;
+        }
+        memmove(g_writes.lo + i + 1, g_writes.lo + i, sizeof *g_writes.lo * (g_writes.n - i));
+        memmove(g_writes.hi + i + 1, g_writes.hi + i, sizeof *g_writes.hi * (g_writes.n - i));
+        g_writes.n++;
+    } else if (j - i > 1) {
+        memmove(g_writes.lo + i + 1, g_writes.lo + j, sizeof *g_writes.lo * (g_writes.n - j));
+        memmove(g_writes.hi + i + 1, g_writes.hi + j, sizeof *g_writes.hi * (g_writes.n - j));
+        g_writes.n -= j - i - 1;
+    }
+    g_writes.lo[i] = lo;
+    g_writes.hi[i] = hi;
 }
 
+/** @brief Whether the set may write any byte of [lo, hi): a binary search over the sorted ranges. */
 static bool writes_into(const write_set *w, uint64_t lo, uint64_t hi)
 {
     if (w->all)
         return true;
-    for (uint32_t i = 0; i < w->n; i++)
-        if (lo < w->hi[i] && w->lo[i] < hi)
-            return true;
-    return false;
+    uint32_t i = first_ending_from(w, lo);
+    while (i < w->n && w->hi[i] == lo)
+        i++;
+    return i < w->n && w->lo[i] < hi;
 }
 
 static bool wait_slot(uint32_t s);
@@ -3292,6 +3318,37 @@ int nvn_vk_grow_check(void)
 
 static bool nvn_pending_check(uint64_t at) { return nvn_vk_pending_write(at, 0x20); }
 
+/** @brief For nvn_vk_ring_check: the write set keeps ranges sorted and merged where they touch, in any order of noting. */
+static int write_set_check(void)
+{
+    write_set saved = g_writes;
+    g_writes = (write_set){ 0 };
+    int rc = 0;
+    /* Out of order, then one that bridges two, one that touches the end of another and one inside another. */
+    nvn_vk_mark_write_range(0x5000, 0x100);
+    nvn_vk_mark_write_range(0x1000, 0x100);
+    nvn_vk_mark_write_range(0x3000, 0x100);
+    if (g_writes.n != 3 || g_writes.lo[0] != 0x1000 || g_writes.lo[1] != 0x3000 || g_writes.lo[2] != 0x5000)
+        rc = 1;
+    nvn_vk_mark_write_range(0x1100, 0x80);
+    nvn_vk_mark_write_range(0x3040, 0x10);
+    if (!rc && (g_writes.n != 3 || g_writes.hi[0] != 0x1180 || g_writes.hi[1] != 0x3100))
+        rc = 2;
+    nvn_vk_mark_write_range(0x3100, 0x1f00);
+    if (!rc && (g_writes.n != 2 || g_writes.lo[1] != 0x3000 || g_writes.hi[1] != 0x5100))
+        rc = 3;
+    /* Reads: inside, in a gap, just before the first, ending where one starts, starting where one ends, past the last. */
+    if (!rc && (!writes_into(&g_writes, 0x1050, 0x1060) || writes_into(&g_writes, 0x2000, 0x2fff) ||
+                writes_into(&g_writes, 0x800, 0x1000) || writes_into(&g_writes, 0x1180, 0x3000) ||
+                !writes_into(&g_writes, 0x1000, 0x1001) || !writes_into(&g_writes, 0x1fff, 0x3001) ||
+                !writes_into(&g_writes, 0x50ff, 0x6000) || writes_into(&g_writes, 0x5100, 0x6000)))
+        rc = 4;
+    free(g_writes.lo);
+    free(g_writes.hi);
+    g_writes = saved;
+    return rc ? 30 + rc : 0;
+}
+
 int nvn_vk_ring_check(void)
 {
     pthread_once(&g.once, bring_up);
@@ -3299,7 +3356,11 @@ int nvn_vk_ring_check(void)
         return -1;
     nvn_lock();
     staging big, out;
-    int rc = 0;
+    int rc = write_set_check();
+    if (rc) {
+        nvn_unlock();
+        return rc;
+    }
     if (!nvn_vk_staging_new(&big, 64ull << 20) || !nvn_vk_readback_new(&out, 4096)) {
         nvn_unlock();
         return 1;
