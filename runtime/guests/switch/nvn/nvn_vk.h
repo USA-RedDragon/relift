@@ -170,6 +170,8 @@ typedef struct vimg {
     VkImageView rate_view;
     /** @brief The texture set keeps it for a registered texture's id (nvn_texset_sync_registered). */
     bool synced;
+    /** @brief For a multisample image: what its sample moves keep (nvn_msaa.c), made at its first move. */
+    struct nvn_msaa_img *msaa;
 } vimg;
 
 /** @brief A render target: one level and layer of an image. */
@@ -220,6 +222,8 @@ typedef struct nvn_vkdev {
      * (SDK 22.2.8 driver).
      */
     bool standard_samples;
+    /** @brief The device shades per sample, and writes storage images declared without a format. */
+    bool sample_shading, formatless_write;
     /** @brief The largest extra overestimation (pixels) of VK_EXT_conservative_rasterization, and whether a dilate past it was warned of. */
     float conservative_extra_max;
     bool dilate_warned;
@@ -927,6 +931,33 @@ static inline VkSampleCountFlagBits nvn_vk_sample_bits(const nvn_tex_desc *d)
 {
     return d->samples > 1 ? (VkSampleCountFlagBits)d->samples : VK_SAMPLE_COUNT_1_BIT;
 }
+/**
+ * @brief Fills multisample image v from its guest storage, every sample's bits unchanged (nvn_msaa.c); false with
+ * why set when it cannot.
+ */
+bool nvn_msaa_upload(replay *r, vimg *v, const char **why);
+/** @brief Stores every sample of multisample image v to its guest storage, bits unchanged; false when it cannot. */
+bool nvn_msaa_write_back(replay *r, vimg *v);
+/**
+ * @brief Downsample's taps for a source of samples samples: the sample indices it averages (bits 4i to 4i + 3) and
+ * their count (nvn_msaa.c downsample_taps).
+ */
+bool nvn_msaa_downsample_taps(uint32_t samples, uint32_t *taps, uint32_t *n);
+/** @brief Records Downsample's mean of src's taps into target (format f, w by h from the origin); false with why. */
+bool nvn_msaa_resolve(replay *r, vimg *src, VkImageView target, VkFormat f, uint32_t w, uint32_t h, const char **why);
+/** @brief Frees what v's sample moves keep (vimg.msaa). */
+void nvn_msaa_free(vimg *v);
+/**
+ * @brief The guest's sample grid of a texture of samples samples, gw by gh texels a pixel, and the cell of each
+ * sample (cx | cy << 2 in bits 4s to 4s + 3); false for a count whose cells are not known (16).
+ */
+bool nvn_msaa_cells(uint32_t samples, uint32_t *gw, uint32_t *gh, uint32_t *cells);
+/** @brief The layer's single-sample upload of v from its storage (not for multisample images). */
+bool nvn_vk_fill_plain(replay *r, vimg *v);
+/** @brief The layer's single-sample write-back of v to its storage (not for multisample images). */
+bool nvn_vk_store_plain(replay *r, vimg *v);
+/** @brief Frees an image that is in no list (its views, memory and the struct itself). */
+void nvn_vk_image_drop(vimg *v);
 /** @brief Whether the layer can make a host image of the texture d describes (its format, target and samples). */
 bool nvn_vk_can_image(const nvn_tex_desc *d);
 vimg *nvn_vk_image(replay *r, uint64_t tex);

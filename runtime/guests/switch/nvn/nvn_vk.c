@@ -600,6 +600,12 @@ static void bring_up(void)
         VK(vkGetPhysicalDeviceProperties)(g.phys, &dp);
         g.max_storage_range = dp.limits.maxStorageBufferRange;
         g.standard_samples = dp.limits.standardSampleLocations;
+        g.sample_shading = feat.f2.features.sampleRateShading;
+        g.formatless_write = feat.f2.features.shaderStorageImageWriteWithoutFormat;
+        rl_log(RL_LOG_INFO, "nvn",
+               "multisample: standard sample positions %s, sample shading %s, color sample counts 0x%x",
+               g.standard_samples ? "yes" : "no", g.sample_shading ? "yes" : "no",
+               (unsigned)dp.limits.framebufferColorSampleCounts);
         g.max_stage_storage = dp.limits.maxPerStageDescriptorStorageBuffers;
         g.max_stage_uniform = dp.limits.maxPerStageDescriptorUniformBuffers;
         g.max_compute_shared = dp.limits.maxComputeSharedMemorySize;
@@ -2968,6 +2974,7 @@ static void image_free(vimg *v)
             VK(vkDestroyImageView)(g.dev, v->views[i], NULL);
     for (uint32_t i = 0; i < v->nsub; i++)
         VK(vkDestroyImageView)(g.dev, v->sub[i].view, NULL);
+    nvn_msaa_free(v);
     free(v->sub);
     free(v->aliases);
     if (v->view)
@@ -3084,17 +3091,20 @@ static bool upload_decoded(replay *r, const vimg *v, uint32_t level, uint32_t la
 
 static bool upload_body(replay *r, vimg *v);
 
+/** @brief Why the last multisample upload failed, for the message of the image it stops. */
+static const char *ms_why = "";
+
 /**
  * @brief Fills multisample image v from its guest storage. Storage of all zero bytes (a target the game has not drawn
- * into, in a pool it cleared) is every sample zero: the image is cleared to zero. Other bytes are not uploaded yet:
- * false.
+ * into, in a pool it cleared) is every sample zero: the image is cleared to zero, for depth formats too. Other bytes
+ * move sample by sample (nvn_msaa_upload).
  */
 static bool upload_multisample(replay *r, vimg *v)
 {
     const uint8_t *p = r->mem + v->storage;
     for (uint64_t i = 0; i < v->d.size; i++)
         if (p[i])
-            return false;
+            return nvn_msaa_upload(r, v, &ms_why);
     VkImageSubresourceRange rr = range_of(v);
     nvn_vk_begin(r);
     nvn_vk_barrier(g.cb);
@@ -3330,7 +3340,7 @@ static bool write_back_body(replay *r, vimg *u)
 {
     const nvn_tex_desc *d = &u->d;
     if (nvn_vk_sample_bits(d) != VK_SAMPLE_COUNT_1_BIT)
-        return false;
+        return nvn_msaa_write_back(r, u);
     if (gpu_moves() && nvn_untile_move(r, u, true)) {
         bool ok = nvn_vk_flush(r);
         nvn_watch_touch(u->storage, d->size);
@@ -3929,11 +3939,12 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex, bool 
         goto fail;
     v->hash = bytes_hash(r->mem + storage, d->size);
     v->edge_hash = edge_hash(r, v);
-    why = samples != VK_SAMPLE_COUNT_1_BIT ? "its storage holds bytes other than zeros, which are not uploaded into "
-                                             "a multisample image yet"
-                                           : "its upload failed";
-    if (!depth && !upload(r, v))
+    why = "its upload failed";
+    if ((!depth || samples != VK_SAMPLE_COUNT_1_BIT) && !upload(r, v)) {
+        if (samples != VK_SAMPLE_COUNT_1_BIT)
+            why = ms_why;
         goto fail;
+    }
     why = "the host device failed a submit";
     if (samples != VK_SAMPLE_COUNT_1_BIT && !nvn_vk_flush(r))
         goto fail;
@@ -3981,6 +3992,15 @@ fail:
 }
 
 vimg *nvn_vk_image(replay *r, uint64_t tex) { return image_of(r, tex); }
+
+bool nvn_vk_fill_plain(replay *r, vimg *v) { return nvn_vk_sample_bits(&v->d) == VK_SAMPLE_COUNT_1_BIT && upload_body(r, v); }
+
+bool nvn_vk_store_plain(replay *r, vimg *v)
+{
+    return nvn_vk_sample_bits(&v->d) == VK_SAMPLE_COUNT_1_BIT && write_back_body(r, v);
+}
+
+void nvn_vk_image_drop(vimg *v) { image_free(v); }
 
 bool nvn_vk_bytes_changed(vimg *v, const uint8_t *bytes)
 {
@@ -4798,6 +4818,75 @@ static int copy_texture_to_texture(replay *r, const nvn_cmd *e)
     return RL_OK;
 }
 
+static uint32_t integer_texel_bytes(VkFormat f);
+
+/** @brief Whether f is an sRGB format. */
+static bool srgb_format(VkFormat f)
+{
+    switch (f) {
+    case VK_FORMAT_R8_SRGB: case VK_FORMAT_R8G8_SRGB: case VK_FORMAT_R8G8B8_SRGB: case VK_FORMAT_B8G8R8_SRGB:
+    case VK_FORMAT_R8G8B8A8_SRGB: case VK_FORMAT_B8G8R8A8_SRGB: case VK_FORMAT_A8B8G8R8_SRGB_PACK32:
+        return true;
+    default:
+        return false;
+    }
+}
+
+/**
+ * @brief nvnCommandBufferDownsample(src, dst) and TiledDownsample, and their TextureView forms (src, srcView, dst,
+ * dstView): level 0 of dst, over the smaller of the two sizes, gets the mean of src's Downsample taps
+ * (nvn_msaa.c downsample_taps, read from the driver and Mesa's nvc0 2D blit). The tiled forms record the same blit
+ * in the driver. The mean is a float sum of the taps times one over their count, which the host writes through
+ * dst's format; how the 2D engine's bilinear filter rounds is not in NVIDIA's headers or Mesa, so only formats the
+ * host filters and renders to are taken, between textures of one format, not integer, depth or sRGB ones
+ * (.work/s2-console-questions.md); views only of the whole texture.
+ */
+static int downsample(replay *r, const nvn_cmd *e, bool views)
+{
+    const char *name = nvn_cmd_name(e->op);
+    for (uint32_t i = 0; views && i < 2; i++) {
+        const uint8_t *vb = nvn_cmd_bytes(r->s, e->x[2 + 2 * i]);
+        if (!vb)
+            continue;
+        nvn_view nv;
+        int rc = nvn_view_read(r->c, r->mem, vb, &nv);
+        if (rc != RL_OK)
+            return rc;
+        if (nv.has_levels || nv.has_layers || nv.has_format || nv.has_target || nv.has_swizzle || nv.has_ds_mode)
+            return nvn_vk_stop(r, "%s through a view of part of a texture or another format", name);
+    }
+    vimg *src = image_of(r, e->x[1]);
+    if (!src)
+        return RL_PENDING;
+    vimg *dst = image_of(r, views ? e->x[3] : e->x[2]);
+    if (!dst)
+        return RL_PENDING;
+    uint32_t taps, n;
+    if (!nvn_msaa_downsample_taps(src->d.samples, &taps, &n) || dst->d.samples > 1)
+        return nvn_vk_stop(r, "%s from a texture of %u samples to one of %u", name, src->d.samples, dst->d.samples);
+    VkFormatProperties fp;
+    VK(vkGetPhysicalDeviceFormatProperties)(g.phys, src->format, &fp);
+    VkFormatFeatureFlags need = VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+    if (src->d.format != dst->d.format || src->format != dst->format || src->aspect != VK_IMAGE_ASPECT_COLOR_BIT ||
+        src->decoded || dst->decoded || (fp.optimalTilingFeatures & need) != need || srgb_format(src->format) ||
+        integer_texel_bytes(src->format))
+        return nvn_vk_stop(r, "%s from format %u to format %u: only one color format the host filters, not sRGB or "
+                              "integer",
+                           name, src->d.format, dst->d.format);
+    if (!nvn_vk_refresh(r, src))
+        return nvn_vk_stop(r, "%s: the source texture's bytes could not be uploaded", name);
+    VkImageView target = sub_view(dst, 0, 0, 1, dst->format);
+    if (!target)
+        return nvn_vk_stop(r, "%s: no view of the destination's level 0", name);
+    nvn_vk_written(dst);
+    uint32_t w = src->d.width < dst->d.width ? src->d.width : dst->d.width;
+    uint32_t h = src->d.height < dst->d.height ? src->d.height : dst->d.height;
+    const char *why = "";
+    if (!nvn_msaa_resolve(r, src, target, dst->format, w, h, &why))
+        return nvn_vk_stop(r, "%s from a texture of %u samples: %s", name, src->d.samples, why);
+    return RL_OK;
+}
+
 /**
  * @brief nvnCommandBufferCopyBufferToTexture(buffer, dst, dstView,
  * dstRegion, flags): the region's texels from the buffer, laid out with the
@@ -5075,6 +5164,12 @@ static int run_one(replay *r, const nvn_cmd *e)
         return clear_buffer(r, e);
     case NVN_CMD_COPY_TEXTURE_TO_TEXTURE:
         return copy_texture_to_texture(r, e);
+    case NVN_CMD_DOWNSAMPLE:
+    case NVN_CMD_TILED_DOWNSAMPLE:
+        return downsample(r, e, false);
+    case NVN_CMD_DOWNSAMPLE_TEXTURE_VIEW:
+    case NVN_CMD_TILED_DOWNSAMPLE_TEXTURE_VIEW:
+        return downsample(r, e, true);
     case NVN_CMD_COPY_BUFFER_TO_TEXTURE:
         return copy_buffer_to_texture(r, e);
     case NVN_CMD_COPY_TEXTURE_TO_BUFFER:

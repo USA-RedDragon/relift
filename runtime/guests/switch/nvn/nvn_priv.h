@@ -973,6 +973,10 @@ int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], n
     X(NVN_CMD_COPY_BUFFER_TO_TEXTURE, nvnCommandBufferCopyBufferToTexture) \
     X(NVN_CMD_COPY_TEXTURE_TO_BUFFER, nvnCommandBufferCopyTextureToBuffer) \
     X(NVN_CMD_COPY_TEXTURE_TO_TEXTURE, nvnCommandBufferCopyTextureToTexture) \
+    X(NVN_CMD_DOWNSAMPLE, nvnCommandBufferDownsample) \
+    X(NVN_CMD_DOWNSAMPLE_TEXTURE_VIEW, nvnCommandBufferDownsampleTextureView) \
+    X(NVN_CMD_TILED_DOWNSAMPLE, nvnCommandBufferTiledDownsample) \
+    X(NVN_CMD_TILED_DOWNSAMPLE_TEXTURE_VIEW, nvnCommandBufferTiledDownsampleTextureView) \
     X(NVN_CMD_DISPATCH_COMPUTE, nvnCommandBufferDispatchCompute) \
     X(NVN_CMD_DISPATCH_COMPUTE_INDIRECT, nvnCommandBufferDispatchComputeIndirect) \
     X(NVN_CMD_DRAW_ARRAYS, nvnCommandBufferDrawArrays) \
