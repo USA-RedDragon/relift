@@ -270,7 +270,9 @@ fn main() {
             _ => paths.push(a.clone()),
         }
     }
-    std::panic::set_hook(Box::new(|_| {}));
+    if std::env::var_os("SPVIDIFF_PANICS").is_none() {
+        std::panic::set_hook(Box::new(|_| {}));
+    }
     let files = files(&paths);
     let next = AtomicUsize::new(0);
     let counts = Mutex::new(HashMap::<String, u64>::new());
@@ -301,17 +303,26 @@ fn main() {
                         continue;
                     };
                     for seed in 0..seeds {
-                        let inp = inputs(&m, seed.wrapping_mul(0x1234_5678_9abc) ^ k as u64);
+                        let name = f
+                            .file_name()
+                            .map(|n| n.as_encoded_bytes().to_vec())
+                            .unwrap_or_default();
+                        let h = name.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, &b| {
+                            (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3)
+                        });
+                        let inp = inputs(&m, seed.wrapping_mul(0x1234_5678_9abc) ^ h);
                         let (n, o) = (
                             single(&words, &inp, steps, false),
                             single(&words, &inp, steps, true),
                         );
                         let (sn, so) = (summary(&n), summary(&o));
-                        bump(if n.is_ok() {
-                            "single ok"
-                        } else {
-                            "single failed"
-                        });
+                        match &o {
+                            Ok(_) => bump("single ok"),
+                            Err(e) => bump(&format!(
+                                "single failed: {}",
+                                e.chars().take(48).collect::<String>()
+                            )),
+                        }
                         if sn != so {
                             bump("single DIFFER");
                             println!(
@@ -322,11 +333,13 @@ fn main() {
                         let n = workgroup(&words, &inp, steps, size, subgroup, false);
                         let o = workgroup(&words, &inp, steps, size, subgroup, true);
                         let (sn, so) = (summary(&n), summary(&o));
-                        bump(if n.is_ok() {
-                            "group ok"
-                        } else {
-                            "group failed"
-                        });
+                        match &o {
+                            Ok(_) => bump("group ok"),
+                            Err(e) => bump(&format!(
+                                "group failed: {}",
+                                e.chars().take(48).collect::<String>()
+                            )),
+                        }
                         if sn != so {
                             let o2 = summary(&workgroup(&words, &inp, steps, size, subgroup, true));
                             if o2 != so {

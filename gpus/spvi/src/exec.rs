@@ -6,7 +6,9 @@
 use std::collections::BTreeMap;
 
 use crate::arith::Fx;
-use crate::code::{DESC, Global, Index, MEM, MemStep, NOT_PTR, Op, POISON, Program, VAR, VarStep};
+use crate::code::{
+    DESC, Global, Index, MEM, MemStep, NOT_PTR, Op, Program, VAR, VAR_OOB, VAR_SCALAR, VarStep,
+};
 use crate::{Env, GARBAGE, Memory, mask, sext};
 
 /// Memory as an invocation sees it.
@@ -262,9 +264,49 @@ impl Inv {
         )
     }
 
+    /// Panics as the reference does on an operand of the wrong shape,
+    /// printing it as the reference's value would print.
+    #[cold]
+    #[inline(never)]
+    fn refuse(&self, composite: bool, kind: u8, r: usize, ty: u32) -> ! {
+        let s = |v: u64| {
+            if v == GARBAGE {
+                "Undef".to_string()
+            } else {
+                format!("S({v})")
+            }
+        };
+        let got = match kind {
+            0 => s(self.regs[r]),
+            1 => match self.regs[r] {
+                MEM => format!("P(Mem({}, {ty}))", self.regs[r + 1]),
+                NOT_PTR => s(self.regs[r + 1]),
+                t => format!("P(tag {t:#x})"),
+            },
+            _ => {
+                let parts: Vec<String> = (0..ty as usize).map(|k| s(self.regs[r + k])).collect();
+                format!("C([{}])", parts.join(", "))
+            }
+        };
+        let what = if composite { "composite" } else { "scalar" };
+        panic!("{what} expected, got {got}")
+    }
+
     #[cold]
     #[inline(never)]
     fn bad_ptr(what: &str, tag: u64, v: u64) -> ! {
+        if tag & 0xff == VAR_OOB {
+            panic!(
+                "index out of bounds: the len is {} but the index is {v}",
+                tag >> 8
+            )
+        }
+        if tag == VAR_SCALAR {
+            if what == "store to" {
+                panic!("store path into scalar")
+            }
+            panic!("composite expected, got S(0)")
+        }
         if tag == NOT_PTR {
             panic!("{what} S({v})")
         }
@@ -330,22 +372,29 @@ impl Inv {
         };
         let out = match tag {
             VAR => {
-                let mut o = v;
+                let mut out = [VAR, v];
                 for l in links {
-                    if o == POISON {
-                        break;
-                    }
-                    o = match l.var {
-                        Ok(VarStep::Add(k)) => o + k,
+                    let o = out[1];
+                    out = match l.var {
+                        Ok(VarStep::Add(k)) => [VAR, o + k],
                         Ok(VarStep::Elem { size, len }) => {
                             let i = idx(&l.idx);
-                            if i >= len { POISON } else { o + i * size }
+                            if i >= len {
+                                [VAR_OOB | len << 8, i]
+                            } else {
+                                [VAR, o + i * size]
+                            }
                         }
-                        Err(_) => POISON,
+                        Ok(VarStep::Scalar) | Err(_) => [VAR_SCALAR, 0],
                     };
+                    if out[0] != VAR {
+                        break;
+                    }
                 }
-                [VAR, o]
+                out
             }
+            VAR_SCALAR => [VAR_SCALAR, 0],
+            t if t & 0xff == VAR_OOB => [t, v],
             MEM => [MEM, mem_walk(v, links)],
             t if t & 0xff == DESC => {
                 let (set, binding) = (((t >> 8) & 0xff_ffff) as u32, (t >> 32) as u32);
@@ -474,14 +523,15 @@ impl Inv {
                 Op::Atomic { d, p: ptr, at } => {
                     let sd = &p.side[at as usize..];
                     let (kind, load, store, w) = (sd[0], sd[1], sd[2], sd[3]);
-                    let (x, y) = (
-                        self.regs[sd[4] as usize],
-                        sd.get(5).map_or(0, |&r| self.regs[r as usize]),
-                    );
+                    let (x, y, missing) =
+                        (self.regs[sd[4] as usize], self.regs[sd[5] as usize], sd[6]);
                     let tmp = self.regs.len() - 1;
                     let old = mem.atomic(|mem| {
                         self.load(p, mem, tmp, ptr as usize, load, 1);
                         let old = self.regs[tmp];
+                        if missing != u32::MAX {
+                            panic!("{}", p.msgs[missing as usize]);
+                        }
                         let new = match kind {
                             234 => old.wrapping_add(x) & mask(w),
                             230 if old == y => x,
@@ -732,6 +782,12 @@ impl Inv {
                     self.regs[d as usize] = fx.ext_scalar(g.inst, g.w, &x[..g.n as usize]);
                 }
                 Op::Panic { msg } => panic!("{}", p.msgs[msg as usize]),
+                Op::Refuse {
+                    composite,
+                    kind,
+                    r,
+                    ty,
+                } => self.refuse(composite, kind, r as usize, ty),
             }
         }
     }

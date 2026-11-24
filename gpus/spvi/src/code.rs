@@ -26,8 +26,13 @@ pub(crate) const VAR: u64 = 1;
 pub(crate) const DESC: u64 = 2;
 /// Pointer tag of a scalar where a pointer was expected.
 pub(crate) const NOT_PTR: u64 = 0xff;
-/// A variable store place no access reaches (an index past the end).
-pub(crate) const POISON: u64 = u64::MAX;
+/// Pointer tag (low byte): a variable path with an index past the end of
+/// a composite of the length in bits 8..64; the value is the index. The
+/// reference fails on a load or store through it, as here.
+pub(crate) const VAR_OOB: u64 = 3;
+/// Pointer tag: a variable path into a value the reference holds as a
+/// scalar (the zero of a runtime array or an opaque type).
+pub(crate) const VAR_SCALAR: u64 = 4;
 
 /// Where a function's instructions start and where its parameters live.
 pub(crate) struct Func {
@@ -55,9 +60,10 @@ pub(crate) enum Index {
 pub(crate) enum VarStep {
     /// A struct member: a fixed offset.
     Add(u64),
-    /// An array or vector element of `size` registers, of `len` elements
-    /// (unbounded for a runtime array).
+    /// An array or vector element of `size` registers, of `len` elements.
     Elem { size: u64, len: u64 },
+    /// Into a value the reference holds as a scalar.
+    Scalar,
 }
 
 #[derive(Clone, Copy)]
@@ -349,6 +355,16 @@ pub(crate) enum Op {
     Panic {
         msg: u32,
     },
+    /// Stops as the reference does on an operand of the wrong shape:
+    /// "scalar expected" (`composite` false) or "composite expected", with
+    /// the operand at `r` printed as `kind` says (0 a scalar, 1 a pointer
+    /// to `ty`, 2 `ty` scalars).
+    Refuse {
+        composite: bool,
+        kind: u8,
+        r: u32,
+        ty: u32,
+    },
 }
 
 /// How the entry point finds a global variable: its pointer register and
@@ -400,7 +416,7 @@ impl Module {
     /// Registers a value of type `ty` takes.
     pub(crate) fn flat(&self, ty: u32) -> u32 {
         match self.types.get(&ty) {
-            Some(Ty::Bool | Ty::Int(_) | Ty::Float(_)) => 1,
+            Some(Ty::Bool | Ty::Int(_) | Ty::Float(_) | Ty::Other | Ty::RtArray(_)) => 1,
             Some(Ty::Vec(e, n)) => self.flat(*e) * n,
             Some(Ty::Array(e, n)) => self.flat(*e) * *n as u32,
             Some(Ty::Struct(ms)) => ms.iter().map(|&t| self.flat(t)).sum(),
@@ -419,7 +435,9 @@ impl Module {
         let start = out.len();
         match (v, self.types.get(&ty)) {
             (V::S(x), Some(Ty::Ptr(_))) => out.extend([NOT_PTR, *x]),
-            (V::S(x), Some(Ty::Bool | Ty::Int(_) | Ty::Float(_))) => out.push(*x),
+            (V::S(x), Some(Ty::Bool | Ty::Int(_) | Ty::Float(_) | Ty::Other | Ty::RtArray(_))) => {
+                out.push(*x)
+            }
             (V::P(p), Some(Ty::Ptr(_))) => out.extend(enc_ptr(p)),
             (V::C(parts), Some(Ty::Vec(e, _) | Ty::Array(e, _))) => {
                 for p in parts.iter() {
@@ -446,6 +464,45 @@ pub(crate) fn enc_ptr(p: &Ptr) -> [u64; 2] {
 }
 
 const NONE: u32 = u32::MAX;
+
+/// Why [`Module::width`] of `ty` fails, as it says.
+fn width_err(m: &Module, ty: u32) -> String {
+    match m.types.get(&ty) {
+        None => format!("type %{ty}"),
+        Some(Ty::Vec(e, _)) => width_err(m, *e),
+        Some(t) => format!("width of {t:?}"),
+    }
+}
+
+/// [`Module::size`], or why it has none.
+fn size(m: &Module, ty: u32) -> Result<u64, String> {
+    match m.types.get(&ty) {
+        Some(Ty::Int(w) | Ty::Float(w)) => Ok(u64::from(w / 8)),
+        Some(Ty::Vec(e, n)) => Ok(size(m, *e)? * u64::from(*n)),
+        Some(Ty::Array(e, n)) => Ok(stride(m, ty, *e)? * n),
+        Some(Ty::Struct(ms)) => {
+            let mut end = 0;
+            for (k, &t) in ms.iter().enumerate() {
+                let off = m
+                    .member_off
+                    .get(&(ty, k as u32))
+                    .ok_or_else(|| format!("no offset of member {k} of %{ty}"))?;
+                end = end.max(off + size(m, t)?);
+            }
+            Ok(end)
+        }
+        Some(t) => Err(format!("size of {t:?}")),
+        None => Err(format!("type %{ty}")),
+    }
+}
+
+/// [`Module::stride`], or why it has none.
+fn stride(m: &Module, arr: u32, elem: u32) -> Result<u64, String> {
+    match m.deco.get(&(arr, 6)) {
+        Some(a) => Ok(u64::from(a[0])),
+        None => size(m, elem),
+    }
+}
 
 struct Cx<'a> {
     m: &'a Module,
@@ -492,10 +549,12 @@ impl Cx<'_> {
     }
 
     /// A scalar operand: not a composite, not a pointer.
+    /// An operand the reference reads as a scalar: a number, an opaque
+    /// value (its zero) or an id without a value (undefined).
     fn is_scalar(&self, id: u32) -> bool {
-        matches!(
+        !matches!(
             self.m.types.get(&self.ty_of(id)),
-            Some(Ty::Bool | Ty::Int(_) | Ty::Float(_))
+            Some(Ty::Vec(..) | Ty::Array(..) | Ty::Struct(_) | Ty::Ptr(_))
         )
     }
 
@@ -538,13 +597,13 @@ impl Cx<'_> {
         match m.types.get(&ty) {
             Some(Ty::Int(w) | Ty::Float(w)) => out.push((at, u64::from(w / 8))),
             Some(Ty::Vec(e, n)) => {
-                let sz = m.size(*e);
+                let sz = size(m, *e)?;
                 for k in 0..u64::from(*n) {
                     self.load_layout(*e, at + k * sz, out)?;
                 }
             }
             Some(Ty::Array(e, n)) => {
-                let st = m.stride(ty, *e);
+                let st = stride(m, ty, *e)?;
                 for k in 0..*n {
                     self.load_layout(*e, at + k * st, out)?;
                 }
@@ -569,7 +628,7 @@ impl Cx<'_> {
         match m.types.get(&ty) {
             Some(Ty::Int(w) | Ty::Float(w)) => out.push((at, u64::from(w / 8))),
             Some(Ty::Vec(e, n)) => {
-                let sz = m.size(*e);
+                let sz = size(m, *e)?;
                 for k in 0..u64::from(*n) {
                     self.store_layout(*e, at + k * sz, out)?;
                 }
@@ -578,6 +637,10 @@ impl Cx<'_> {
             None => return Err(format!("type %{ty}")),
         }
         Ok(())
+    }
+
+    fn step(&mut self, r: Result<u64, String>) -> Result<MemStep, u32> {
+        r.map(MemStep::Mul).map_err(|e| self.msg(e))
     }
 
     fn layout(&mut self, r: Result<Vec<(u64, u64)>, String>) -> u32 {
@@ -668,6 +731,14 @@ impl Cx<'_> {
         let mut seg: Option<usize> = None;
         let mut seg_n = 0u32;
         for ins in &f.code {
+            if ins.op == 248
+                && let Some(at) = seg.take()
+            {
+                match &mut self.p.code[at] {
+                    Op::Label { n, .. } | Op::Count { n } => *n = seg_n,
+                    _ => unreachable!(),
+                }
+            }
             if seg.is_none() {
                 if ins.op == 248 {
                     self.labels.insert(ins.args[0], self.p.code.len() as u32);
@@ -680,8 +751,6 @@ impl Cx<'_> {
                 }
                 seg = Some(self.p.code.len() - 1);
                 seg_n = 0;
-            } else if ins.op == 248 {
-                panic!("label %{} inside a block", ins.args[0]);
             }
             seg_n += 1;
             self.inst(ins);
@@ -771,7 +840,7 @@ impl Cx<'_> {
             }
             250 => {
                 if !self.is_scalar(a[0]) {
-                    self.panic("scalar expected".into());
+                    self.refuse_one(false, a[0]);
                     return;
                 }
                 self.fixups.push((self.p.code.len(), 0));
@@ -783,7 +852,7 @@ impl Cx<'_> {
             }
             251 => {
                 if !self.is_scalar(a[0]) {
-                    self.panic("scalar expected".into());
+                    self.refuse_one(false, a[0]);
                     return;
                 }
                 let mut cases = Vec::new();
@@ -871,18 +940,23 @@ impl Cx<'_> {
                 let r = self.store_layout(pointee, 0, &mut l).map(|()| l);
                 let store = self.layout(r);
                 let w = self.width(ins.ty).unwrap_or(64);
-                let ops: Vec<u32> = match ins.op {
-                    234 => vec![u32::from(ins.op), load, store, w, self.r(a[3])],
-                    230 => vec![
-                        u32::from(ins.op),
-                        load,
-                        store,
-                        w,
-                        self.r(a[5]),
-                        self.r(a[6]),
-                    ],
-                    _ => vec![u32::from(ins.op), load, store, w, self.r(a[3])],
+                let (x, y) = match ins.op {
+                    230 => (5, 6),
+                    _ => (3, usize::MAX),
                 };
+                let reg = |cx: &mut Self, k: usize| match a.get(k) {
+                    Some(&i) => (cx.r(i), u32::MAX),
+                    None if k == usize::MAX => (0, u32::MAX),
+                    None => {
+                        let msg = format!(
+                            "index out of bounds: the len is {} but the index is {k}",
+                            a.len()
+                        );
+                        (0, cx.msg(msg))
+                    }
+                };
+                let ((xr, xm), (yr, ym)) = (reg(self, x), reg(self, y));
+                let ops = vec![u32::from(ins.op), load, store, w, xr, yr, ym.min(xm)];
                 if self.flat_id(ins.id) != 1 {
                     self.panic("atomic of a composite".into());
                     return;
@@ -909,8 +983,8 @@ impl Cx<'_> {
             }
             224 => self.p.code.push(Op::Barrier),
             345 => {
-                if !self.is_scalar(a[1]) || !self.is_scalar(a[2]) {
-                    self.panic("scalar expected".into());
+                if let Some(&i) = a[1..3].iter().find(|&&i| !self.is_scalar(i)) {
+                    self.refuse_one(false, i);
                     return;
                 }
                 self.p.code.push(Op::Shuffle {
@@ -948,6 +1022,10 @@ impl Cx<'_> {
                 None => self.panic("insert into scalar".into()),
             },
             80 => {
+                if !m.types.contains_key(&ins.ty) {
+                    self.panic(format!("type %{}", ins.ty));
+                    return;
+                }
                 let mut off = 0;
                 for &i in a {
                     let n = self.flat_id(i);
@@ -961,7 +1039,12 @@ impl Cx<'_> {
             }
             79 => {
                 let (Some(nx), Some(ny)) = (self.comps(a[0]), self.comps(a[1])) else {
-                    self.panic("composite expected".into());
+                    let i = if self.comps(a[0]).is_none() {
+                        a[0]
+                    } else {
+                        a[1]
+                    };
+                    self.refuse_one(true, i);
                     return;
                 };
                 if a[2..].iter().any(|&k| k >= nx + ny) {
@@ -993,7 +1076,7 @@ impl Cx<'_> {
             124 => self.bitcast(ins),
             120 => {
                 if !self.is_scalar(a[0]) {
-                    self.panic("scalar expected".into());
+                    self.refuse_one(false, a[0]);
                     return;
                 }
                 self.p.code.push(Op::PtrOfU { d, s: self.r(a[0]) });
@@ -1008,10 +1091,15 @@ impl Cx<'_> {
                         at,
                     });
                 } else if let Some(k) = self.comps(a[0]) {
-                    if self.comps(a[1]).is_none_or(|x| x < k)
-                        || self.comps(a[2]).is_none_or(|x| x < k)
+                    if let Some(&i) = a[1..3]
+                        .iter()
+                        .find(|&&i| self.comps(i).is_none_or(|x| x < k))
                     {
-                        self.panic("composite expected".into());
+                        if self.comps(i).is_some() {
+                            self.panic("index out of bounds".into());
+                        } else {
+                            self.refuse_one(true, i);
+                        }
                         return;
                     }
                     let at = self.side(&[self.r(a[0]), self.r(a[1]), self.r(a[2])]);
@@ -1029,8 +1117,8 @@ impl Cx<'_> {
                     self.panic("struct expected".into());
                     return;
                 };
-                if !self.is_scalar(a[0]) || !self.is_scalar(a[1]) {
-                    self.panic("scalar expected".into());
+                if let Some(&i) = a[..2].iter().find(|&&i| !self.is_scalar(i)) {
+                    self.refuse_one(false, i);
                     return;
                 }
                 self.p.code.push(Op::Wide {
@@ -1080,7 +1168,7 @@ impl Cx<'_> {
         let mut links = Vec::new();
         for &i in &a[1..] {
             if !self.is_scalar(i) {
-                self.panic("scalar expected".into());
+                self.refuse_one(false, i);
                 return;
             }
             let c = self.const_of(i);
@@ -1109,23 +1197,16 @@ impl Cx<'_> {
                         size: u64::from(m.flat(e)),
                         len: n,
                     }),
-                    Ok(MemStep::Mul(m.stride(ty, e))),
+                    self.step(stride(m, ty, e)),
                     e,
                 ),
-                Some(Ty::RtArray(e)) => (
-                    Ok(VarStep::Elem {
-                        size: u64::from(m.flat(e)),
-                        len: u64::MAX,
-                    }),
-                    Ok(MemStep::Mul(m.stride(ty, e))),
-                    e,
-                ),
+                Some(Ty::RtArray(e)) => (Ok(VarStep::Scalar), self.step(stride(m, ty, e)), e),
                 Some(Ty::Vec(e, n)) => (
                     Ok(VarStep::Elem {
                         size: u64::from(m.flat(e)),
                         len: u64::from(n),
                     }),
-                    Ok(MemStep::Mul(m.size(e))),
+                    self.step(size(m, e)),
                     e,
                 ),
                 t => {
@@ -1133,7 +1214,7 @@ impl Cx<'_> {
                         Some(t) => self.msg(format!("access chain into {t:?}")),
                         None => self.msg(format!("type %{ty}")),
                     };
-                    (Err(msg), Err(msg), ty)
+                    (Ok(VarStep::Scalar), Err(msg), ty)
                 }
             };
             links.push(Link { idx, var, mem });
@@ -1175,22 +1256,59 @@ impl Cx<'_> {
         };
         match dst {
             Some(Ty::Ptr(_)) if n >= 2 => self.p.code.push(Op::PtrOfVec { d, s }),
-            Some(Ty::Vec(..)) => {
-                self.panic("bitcast between vectors (the reference gives a scalar)".into());
-            }
+            Some(Ty::Vec(..)) => match self.width(self.scalar_of(src_ty)) {
+                Some(_) => {
+                    self.panic("bitcast between vectors (the reference gives a scalar)".into());
+                }
+                None => self.panic(width_err(m, self.scalar_of(src_ty))),
+            },
             Some(_) => match self.width(self.scalar_of(src_ty)) {
                 Some(w) => self.p.code.push(Op::Join { d, s, n, w }),
-                None => self.panic("width of a bitcast source".into()),
+                None => self.panic(width_err(m, self.scalar_of(src_ty))),
             },
             None => self.panic(format!("type %{}", ins.ty)),
         }
+    }
+
+    /// The [`Op::Refuse`] of elementwise operands `ids` of the wrong
+    /// shape.
+    fn refuse(&mut self, ids: &[u32]) {
+        let composite = ids.first().is_some_and(|&f| self.comps(f).is_some());
+        let bad = ids.iter().copied().find(|&i| {
+            if composite {
+                self.comps(i).is_none()
+            } else {
+                !self.is_scalar(i)
+            }
+        });
+        let Some(i) = bad else {
+            self.panic("index out of bounds".into());
+            return;
+        };
+        self.refuse_one(composite, i);
+    }
+
+    /// The [`Op::Refuse`] of operand `i`.
+    fn refuse_one(&mut self, composite: bool, i: u32) {
+        let r = self.r(i);
+        let (kind, ty) = match self.m.types.get(&self.ty_of(i)) {
+            Some(Ty::Ptr(t)) => (1, *t),
+            Some(Ty::Vec(..) | Ty::Array(..) | Ty::Struct(_)) => (2, self.flat_id(i)),
+            _ => (0, 0),
+        };
+        self.p.code.push(Op::Refuse {
+            composite,
+            kind,
+            r,
+            ty,
+        });
     }
 
     fn ext(&mut self, ins: &crate::Inst) {
         let a = &ins.args;
         let ids = &a[2..];
         let Some(shape) = self.elementwise(ids) else {
-            self.panic("scalar expected".into());
+            self.refuse(ids);
             return;
         };
         let Some(w) = self.width(self.scalar_of(ins.ty)) else {
@@ -1224,7 +1342,7 @@ impl Cx<'_> {
         let a = &ins.args;
         let op = ins.op;
         let Some(shape) = self.elementwise(a) else {
-            self.panic("scalar expected".into());
+            self.refuse(a);
             return;
         };
         let Some(w) = self.width(self.scalar_of(ins.ty)) else {
