@@ -21,8 +21,8 @@ use relift_objfile::{Machine, elf};
 use relift_progress::{Line, Paint, duration, noun};
 
 use crate::cross;
-use crate::gba::{Layers, compile_layers};
 use crate::import::BoxError;
+use crate::layers::{Layers, compile_layers};
 use crate::settings::Settings;
 use crate::ui::Ui;
 

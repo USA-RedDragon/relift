@@ -17,8 +17,8 @@ use relift_sms_formats::{Cartridge, System, banks};
 
 use crate::cross;
 use crate::gb::Built;
-use crate::gba::{Layers, compile_layers};
 use crate::import::BoxError;
+use crate::layers::{Layers, compile_layers};
 use crate::settings::Settings;
 use crate::ui::Ui;
 
