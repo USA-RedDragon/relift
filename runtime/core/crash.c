@@ -47,9 +47,8 @@ void rl_fn_maps_reset(void)
     g_ix_count = 0;
 }
 
-int rl_fn_maps_register(const rl_fn_map *const *maps, uint32_t count)
+int rl_fn_maps_check(const rl_fn_map *const *maps, uint32_t count)
 {
-    uint64_t fns = g_ix_count;
     for (uint32_t k = 0; k < count; k++) {
         const rl_fn_map *m = maps[k];
         if (m->version != RL_FN_MAP_VERSION)
@@ -57,8 +56,26 @@ int rl_fn_maps_register(const rl_fn_map *const *maps, uint32_t count)
         for (uint32_t i = 1; i < m->count; i++)
             if (m->fns[i].guest_addr < m->fns[i - 1].guest_addr + m->fns[i - 1].guest_size)
                 return -1;
-        fns += m->count;
     }
+    return 0;
+}
+
+/** @brief Whether the entries are in host address order (a unit's functions usually are, as its compiler laid them out). */
+static bool ix_sorted(const host_ix *a, uint32_t n)
+{
+    for (uint32_t i = 1; i < n; i++)
+        if (a[i].host < a[i - 1].host)
+            return false;
+    return true;
+}
+
+int rl_fn_maps_register(const rl_fn_map *const *maps, uint32_t count)
+{
+    uint64_t fns = g_ix_count;
+    if (rl_fn_maps_check(maps, count) != 0)
+        return -1;
+    for (uint32_t k = 0; k < count; k++)
+        fns += maps[k]->count;
     const rl_fn_map **nm = malloc(((size_t)g_map_count + count + 1) * sizeof *nm);
     host_ix *ni = malloc((size_t)(fns + 1) * sizeof *ni);
     if (!nm || !ni) {
@@ -76,7 +93,29 @@ int rl_fn_maps_register(const rl_fn_map *const *maps, uint32_t count)
         for (uint32_t i = 0; i < maps[k]->count; i++)
             ni[n++] = (host_ix){ (uintptr_t)maps[k]->fns[i].fn, maps[k], &maps[k]->fns[i] };
     }
-    qsort(ni, n, sizeof *ni, ix_cmp);
+    /* The old index is sorted; sort only what is new (often already in
+     * order) and merge the two runs. */
+    host_ix *fresh = ni + g_ix_count;
+    uint32_t added = n - g_ix_count;
+    if (!ix_sorted(fresh, added))
+        qsort(fresh, added, sizeof *fresh, ix_cmp);
+    if (g_ix_count && added && fresh[0].host < ni[g_ix_count - 1].host) {
+        host_ix *tmp = malloc((size_t)added * sizeof *tmp);
+        if (!tmp) {
+            free(nm);
+            free(ni);
+            return -1;
+        }
+        memcpy(tmp, fresh, (size_t)added * sizeof *tmp);
+        uint32_t i = g_ix_count, j = added, o = n;
+        while (j > 0) {
+            if (i > 0 && ni[i - 1].host > tmp[j - 1].host)
+                ni[--o] = ni[--i];
+            else
+                ni[--o] = tmp[--j];
+        }
+        free(tmp);
+    }
     free(g_maps);
     free(g_ix);
     g_maps = nm;

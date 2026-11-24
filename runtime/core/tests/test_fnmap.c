@@ -130,3 +130,36 @@ TEST(fnmap_pieces_resolve_to_their_function_in_any_host_order)
     CHECK(h.fn == &info[2]);
     CHECK_EQ(h.fn->fn_addr, 0x2000);
 }
+
+static uint64_t qa(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 10; }
+static uint64_t qb(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 11; }
+static uint64_t qc(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 12; }
+static uint64_t qd(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 13; }
+
+TEST(fnmap_registrations_merge_into_one_host_order_and_a_bad_map_changes_nothing)
+{
+    rl_fn_maps_reset();
+    rl_fn fns[4] = { qa, qb, qc, qd };
+    rl_fn_info info[4];
+    rl_fn_map maps[4];
+    for (int i = 0; i < 4; i++) {
+        info[i] = (rl_fn_info){ 0x4000u + 0x100u * (unsigned)i, 0x4000u + 0x100u * (unsigned)i, 0x10, 0, fns[i], "q", NULL };
+        maps[i] = (rl_fn_map){ RL_FN_MAP_VERSION, 1, &info[i], "q", "q-0", 0x4000u + 0x100u * (unsigned)i, NULL, NULL };
+    }
+    const rl_fn_map *first[] = { &maps[3], &maps[0] };
+    const rl_fn_map *second[] = { &maps[2], &maps[1] };
+    CHECK_EQ(rl_fn_maps_register(first, 2), 0);
+    CHECK_EQ(rl_fn_maps_register(second, 2), 0);
+    rl_fn_hit h;
+    for (int i = 0; i < 4; i++) {
+        CHECK(rl_fn_find_host((uintptr_t)fns[i] + 1, &h));
+        CHECK(h.fn == &info[i]);
+    }
+    rl_fn_info bad[2] = { { 0x9000, 0x9000, 0x20, 0, qa, "b", NULL }, { 0x9010, 0x9010, 0x10, 0, qb, "b", NULL } };
+    rl_fn_map bm = { RL_FN_MAP_VERSION, 2, bad, "b", "b-0", 0x9000, NULL, NULL };
+    const rl_fn_map *bl[] = { &maps[0], &bm };
+    CHECK_EQ(rl_fn_maps_check(bl, 2), -1);
+    CHECK_EQ(rl_fn_maps_register(bl, 2), -1);
+    CHECK(!rl_fn_find_guest(0x9000, &h));
+    CHECK(rl_fn_find_guest(0x4300, &h));
+}

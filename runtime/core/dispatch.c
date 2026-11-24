@@ -283,11 +283,29 @@ int rl_units_register(const rl_unit *const *units, uint32_t count)
                 hi = end;
         }
     }
+    /* One registration for every map of the batch: the host index is
+     * merged once, not once per unit (a program with hundreds of lifted
+     * libraries re-sorted the whole index hundreds of times at start). */
+    uint32_t nmaps = 0;
     for (uint32_t k = 0; k < count; k++)
-        if (units[k]->map_count && rl_fn_maps_register(units[k]->maps, units[k]->map_count) != 0) {
-            rl_log(RL_LOG_ERROR, "dispatch", "unit %s: a function map is malformed", units[k]->name ? units[k]->name : "?");
+        nmaps += units[k]->map_count;
+    if (nmaps) {
+        const rl_fn_map **all = malloc(nmaps * sizeof *all);
+        if (!all)
+            return -1;
+        uint32_t at = 0;
+        for (uint32_t k = 0; k < count; k++)
+            for (uint32_t i = 0; i < units[k]->map_count; i++)
+                all[at++] = units[k]->maps[i];
+        int rc = rl_fn_maps_register(all, nmaps);
+        free(all);
+        if (rc != 0) {
+            for (uint32_t k = 0; k < count; k++)
+                if (units[k]->map_count && rl_fn_maps_check(units[k]->maps, units[k]->map_count) != 0)
+                    rl_log(RL_LOG_ERROR, "dispatch", "unit %s: a function map is malformed", units[k]->name ? units[k]->name : "?");
             return -1;
         }
+    }
     if (grow(lo, hi) != 0)
         return -1;
     for (uint32_t k = 0; k < count; k++) {

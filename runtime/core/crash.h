@@ -27,6 +27,8 @@
  * or -1 for a map with another version, an unsorted map, or no memory.
  */
 RL_RUNTIME_API int rl_fn_maps_register(const rl_fn_map *const *maps, uint32_t count);
+/** @brief 0 when every map has the current version and its functions in guest address order without overlap, else -1 (what rl_fn_maps_register refuses). */
+RL_RUNTIME_API int rl_fn_maps_check(const rl_fn_map *const *maps, uint32_t count);
 /** @brief Forgets every registered map (tests). */
 RL_RUNTIME_API void rl_fn_maps_reset(void);
 
