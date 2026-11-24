@@ -59,6 +59,8 @@ fn env() -> Env {
         local_index: 0,
         subgroup_size: 32,
         fold_identity: false,
+        images: HashMap::new(),
+        log_stores: false,
     }
 }
 

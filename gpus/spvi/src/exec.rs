@@ -7,9 +7,11 @@ use std::collections::BTreeMap;
 
 use crate::arith::Fx;
 use crate::code::{
-    DESC, Global, Index, MEM, MemStep, NOT_PTR, Op, Program, VAR, VAR_OOB, VAR_SCALAR, VarStep,
+    DESC, Global, IMG, IMG_ARRAY, Index, MEM, MemStep, NOT_PTR, Op, Program, VAR, VAR_OOB,
+    VAR_SCALAR, VarStep,
 };
-use crate::{Env, GARBAGE, Memory, mask, sext};
+use crate::group::{Store, WORKGROUP_BASE};
+use crate::{Env, GARBAGE, Image, Memory, mask, sext, texel_decode, texel_encode};
 
 /// Memory as an invocation sees it.
 pub(crate) trait Mem {
@@ -17,6 +19,8 @@ pub(crate) trait Mem {
     fn read(&mut self, addr: u64, n: u64) -> u64;
     /// Writes the low `n` bytes of `v` at `addr`.
     fn write(&mut self, addr: u64, n: u64, v: u64);
+    /// The end of the memory region that holds `addr` (for OpArrayLength).
+    fn end(&mut self, addr: u64) -> Option<u64>;
     /// Runs an atomic read, modify and write with no other one between.
     fn atomic<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
         f(self)
@@ -95,6 +99,14 @@ pub(crate) fn le(b: &[u8]) -> u64 {
 }
 
 impl Mem for Plain<'_> {
+    fn end(&mut self, addr: u64) -> Option<u64> {
+        self.mem
+            .regions
+            .iter()
+            .find(|(b, r)| addr >= *b && addr < *b + r.len() as u64)
+            .map(|(b, r)| *b + r.len() as u64)
+    }
+
     fn read(&mut self, addr: u64, n: u64) -> u64 {
         self.get(addr, n)
             .unwrap_or_else(|| panic!("access to unmapped memory {addr:#x}+{n}"))
@@ -111,8 +123,8 @@ impl Mem for Plain<'_> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Event {
     Done,
-    /// Waits at a barrier in this block.
-    Barrier(u32),
+    /// Waits at a barrier in this block; of the subgroup only when true.
+    Barrier(u32, bool),
     /// Waits at a shuffle in `block`: gives `value`, reads lane `lane`.
     Shuffle {
         block: u32,
@@ -160,6 +172,9 @@ pub(crate) struct Inv {
     /// The code position of the instruction the invocation last stopped
     /// at (before it, or at a barrier or shuffle).
     stop_pc: u32,
+    /// Stores are logged ([`Env::log_stores`]) to `stores`.
+    logging: bool,
+    pub stores: Vec<Store>,
 }
 
 impl Inv {
@@ -181,6 +196,8 @@ impl Inv {
             max_steps: 50_000_000,
             at: (0, 0),
             lockstep: false,
+            logging: env.log_stores,
+            stores: Vec::new(),
             pass: false,
             stop_pc: 0,
         };
@@ -189,6 +206,20 @@ impl Inv {
                 Global::Desc { r, set, binding } => (
                     *r,
                     [DESC | u64::from(*set) << 8 | u64::from(*binding) << 32, 0],
+                ),
+                Global::Img {
+                    r,
+                    set,
+                    binding,
+                    array,
+                } => (
+                    *r,
+                    [
+                        if *array { IMG_ARRAY } else { IMG }
+                            | u64::from(*set) << 8
+                            | u64::from(*binding) << 32,
+                        0,
+                    ],
                 ),
                 Global::Block { r, set, binding } => {
                     let b = (*set, *binding);
@@ -274,6 +305,7 @@ impl Inv {
     fn stops(&self, op: Op, pc: usize) -> bool {
         match op {
             Op::Load { p, .. } | Op::Store { p, .. } => self.regs[p as usize] != VAR,
+            Op::Image { kind, .. } => kind < 2,
             Op::Atomic { .. }
             | Op::Call { .. }
             | Op::Return
@@ -373,7 +405,111 @@ impl Inv {
                 }
                 Err(msg) => panic!("{}", p.msgs[*msg as usize]),
             },
+            t if t & 0xff == IMG => {
+                let n = (n as usize).min(2);
+                self.regs[d..d + n].copy_from_slice(&[tag, v][..n]);
+            }
             _ => Inv::bad_ptr("load from", tag, v),
+        }
+    }
+
+    /// The image the two registers at `r` name.
+    fn image_at<'e>(&self, env: &'e Env, r: usize) -> &'e Image {
+        let (tag, k) = (self.regs[r], self.regs[r + 1]);
+        if tag & 0xff != IMG {
+            Inv::bad_ptr("image", tag, k);
+        }
+        let (set, binding) = (((tag >> 8) & 0xff_ffff) as u32, (tag >> 32) as u32);
+        env.images
+            .get(&(set, binding, k))
+            .unwrap_or_else(|| panic!("no image at ({set}, {binding})[{k}]"))
+    }
+
+    /// An image instruction ([`Op::Image`]).
+    fn image<M: Mem>(
+        &mut self,
+        p: &Program,
+        env: &Env,
+        mem: &mut M,
+        kind: u8,
+        d: usize,
+        at: usize,
+    ) {
+        let s = &p.side[at..at + 6];
+        let img = self.image_at(env, s[0] as usize);
+        let none = u32::MAX;
+        let level = if s[3] == none {
+            0
+        } else {
+            self.regs[s[3] as usize] as u32
+        };
+        let n = s[5] as usize;
+        let texel = |regs: &[u64]| {
+            if s[1] == none {
+                return None;
+            }
+            let c = |k: u32| {
+                if k < s[2] {
+                    sext(regs[(s[1] + k) as usize], 32)
+                } else {
+                    0
+                }
+            };
+            img.texel(c(0), c(1), c(2), level)
+        };
+        match kind {
+            0 => {
+                let bits = match texel(&self.regs) {
+                    Some(addr) => {
+                        let nb = Image::texel_bytes(img.format)
+                            .unwrap_or_else(|| panic!("texel format"));
+                        let mut raw = 0u128;
+                        for k in (0..nb).step_by(8) {
+                            raw |= u128::from(mem.read(addr + k, (nb - k).min(8))) << (8 * k);
+                        }
+                        texel_decode(img.format, raw)
+                    }
+                    None => [0; 4],
+                };
+                self.regs[d..d + n].copy_from_slice(&bits[..n]);
+            }
+            1 => {
+                if let Some(addr) = texel(&self.regs) {
+                    let mut c = [0u64; 4];
+                    c[..n.min(4)]
+                        .copy_from_slice(&self.regs[s[4] as usize..s[4] as usize + n.min(4)]);
+                    let raw = texel_encode(img.format, c);
+                    let nb =
+                        Image::texel_bytes(img.format).unwrap_or_else(|| panic!("texel format"));
+                    for k in (0..nb).step_by(8) {
+                        let w = (nb - k).min(8);
+                        mem.write(addr + k, w, (raw >> (8 * k)) as u64);
+                        self.stored(env, addr + k, w);
+                    }
+                }
+            }
+            2 => {
+                let (w, h, dd) = img.dims(level.min(img.levels.saturating_sub(1)));
+                let all = [w, h, dd];
+                for k in 0..n {
+                    self.regs[d + k] = u64::from(all[k.min(2)]);
+                }
+            }
+            _ => self.regs[d] = u64::from(img.levels),
+        }
+    }
+
+    /// Logs a store when [`Env::log_stores`] asks.
+    #[inline]
+    fn stored(&mut self, env: &Env, addr: u64, bytes: u64) {
+        if env.log_stores && addr < WORKGROUP_BASE {
+            self.stores.push(Store {
+                addr,
+                bytes,
+                invocation: 0,
+                func: self.at.0,
+                block: self.at.1,
+            });
         }
     }
 
@@ -389,6 +525,15 @@ impl Inv {
                 Ok(l) => {
                     for (k, &(o, b)) in l.iter().enumerate() {
                         mem.write(v + o, b, self.regs[s + k]);
+                        if self.logging && v + o < WORKGROUP_BASE {
+                            self.stores.push(Store {
+                                addr: v + o,
+                                bytes: b,
+                                invocation: 0,
+                                func: self.at.0,
+                                block: self.at.1,
+                            });
+                        }
                     }
                 }
                 Err(msg) => panic!("{}", p.msgs[*msg as usize]),
@@ -440,6 +585,7 @@ impl Inv {
             VAR_SCALAR => [VAR_SCALAR, 0],
             t if t & 0xff == VAR_OOB => [t, v],
             MEM => [MEM, mem_walk(v, links)],
+            t if t & 0xff == IMG_ARRAY => [IMG | (t & !0xff), idx(&links[0].idx)],
             t if t & 0xff == DESC => {
                 let (set, binding) = (((t >> 8) & 0xff_ffff) as u32, (t >> 32) as u32);
                 let i0 = idx(&links[0].idx);
@@ -623,12 +769,25 @@ impl Inv {
                     self.cur = 0;
                     pc = f.start as usize;
                 }
-                Op::Barrier => {
+                Op::Barrier { exec } => {
                     if group {
                         self.pc = pc as u32;
                         self.stop_pc = pc as u32 - 1;
-                        return Event::Barrier(self.cur);
+                        return Event::Barrier(self.cur, self.regs[exec as usize] == 3);
                     }
+                }
+                Op::Image { kind, d, at } => self.image(p, env, mem, kind, d as usize, at as usize),
+                Op::ArrayLen { d, p: ptr, at } => {
+                    let (tag, v) = (self.regs[ptr as usize], self.regs[ptr as usize + 1]);
+                    if tag != MEM {
+                        Inv::bad_ptr("array length of", tag, v);
+                    }
+                    let s = &p.side[at as usize..at as usize + 3];
+                    let off = u64::from(s[0]) | u64::from(s[1]) << 32;
+                    let end = mem
+                        .end(v)
+                        .unwrap_or_else(|| panic!("array length at unmapped {v:#x}"));
+                    self.regs[d as usize] = end.saturating_sub(v + off) / u64::from(s[2]).max(1);
                 }
                 Op::Shuffle { d, v, lane } => {
                     assert!(group, "shuffle outside a workgroup run");

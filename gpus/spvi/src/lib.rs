@@ -18,6 +18,13 @@
 //! [`group::run_dispatch`] the workgroups of a dispatch on several threads.
 //! [`reference`] is the tree-walking interpreter the compiled one is
 //! checked against.
+//!
+//! Images are arrays of [`Image`]s at (set, binding, element)
+//! ([`Env::images`]) whose texels lie in the memory: fetches, reads, writes
+//! and size and level queries of the formats [`Image::texel_bytes`] lists.
+//! Texels outside the image read as zero and writes to them are dropped,
+//! as robust image access gives. Filtered sampling panics. The reference
+//! interpreter runs no image instructions.
 
 mod arith;
 mod code;
@@ -59,7 +66,137 @@ enum Ty {
     Struct(Vec<u32>),
     /// The pointee type.
     Ptr(u32),
+    /// A storage or sampled image, or a sampled image (image and sampler):
+    /// two registers, as a pointer ([`code`]'s image tag and the element).
+    Image,
     Other,
+}
+
+/// An image whose texels lie in the memory: each level in turn from
+/// `addr`, in a level each layer (or depth slice) in turn, rows of texels
+/// without padding.
+#[derive(Clone, Debug)]
+pub struct Image {
+    pub addr: u64,
+    pub width: u32,
+    pub height: u32,
+    /// Depth slices of a 3D image, else 1.
+    pub depth: u32,
+    pub layers: u32,
+    pub levels: u32,
+    /// The VkFormat number: 9 R8 unorm, 16 R8G8 unorm, 37 R8G8B8A8 unorm,
+    /// 44 B8G8R8A8 unorm, 64 A2B10G10R10 unorm, 76 R16 float, 83 R16G16
+    /// float, 97 R16G16B16A16 float, 98 R32 uint, 99 R32 sint, 100 R32
+    /// float, 103 R32G32 float, 107 R32G32B32A32 uint, 109 R32G32B32A32
+    /// float.
+    pub format: u32,
+}
+
+impl Image {
+    /// Bytes per texel, or `None` for a format the interpreter lacks.
+    pub fn texel_bytes(format: u32) -> Option<u64> {
+        Some(match format {
+            9 => 1,
+            16 | 76 => 2,
+            37 | 44 | 64 | 83 | 98 | 99 | 100 => 4,
+            97 | 103 => 8,
+            107 | 109 => 16,
+            _ => return None,
+        })
+    }
+
+    fn dims(&self, level: u32) -> (u32, u32, u32) {
+        let f = |v: u32| (v >> level).max(1);
+        let d = if self.depth > 1 {
+            f(self.depth)
+        } else {
+            self.layers.max(1)
+        };
+        (f(self.width), f(self.height), d)
+    }
+
+    /// The address of texel (x, y, z) of `level`, z a layer or depth slice;
+    /// `None` outside the image.
+    fn texel(&self, x: i64, y: i64, z: i64, level: u32) -> Option<u64> {
+        let bpp = Self::texel_bytes(self.format)?;
+        if level >= self.levels {
+            return None;
+        }
+        let (w, h, d) = self.dims(level);
+        if x < 0 || y < 0 || z < 0 || x >= i64::from(w) || y >= i64::from(h) || z >= i64::from(d) {
+            return None;
+        }
+        let mut at = self.addr;
+        for l in 0..level {
+            let (lw, lh, ld) = self.dims(l);
+            at += u64::from(lw) * u64::from(lh) * u64::from(ld) * bpp;
+        }
+        Some(at + ((z as u64 * u64::from(h) + y as u64) * u64::from(w) + x as u64) * bpp)
+    }
+}
+
+/// The four channels of a texel's bits: float formats give f32 bits,
+/// unorm formats their value as f32 bits, integer formats the integers.
+fn texel_decode(format: u32, raw: u128) -> [u64; 4] {
+    let f = |x: f32| u64::from(x.to_bits());
+    let un = |v: u128, bits: u32| f((v & ((1 << bits) - 1)) as f32 / ((1u32 << bits) - 1) as f32);
+    let one = f(1.0);
+    let h = |v: u128| f(f16_to_f64(v as u16) as f32);
+    match format {
+        9 => [un(raw, 8), 0, 0, one],
+        16 => [un(raw, 8), un(raw >> 8, 8), 0, one],
+        37 => [
+            un(raw, 8),
+            un(raw >> 8, 8),
+            un(raw >> 16, 8),
+            un(raw >> 24, 8),
+        ],
+        44 => [
+            un(raw >> 16, 8),
+            un(raw >> 8, 8),
+            un(raw, 8),
+            un(raw >> 24, 8),
+        ],
+        64 => [
+            un(raw, 10),
+            un(raw >> 10, 10),
+            un(raw >> 20, 10),
+            un(raw >> 30, 2),
+        ],
+        76 => [h(raw), 0, 0, one],
+        83 => [h(raw), h(raw >> 16), 0, one],
+        97 => [h(raw), h(raw >> 16), h(raw >> 32), h(raw >> 48)],
+        98..=100 => [raw as u32 as u64, 0, 0, if format == 100 { one } else { 1 }],
+        103 => [raw as u32 as u64, (raw >> 32) as u32 as u64, 0, one],
+        107 | 109 => [0, 1, 2, 3].map(|k| (raw >> (32 * k)) as u32 as u64),
+        _ => panic!("texel format {format}"),
+    }
+}
+
+/// A texel's bits from four channels as [`texel_decode`] gives them;
+/// unorm channels round to nearest after clamping.
+fn texel_encode(format: u32, c: [u64; 4]) -> u128 {
+    let un = |v: u64, bits: u32| -> u128 {
+        let x = f32::from_bits(v as u32);
+        let max = ((1u32 << bits) - 1) as f32;
+        let x = if x.is_nan() { 0.0 } else { x.clamp(0.0, 1.0) };
+        (x * max + 0.5).floor() as u128
+    };
+    let h = |v: u64| u128::from(round_f16(f64::from(f32::from_bits(v as u32)), 0.0));
+    match format {
+        9 => un(c[0], 8),
+        16 => un(c[0], 8) | un(c[1], 8) << 8,
+        37 => un(c[0], 8) | un(c[1], 8) << 8 | un(c[2], 8) << 16 | un(c[3], 8) << 24,
+        44 => un(c[2], 8) | un(c[1], 8) << 8 | un(c[0], 8) << 16 | un(c[3], 8) << 24,
+        64 => un(c[0], 10) | un(c[1], 10) << 10 | un(c[2], 10) << 20 | un(c[3], 2) << 30,
+        76 => h(c[0]),
+        83 => h(c[0]) | h(c[1]) << 16,
+        97 => h(c[0]) | h(c[1]) << 16 | h(c[2]) << 32 | h(c[3]) << 48,
+        98..=100 => u128::from(c[0] as u32),
+        103 => u128::from(c[0] as u32) | u128::from(c[1] as u32) << 32,
+        107 | 109 => (0..4).fold(0, |acc, k| acc | u128::from(c[k] as u32) << (32 * k)),
+        _ => panic!("texel format {format}"),
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -177,6 +314,7 @@ fn has_result(op: u16) -> bool {
             | 63
             | 71
             | 72
+            | 99
             | 224
             | 225
             | 228
@@ -251,6 +389,9 @@ impl Module {
                 }
                 OP_TYPE_POINTER => {
                     m.types.insert(a[0], Ty::Ptr(a[2]));
+                }
+                25 | 27 => {
+                    m.types.insert(a[0], Ty::Image);
                 }
                 op if (19..=39).contains(&op) => {
                     m.types.insert(a[0], Ty::Other);
@@ -499,6 +640,11 @@ pub struct Env {
     /// Buffers of descriptor arrays by (set, binding, element), placed in
     /// memory.
     pub arrays: HashMap<(u32, u32, u64), u64>,
+    /// Images by (set, binding, element) ([`Image`]).
+    pub images: HashMap<(u32, u32, u64), Image>,
+    /// A workgroup run logs every store outside the workgroup memory
+    /// ([`group::Store`]).
+    pub log_stores: bool,
     pub local_id: [u32; 3],
     pub group_id: [u32; 3],
     /// The invocation's index in its workgroup (x fastest).

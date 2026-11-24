@@ -64,12 +64,27 @@ pub struct Failure {
     pub steps: Vec<u64>,
 }
 
+/// One store outside the workgroup memory, when [`Env::log_stores`] asks
+/// for them: where, how many bytes, which invocation, and the function and
+/// block it was in.
+#[derive(Clone, Debug)]
+pub struct Store {
+    pub addr: u64,
+    pub bytes: u64,
+    pub invocation: u32,
+    pub func: u32,
+    pub block: u32,
+}
+
 /// What a finished workgroup leaves.
 pub struct Done {
     pub mem: Memory,
     pub notes: BTreeMap<Note, u64>,
     /// Steps each invocation ran.
     pub steps: Vec<u64>,
+    /// The stores, each invocation's in its order, invocations in turn
+    /// ([`Env::log_stores`]).
+    pub stores: Vec<Store>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -78,6 +93,8 @@ enum Wait {
     /// Stopped before an instruction its warp runs in lockstep.
     At,
     Barrier(u32),
+    /// At a barrier of subgroup scope: waits for its subgroup's lanes only.
+    SubBarrier(u32),
     Shuffle {
         block: u32,
         value: u64,
@@ -212,11 +229,15 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 /// The memory behind a workgroup's own: one workgroup's [`Memory`], or a
 /// dispatch's [`SharedMemory`].
 trait Global {
+    fn end(&mut self, addr: u64) -> Option<u64>;
     fn get(&mut self, addr: u64, n: u64) -> Option<u64>;
     fn put(&mut self, addr: u64, n: u64, v: u64) -> bool;
 }
 
 impl Global for Plain<'_> {
+    fn end(&mut self, addr: u64) -> Option<u64> {
+        Mem::end(self, addr)
+    }
     fn get(&mut self, addr: u64, n: u64) -> Option<u64> {
         Plain::get(self, addr, n)
     }
@@ -231,6 +252,13 @@ struct SharedRef<'a> {
 }
 
 impl Global for SharedRef<'_> {
+    fn end(&mut self, addr: u64) -> Option<u64> {
+        self.m
+            .regions
+            .iter()
+            .find(|(b, w)| addr >= *b && addr < *b + w.len)
+            .map(|(b, w)| *b + w.len)
+    }
     fn get(&mut self, addr: u64, n: u64) -> Option<u64> {
         self.m.get(addr, n, &mut self.hint)
     }
@@ -250,6 +278,17 @@ struct GroupMem<'a, G> {
 }
 
 impl<G: Global> Mem for GroupMem<'_, G> {
+    fn end(&mut self, addr: u64) -> Option<u64> {
+        Mem::end(&mut self.uniform, addr)
+            .or_else(|| Global::end(&mut self.global, addr))
+            .or_else(|| match &self.local {
+                Some((base, b)) if addr >= *base && addr < *base + b.len() as u64 => {
+                    Some(*base + b.len() as u64)
+                }
+                _ => None,
+            })
+    }
+
     fn read(&mut self, addr: u64, n: u64) -> u64 {
         if let Some(v) = self.uniform.get(addr, n) {
             return v;
@@ -385,12 +424,16 @@ struct Setup<'a> {
     stop: Option<&'a AtomicBool>,
 }
 
+/// What [`run_group`] leaves: the notes, each invocation's steps and the
+/// logged stores.
+type GroupRun = (BTreeMap<Note, u64>, Vec<u64>, Vec<Store>);
+
 /// One workgroup over `mem`.
 fn run_group<G: Global>(
     su: &Setup<'_>,
     env: &Env,
     mut mem: GroupMem<'_, G>,
-) -> Result<(BTreeMap<Note, u64>, Vec<u64>), Failure> {
+) -> Result<GroupRun, Failure> {
     let Setup {
         p,
         vars,
@@ -465,7 +508,8 @@ fn run_group<G: Global>(
                     }
                     match catch_unwind(AssertUnwindSafe(|| inv.run(p, &fx, env, &mut mem, true))) {
                         Ok(Event::Done) => st.wait[i] = Wait::Done,
-                        Ok(Event::Barrier(b)) => st.wait[i] = Wait::Barrier(b),
+                        Ok(Event::Barrier(b, false)) => st.wait[i] = Wait::Barrier(b),
+                        Ok(Event::Barrier(b, true)) => st.wait[i] = Wait::SubBarrier(b),
                         Ok(Event::At) => st.wait[i] = Wait::At,
                         Ok(Event::Shuffle { block, value, lane }) => {
                             st.wait[i] = Wait::Shuffle { block, value, lane };
@@ -476,6 +520,19 @@ fn run_group<G: Global>(
                     if stop.is_some_and(|s| s.load(Ordering::Relaxed)) {
                         return Err(fail(&invs, i, "workgroup stopped".into()));
                     }
+                }
+                let live = lanes.clone().filter(|&i| st.wait[i] != Wait::Done).count();
+                let sub = lanes
+                    .clone()
+                    .filter(|&i| matches!(st.wait[i], Wait::SubBarrier(_)))
+                    .count();
+                if sub > 0 && sub == live {
+                    for i in lanes.clone() {
+                        if matches!(st.wait[i], Wait::SubBarrier(_)) {
+                            st.wait[i] = Wait::Run;
+                        }
+                    }
+                    continue;
                 }
                 let stopped = |w: &Wait| matches!(w, Wait::At | Wait::Shuffle { .. });
                 let pos = |i: usize| invs[i].as_ref().unwrap_or_else(|| unreachable!());
@@ -511,7 +568,16 @@ fn run_group<G: Global>(
         .iter()
         .map(|v| v.as_ref().map_or(0, |v| v.steps))
         .collect();
-    Ok((st.notes, steps))
+    let mut stores = Vec::new();
+    for (i, v) in invs.iter_mut().enumerate() {
+        if let Some(v) = v {
+            stores.extend(std::mem::take(&mut v.stores).into_iter().map(|mut s| {
+                s.invocation = i as u32;
+                s
+            }));
+        }
+    }
+    Ok((st.notes, steps, stores))
 }
 
 /// The workgroup variables of `m`, placed from [`WORKGROUP_BASE`], and
@@ -579,8 +645,13 @@ pub fn run_workgroup(
         max_steps,
         stop: None,
     };
-    let (notes, steps) = run_group(&su, env, gm)?;
-    Ok(Done { mem, notes, steps })
+    let (notes, steps, stores) = run_group(&su, env, gm)?;
+    Ok(Done {
+        mem,
+        notes,
+        steps,
+        stores,
+    })
 }
 
 /// What one workgroup of a dispatch leaves.
@@ -668,7 +739,7 @@ pub fn run_dispatch(
                         stop: Some(&stop),
                     };
                     let r = run_group(&su, &e, gm);
-                    let r = r.map(|(notes, steps)| GroupDone {
+                    let r = r.map(|(notes, steps, _)| GroupDone {
                         group: groups[k],
                         notes,
                         steps,

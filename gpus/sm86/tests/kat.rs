@@ -221,6 +221,8 @@ fn exec_pools(
         local_index: 0,
         subgroup_size: 32,
         fold_identity: true,
+        images: HashMap::new(),
+        log_stores: false,
     };
     let mut old = relift_gpu_spvi::reference::Run::new(m, &env, mem.clone());
     old.main();

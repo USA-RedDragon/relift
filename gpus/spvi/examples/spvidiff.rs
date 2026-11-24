@@ -123,6 +123,8 @@ fn inputs(m: &Module, seed: u64) -> Inputs {
             local_index: (seed % 3) as u32,
             subgroup_size: 32,
             fold_identity: seed.is_multiple_of(2),
+            images: HashMap::new(),
+            log_stores: false,
         },
         uniform,
         mem: Memory {

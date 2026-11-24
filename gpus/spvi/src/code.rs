@@ -33,6 +33,13 @@ pub(crate) const VAR_OOB: u64 = 3;
 /// Pointer tag: a variable path into a value the reference holds as a
 /// scalar (the zero of a runtime array or an opaque type).
 pub(crate) const VAR_SCALAR: u64 = 4;
+/// Pointer tag (low byte): an array of image or sampler descriptors; set
+/// in bits 8..32, binding in bits 32..64.
+pub(crate) const IMG_ARRAY: u64 = 5;
+/// Pointer tag (low byte): one image or sampler descriptor, set and
+/// binding as [`IMG_ARRAY`]'s; the value is the array element. A loaded
+/// image or sampled image is these two registers.
+pub(crate) const IMG: u64 = 6;
 
 /// Where a function's instructions start and where its parameters live.
 pub(crate) struct Func {
@@ -180,7 +187,28 @@ pub(crate) enum Op {
         k: u32,
         d: u32,
     },
-    Barrier,
+    /// OpControlBarrier; `exec` is the register of its execution scope (3:
+    /// the subgroup only).
+    Barrier {
+        exec: u32,
+    },
+    /// An image instruction: `kind` 0 fetch or read, 1 write, 2 size query,
+    /// 3 level query. Operands at `side[at..]`: image register, coordinate
+    /// register and count, level register (`u32::MAX`: level 0), value
+    /// register (a write's texel), result or value components.
+    Image {
+        kind: u8,
+        d: u32,
+        at: u32,
+    },
+    /// OpArrayLength: the elements of the run-time array at byte `side[at]`
+    /// (low word; high word next) of the structure `p` points at, of
+    /// `side[at + 2]` bytes each, to the end of the memory region it lies in.
+    ArrayLen {
+        d: u32,
+        p: u32,
+        at: u32,
+    },
     Shuffle {
         d: u32,
         v: u32,
@@ -372,6 +400,13 @@ pub(crate) enum Op {
 pub(crate) enum Global {
     /// An array of buffer descriptors.
     Desc { r: u32, set: u32, binding: u32 },
+    /// An image or sampler descriptor, or an array of them.
+    Img {
+        r: u32,
+        set: u32,
+        binding: u32,
+        array: bool,
+    },
     /// A uniform or storage block at the address [`crate::Env::uniforms`]
     /// gives.
     Block { r: u32, set: u32, binding: u32 },
@@ -420,7 +455,7 @@ impl Module {
             Some(Ty::Vec(e, n)) => self.flat(*e) * n,
             Some(Ty::Array(e, n)) => self.flat(*e) * *n as u32,
             Some(Ty::Struct(ms)) => ms.iter().map(|&t| self.flat(t)).sum(),
-            Some(Ty::Ptr(_)) => 2,
+            Some(Ty::Ptr(_) | Ty::Image) => 2,
             _ => 0,
         }
     }
@@ -687,6 +722,18 @@ impl Cx<'_> {
                     Global::Desc { r, set, binding }
                 } else {
                     Global::Block { r, set, binding }
+                }
+            }
+            0 => {
+                let Some((set, binding)) = m.binding(id) else {
+                    return Global::Panic("image binding".into());
+                };
+                let array = matches!(m.types.get(&pointee), Some(Ty::Array(..) | Ty::RtArray(_)));
+                Global::Img {
+                    r,
+                    set,
+                    binding,
+                    array,
                 }
             }
             1 => match m.builtin(id) {
@@ -981,7 +1028,69 @@ impl Cx<'_> {
                     d,
                 });
             }
-            224 => self.p.code.push(Op::Barrier),
+            224 => self.p.code.push(Op::Barrier { exec: self.r(a[0]) }),
+            // SampledImage, Image: the image's registers.
+            86 | 100 => self.p.code.push(Op::Copy {
+                d,
+                s: self.r(a[0]),
+                n: 2,
+            }),
+            95 | 98 | 99 | 103 | 104 | 106 => {
+                let kind = match ins.op {
+                    95 | 98 => 0,
+                    99 => 1,
+                    103 | 104 => 2,
+                    _ => 3,
+                };
+                let coord = if matches!(ins.op, 95 | 98 | 99) {
+                    a[1]
+                } else {
+                    NONE
+                };
+                let lod = match ins.op {
+                    95 if a.len() > 3 && a[2] & 2 != 0 => self.r(a[3]),
+                    103 => self.r(a[1]),
+                    _ => NONE,
+                };
+                let (cr, cn) = if coord == NONE {
+                    (NONE, 0)
+                } else {
+                    (self.r(coord), self.flat_id(coord))
+                };
+                let (val, n) = if ins.op == 99 {
+                    (self.r(a[2]), self.flat_id(a[2]))
+                } else {
+                    (NONE, self.flat_id(ins.id))
+                };
+                let at = self.side(&[self.r(a[0]), cr, cn, lod, val, n]);
+                self.p.code.push(Op::Image { kind, d, at });
+            }
+            68 => {
+                let st = match m.types.get(&self.ty_of(a[0])) {
+                    Some(Ty::Ptr(t)) => *t,
+                    _ => 0,
+                };
+                let Some(Ty::Struct(ms)) = m.types.get(&st).cloned() else {
+                    self.panic("array length of a non-structure".into());
+                    return;
+                };
+                let Some(&arr) = ms.get(a[1] as usize) else {
+                    self.panic("array length member".into());
+                    return;
+                };
+                let Some(Ty::RtArray(e)) = m.types.get(&arr).cloned() else {
+                    self.panic("array length of a sized array".into());
+                    return;
+                };
+                let off = m.member_off.get(&(st, a[1])).copied().unwrap_or(0);
+                let stride = m.stride(arr, e);
+                let at = self.side(&[off as u32, (off >> 32) as u32, stride as u32]);
+                self.p.code.push(Op::ArrayLen {
+                    d,
+                    p: self.r(a[0]),
+                    at,
+                });
+            }
             345 => {
                 if let Some(&i) = a[1..3].iter().find(|&&i| !self.is_scalar(i)) {
                     self.refuse_one(false, i);

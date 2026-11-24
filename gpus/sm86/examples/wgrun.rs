@@ -28,13 +28,30 @@
 //!                         the base table says so (gpus/nv mem::slots)
 //!   --steps N             the most instructions per invocation
 //!   --dump BASE,N=FILE    write N bytes at BASE after the last workgroup
+//!   --image S,B,E=FMT,W,H,D,LAYERS,LEVELS,FILE
+//!                         an image at set S binding B element E: VkFormat
+//!                         FMT, its texels from FILE (each level in turn,
+//!                         in a level each layer or depth slice), D the
+//!                         depth of a 3D image, else 1 (repeatable); images
+//!                         from one FILE share their texels, as views of one
+//!                         image at several bindings do
+//!   --image-dump S,B,E=FILE
+//!                         write that image's texels after the last
+//!                         workgroup
+//!   --buffer S,B=SOURCE   a storage buffer at set S binding B in the
+//!                         memory all invocations share (repeatable)
+//!   --buffer-dump S,B=FILE
+//!                         write that buffer after the last workgroup
+//!   --log-stores FILE     write one line per store outside the workgroup
+//!                         memory: address, bytes, invocation, workgroup,
+//!                         the SPIR-V function and block it was in
 //! ```
 
 use std::collections::HashMap;
 
 use relift_gpu_nv::translate::{COMPUTE_BASE_TABLE_BINDING, DRIVER_CBUF_SET, compute_base_binding};
 use relift_gpu_spvi::group::{Dispatch, run_dispatch, run_workgroup};
-use relift_gpu_spvi::{Denorm, Env, Memory, specialize};
+use relift_gpu_spvi::{Denorm, Env, Image, Memory, specialize};
 
 fn triple(s: &str) -> [u32; 3] {
     let v: Vec<u32> = s.split(',').map(|x| x.parse().expect("a number")).collect();
@@ -85,11 +102,77 @@ fn main() {
     let mut dumps = Vec::new();
     let mut table = vec![0u8; 0x10000];
     let mut next_uniform = 0x7e00_0000_0000_0000u64;
+    let mut images = HashMap::new();
+    let mut image_dumps = Vec::new();
+    let mut image_files: HashMap<String, u64> = HashMap::new();
+    let mut next_image = 0x7d00_0000_0000_0000u64;
+    let mut store_log: Option<String> = None;
+    let mut log_lines = String::new();
+    let mut buffers: HashMap<(u32, u32), (u64, u64)> = HashMap::new();
+    let mut buffer_dumps: Vec<((u32, u32), String)> = Vec::new();
     let mut it = args[1..].iter();
     while let Some(a) = it.next() {
         let v = it.next().unwrap_or_else(|| panic!("{a} wants a value"));
         match a.as_str() {
             "--size" => size = triple(v),
+            "--log-stores" => store_log = Some(v.clone()),
+            "--image" => {
+                let (key, rest) = v.split_once('=').expect("S,B,E=...");
+                let k: Vec<u64> = key
+                    .split(',')
+                    .map(|x| x.parse().expect("a number"))
+                    .collect();
+                let f: Vec<&str> = rest.splitn(7, ',').collect();
+                assert_eq!(f.len(), 7, "FMT,W,H,D,LAYERS,LEVELS,FILE");
+                let n = |i: usize| f[i].parse::<u32>().expect("a number");
+                let shared = image_files.get(f[6]).copied();
+                let addr = shared.unwrap_or(next_image);
+                let img = Image {
+                    addr,
+                    width: n(1),
+                    height: n(2),
+                    depth: n(3),
+                    layers: n(4),
+                    levels: n(5),
+                    format: n(0),
+                };
+                assert!(
+                    Image::texel_bytes(img.format).is_some(),
+                    "format {}",
+                    img.format
+                );
+                if shared.is_none() {
+                    let texels = bytes(f[6]);
+                    image_files.insert(f[6].to_string(), addr);
+                    next_image += (texels.len() as u64 + 0xffff) & !0xffff;
+                    mem.regions.push((addr, texels));
+                }
+                images.insert((k[0] as u32, k[1] as u32, k[2]), img);
+            }
+            "--image-dump" => {
+                let (key, out) = v.split_once('=').expect("S,B,E=FILE");
+                let k: Vec<u64> = key
+                    .split(',')
+                    .map(|x| x.parse().expect("a number"))
+                    .collect();
+                image_dumps.push(((k[0] as u32, k[1] as u32, k[2]), out.to_string()));
+            }
+            "--buffer" => {
+                let (sb, src) = v.split_once('=').expect("S,B=SOURCE");
+                let (s, b) = sb.split_once(',').expect("S,B");
+                let key = (s.parse().expect("a set"), b.parse().expect("a binding"));
+                let b8 = bytes(src);
+                uniforms.insert(key, next_image);
+                buffers.insert(key, (next_image, b8.len() as u64));
+                next_image += (b8.len() as u64 + 0xffff) & !0xffff;
+                mem.regions.push((buffers[&key].0, b8));
+            }
+            "--buffer-dump" => {
+                let (sb, out) = v.split_once('=').expect("S,B=FILE");
+                let (s, b) = sb.split_once(',').expect("S,B");
+                let key: (u32, u32) = (s.parse().expect("a set"), b.parse().expect("a binding"));
+                buffer_dumps.push((key, out.to_string()));
+            }
             "--group" => groups.push(triple(v)),
             "--grid" => {
                 let g = triple(v);
@@ -168,6 +251,8 @@ fn main() {
         local_index: 0,
         subgroup_size: subgroup,
         fold_identity: false,
+        images: images.clone(),
+        log_stores: store_log.is_some(),
     };
     if let Some(threads) = threads {
         let d = Dispatch {
@@ -218,6 +303,7 @@ fn main() {
                 mem: d.mem,
                 notes: d.notes.into_iter().map(|(n, c)| (note(n), c)).collect(),
                 steps: d.steps,
+                stores: Vec::new(),
             })
             .map_err(|f| relift_gpu_spvi::group::Failure {
                 invocation: f.invocation,
@@ -237,6 +323,12 @@ fn main() {
                 );
                 for (n, c) in &done.notes {
                     println!("  note {n:?} x{c}");
+                }
+                for st in &done.stores {
+                    log_lines.push_str(&format!(
+                        "{:x} {} {} {},{},{} %{} %{}\n",
+                        st.addr, st.bytes, st.invocation, g[0], g[1], g[2], st.func, st.block
+                    ));
                 }
                 mem = done.mem;
             }
@@ -261,6 +353,24 @@ fn main() {
                 std::process::exit(1);
             }
         }
+    }
+    if let Some(p) = &store_log {
+        relift_cache::write_if_changed(std::path::Path::new(p), log_lines.as_bytes())
+            .unwrap_or_else(|e| panic!("{p}: {e}"));
+    }
+    for (key, out) in image_dumps {
+        let img = &images[&key];
+        let (_, b) = mem
+            .regions
+            .iter()
+            .find(|(b, _)| *b == img.addr)
+            .expect("image region");
+        relift_cache::write_if_changed(std::path::Path::new(&out), b)
+            .unwrap_or_else(|e| panic!("{out}: {e}"));
+    }
+    for (key, out) in buffer_dumps {
+        let (base, n) = buffers[&key];
+        dumps.push((base, n, out));
     }
     for (base, n, out) in dumps {
         let mut b = Vec::with_capacity(n as usize);
