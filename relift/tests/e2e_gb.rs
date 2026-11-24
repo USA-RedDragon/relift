@@ -174,3 +174,75 @@ fn a_miss_from_a_switchable_bank_names_the_site_in_its_bank() {
         assert!(report.contains(want), "{want:?} in\n{report}");
     }
 }
+
+/// `ld a, $20; ldh ($00), a` selects the d-pad, then the code at `0x154`
+/// reads the joypad until a direction is down (`and $0F; cp $0F; jr z`)
+/// and jumps (`jp hl` at `0x15F`) to `0xC000` plus the low nibble: with
+/// right down, `0xC00E`.
+fn pad_rom() -> Vec<u8> {
+    let mut rom = synth::rom(&synth::Spec::default());
+    let code = [
+        0x3E, 0x20, 0xE0, 0x00, 0xF0, 0x00, 0xE6, 0x0F, 0xFE, 0x0F, 0x28, 0xF8, 0x26, 0xC0, 0x6F,
+        0xE9, 0x18, 0xFE,
+    ];
+    rom[0x150..0x150 + code.len()].copy_from_slice(&code);
+    synth::fix_checksums(&mut rom);
+    rom
+}
+
+#[test]
+fn an_input_script_holds_a_button_in_a_headless_run() {
+    if relift_build::find_tool("clang").is_none() {
+        eprintln!("skipped: no clang on PATH");
+        return;
+    }
+    let root = tiny::scratch("e2e-gb-script");
+    let project = root.join("sample");
+    std::fs::create_dir_all(&project).expect("the project dir is creatable");
+    let image = root.join("pad.gb");
+    relift_cache::write_if_changed(&image, &pad_rom()).expect("the ROM is writable");
+    let cache = root.join("cache").display().to_string();
+    let image = image.display().to_string();
+    let out = tiny::relift(&project, &["--cache-dir", &cache, "import", &image]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out = tiny::relift(&project, &["--cache-dir", &cache, "-j", "4", "build"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let program = root
+        .join("cache/projects/sample/build/host")
+        .join(format!("sample{}", std::env::consts::EXE_SUFFIX));
+    let out = relift_proc::command(&program)
+        .args(["--headless", "--no-save", "--no-audio", "--frames", "20"])
+        .env("RELIFT_REPORT_DIR", root.join("reports-none"))
+        .output()
+        .expect("the program runs");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let reports = root.join("reports");
+    let out = relift_proc::command(&program)
+        .args(["--headless", "--no-save", "--no-audio", "--frames", "20"])
+        .env("RELIFT_REPORT_DIR", &reports)
+        .env("RELIFT_INPUT_SCRIPT", "5+100:p1.right")
+        .output()
+        .expect("the program runs");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(70), "{err}");
+    let files: Vec<_> = std::fs::read_dir(&reports)
+        .expect("a report folder")
+        .map(|e| e.unwrap().path())
+        .collect();
+    assert_eq!(files.len(), 1, "{files:?}");
+    let report = std::fs::read_to_string(&files[0]).unwrap();
+    assert!(report.contains("\ntarget: 0xc00e\n"), "{report}");
+    let _ = std::fs::remove_dir_all(&root);
+}

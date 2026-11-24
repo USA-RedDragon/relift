@@ -259,6 +259,7 @@ static int on_frame(void *user, sms *m, uint64_t frame)
 {
     host *H = user;
     H->frames = frame + 1;
+    rl_ports_script_frame(H->frames);
     audio_drain(H, m);
     sms_screen(m, &H->w, &H->h);
     sms_picture(m, H->px);

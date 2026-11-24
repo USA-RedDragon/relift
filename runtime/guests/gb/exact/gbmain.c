@@ -71,6 +71,8 @@ typedef struct host {
     int exit_code;
     int poll_code;
     bool live;
+    /** @brief The input script (relift/ports.h) drives the joypad: a run without --case or --input that has one. */
+    bool scripted;
     bool save_soon;
     bool audio;
     rl_audio_out *out;
@@ -262,7 +264,8 @@ static void on_frame(host *H)
     }
     if (H->win)
         rl_window_present_rgb(H->win, rlgbd_frame_rgb(H->h), 160, 144);
-    if (H->live && !H->in_case) {
+    rl_ports_script_frame(H->frames);
+    if ((H->live && !H->in_case) || H->scripted) {
         uint8_t mask = 0;
         for (int i = 0; i < 8; i++)
             if (rl_ports_read(H->pad[i]) > 0.5f)
@@ -717,6 +720,7 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
         flags |= RLGBD_NEW_BOOT_RESIDUE;
     if (spec && strstr(spec, "cart=lazy_sram_cs"))
         flags |= RLGBD_NEW_LAZY_SRAM_CS;
+    H.scripted = !case_file && !input && rl_ports_script_wanted();
     H.h = rlgbd_new_with((uint32_t)hw, p->rom, p->rom_len, flags);
     if (!H.h) {
         fprintf(stderr, "relift-gb: the device library refused the cartridge\n");

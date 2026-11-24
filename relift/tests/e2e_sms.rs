@@ -4,15 +4,17 @@
 //! oracle's (`RELIFT_SMS_TRACE`), and the program runs headless. The ROM
 //! turns on the frame interrupt, whose handler counts in work RAM and
 //! writes a tone to the PSG; the run shows the count and a sound with a
-//! peak. A build without a trace fails with the reason. Skipped with a note
-//! when clang is not on `PATH`.
+//! peak. The handler also keeps the pad port in work RAM, so a run with an
+//! input script (`RELIFT_INPUT_SCRIPT`) shows the button it holds. A build
+//! without a trace fails with the reason. Skipped with a note when clang is
+//! not on `PATH`.
 
 mod tiny;
 
 /// Reset at 0: `di; im 1; ld sp, $dff0; ld a, $60; out ($bf), a;
 /// ld a, $81; out ($bf), a; ei; halt; jr -3`; the handler at 0x38:
 /// `push af; in a, ($bf); ld a, ($c000); inc a; ld ($c000), a;
-/// ld a, $8e; out ($7f), a; ld a, $07; out ($7f), a; ld a, $90;
+/// in a, ($dc); ld ($c001), a; ld a, $8e; out ($7f), a; ld a, $07; out ($7f), a; ld a, $90;
 /// out ($7f), a; pop af; ei; reti`.
 const CODE: &[(usize, &[u8])] = &[
     (
@@ -25,8 +27,9 @@ const CODE: &[(usize, &[u8])] = &[
     (
         0x0038,
         &[
-            0xF5, 0xDB, 0xBF, 0x3A, 0x00, 0xC0, 0x3C, 0x32, 0x00, 0xC0, 0x3E, 0x8E, 0xD3, 0x7F,
-            0x3E, 0x07, 0xD3, 0x7F, 0x3E, 0x90, 0xD3, 0x7F, 0xF1, 0xFB, 0xED, 0x4D,
+            0xF5, 0xDB, 0xBF, 0x3A, 0x00, 0xC0, 0x3C, 0x32, 0x00, 0xC0, 0xDB, 0xDC, 0x32, 0x01,
+            0xC0, 0x3E, 0x8E, 0xD3, 0x7F, 0x3E, 0x07, 0xD3, 0x7F, 0x3E, 0x90, 0xD3, 0x7F, 0xF1,
+            0xFB, 0xED, 0x4D,
         ],
     ),
 ];
@@ -127,5 +130,20 @@ fn a_trace_builds_and_the_program_runs_with_sound() {
     let ram = std::fs::read(&ram).expect("the RAM dump");
     let irqs = ram[0].wrapping_sub(0xAB);
     assert!((28..=30).contains(&irqs), "{irqs} frame interrupts");
+    assert_eq!(ram[1] & 0x10, 0x10, "button 1 is up without a script");
+    let scripted = root.join("ram-scripted.bin").display().to_string();
+    let out = relift_proc::command(host.join("sample"))
+        .args(["--headless", "--frames", "30", "--dump-ram", &scripted])
+        .env("RELIFT_REPORT_DIR", &root)
+        .env("RELIFT_INPUT_SCRIPT", "10+100:p1.1")
+        .output()
+        .expect("the program runs");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let ram = std::fs::read(&scripted).expect("the RAM dump");
+    assert_eq!(ram[1] & 0x10, 0, "the input script holds button 1");
     let _ = std::fs::remove_dir_all(&root);
 }
