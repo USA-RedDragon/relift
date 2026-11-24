@@ -113,4 +113,15 @@ void am_log_render_size(const char *how)
         snprintf(offers + len, sizeof offers - len, "%s%u", i ? (i + 1 == n ? " or " : ", ") : "", l[i].lines);
     }
     rl_log(RL_LOG_INFO, "am", "rendering %u lines (%s); this game offers %s", rl_am_render_lines(), how, offers);
+    /* A stored value that is not one of the sizes takes the one below it: said once per value. */
+    uint32_t want = rl_render_resolution_lines();
+    static uint32_t said;
+    bool offered = !want;
+    for (size_t i = 0; i < n; i++)
+        offered |= l[i].lines == want;
+    if (!offered && want != said) {
+        said = want;
+        rl_log(RL_LOG_INFO, "am", "video.render_resolution %u is not a size this game offers: using %u lines", want,
+               rl_am_render_lines());
+    }
 }
