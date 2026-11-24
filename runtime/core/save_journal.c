@@ -12,7 +12,7 @@
  * mount decides by the marker: with it the swap finishes, without it the
  * leftovers are dropped, so the save directory is always one whole state.
  */
-#include "fs_priv.h"
+#include "save_journal.h"
 
 #include <dirent.h>
 #include <errno.h>
