@@ -2261,10 +2261,11 @@ bool nvn_vk_begin_dispatch(replay *r)
     return nvn_vk_begin(r);
 }
 
-void nvn_vk_pass_drew(const char *fs)
+void nvn_vk_pass_drew(const char *vs, const char *fs)
 {
     if (!open_pass.draws++ && fs)
         snprintf(open_pass.fs, sizeof open_pass.fs, "%s", fs);
+    nvn_gpuprof_draw(vs, fs, open_pass.area.extent.width, open_pass.area.extent.height);
 }
 
 void nvn_vk_dispatched(void)

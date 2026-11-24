@@ -2065,7 +2065,7 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     } else {
         VK(vkCmdDraw)(g.cb, count, st->inst_count, first, st->inst_base);
     }
-    nvn_vk_pass_drew(mods[1] ? mods[1]->key : NULL);
+    nvn_vk_pass_drew(mods[0] ? mods[0]->key : NULL, mods[1] ? mods[1]->key : NULL);
     nvn_xfb_draw_end(g.cb, &xd);
     nvn_counters_end(counted);
     if (traced) {

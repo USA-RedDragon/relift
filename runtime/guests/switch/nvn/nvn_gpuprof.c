@@ -12,7 +12,12 @@
  * another process) or had nothing queued, which is scheduling and not this batch's work. The presenter's own GPU
  * time is reported by the core (present.c) beside it.
  *
- * Timestamps inside a render pass are not used: on a tiling GPU they do not say when a draw's work ran.
+ * Timestamps inside a render pass are not used by default: on a tiling GPU in tile (GMEM) mode they do not say when a
+ * draw's work ran. RELIFT_GPU_PROFILE_DRAWS=1 adds one after each draw, labelled "draw <size> vs <program> fs
+ * <program>", so the ranking names what each pipeline costs. It is valid where the pass runs in system memory (the
+ * Adreno 740 on Turnip does at these sizes; the log's pass time against the sum of its draws says so), and each
+ * timestamp waits for the draw before it, so the game runs slower. The first draw of a pass also holds the pass's
+ * start (load operations).
  */
 #include "nvn_vk.h"
 #include "present.h"
@@ -24,19 +29,25 @@
 #include <time.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
-/** @brief Marks per batch; a batch with more lumps the rest into its last interval. */
-#define MARKS 1024u
+/**
+ * @brief Marks per batch; a batch with more lumps the rest into its last interval. 4096 is the most a timestamp pool
+ * may hold for MoltenVK to read each one alone.
+ */
+#define MARKS 4096u
 #define LABEL 64u
 /** @brief Distinct labels ranked per report. */
-#define TOTALS 512u
+#define TOTALS 2048u
 /** @brief Batches and thread spans kept per report for the time between batches. */
 #define RECS 2048u
 #define SPANS 65536u
 
 static struct {
     int on;
+    /** @brief RELIFT_GPU_PROFILE_DRAWS: a timestamp after every draw, named by its programs and target size. */
+    bool draws;
     /** @brief One timestamp pool per batch slot: MoltenVK reads every timestamp of a pool of more than 4096 as one. */
     VkQueryPool pool[NVN_SLOTS];
     double period_ns;
@@ -110,6 +121,8 @@ bool nvn_gpuprof_on(void)
 {
     if (!gp.on) {
         gp.on = rl_setting_bool("gpu.profile") && g.timestamp_period_ns > 0 ? 1 : -1;
+        const char *d = getenv("RELIFT_GPU_PROFILE_DRAWS");
+        gp.draws = gp.on > 0 && d && *d && *d != '0';
         if (gp.on > 0) {
             VkQueryPoolCreateInfo qi = { .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
                                          .queryType = VK_QUERY_TYPE_TIMESTAMP,
@@ -338,6 +351,15 @@ void nvn_gpuprof_mark(const char *fmt, ...)
     mark(lab);
 }
 
+void nvn_gpuprof_draw(const char *vs, const char *fs, uint32_t w, uint32_t h)
+{
+    if (gp.on <= 0 || !gp.draws || !gp.n[g.slot] || gp.n[g.slot] >= MARKS)
+        return;
+    char lab[LABEL];
+    snprintf(lab, sizeof lab, "draw %ux%u vs %.8s fs %.8s", w, h, vs ? vs : "-", fs ? fs : "-");
+    mark(lab);
+}
+
 void nvn_gpuprof_mark_kinds(void)
 {
     if (gp.on <= 0 || !gp.n[g.slot] || gp.n[g.slot] >= MARKS)
@@ -453,7 +475,7 @@ void nvn_gpuprof_report(double frames)
         char key[24];
         const char *l = gp.tot[i].lab;
         size_t n = strcspn(l, " ");
-        if (!strncmp(l, "pass ", 5))
+        if (!strncmp(l, "pass ", 5) || !strncmp(l, "draw ", 5))
             n = 5 + strcspn(l + 5, " ");
         snprintf(key, sizeof key, "%.*s", (int)n, l);
         uint32_t k = 0;
@@ -482,7 +504,7 @@ void nvn_gpuprof_report(double frames)
     }
     rl_log(RL_LOG_INFO, "nvn", "GPU profile by kind (ms per present): %s", line);
     double shown = 0;
-    for (uint32_t k = 0; k < 25 && gp.ntot; k++) {
+    for (uint32_t k = 0; k < (gp.draws ? 45u : 25u) && gp.ntot; k++) {
         uint32_t b = 0;
         for (uint32_t i = 1; i < gp.ntot; i++)
             if (gp.tot[i].ns > gp.tot[b].ns)

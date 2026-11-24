@@ -1129,6 +1129,44 @@ TEST(nvn_placed_pool_gives_its_pages_back_with_their_bytes_at_finalize)
     rl_settings_set("nvn.memory", "auto");
 }
 
+TEST(nvn_gpu_profile_draws_times_each_draw_label_by_its_programs_and_size)
+{
+    t_boot(NULL);
+    bool up = have_device();
+    CHECK(up || !getenv("RELIFT_VK_REQUIRE"));
+    if (!up)
+        return;
+    setenv("RELIFT_GPU_PROFILE_DRAWS", "1", 1);
+    CHECK_EQ(rl_settings_set("gpu.profile", "true"), RL_SETTING_OK);
+    nvn_gpuprof_reset();
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.mem = t_mem();
+    staging big;
+    CHECK(nvn_vk_staging_new(&big, 16ull << 20));
+    CHECK(nvn_vk_flush(&r));
+    CHECK(nvn_vk_begin(&r));
+    for (int i = 0; i < 3; i++) {
+        VK(vkCmdFillBuffer)(g.cb, big.buf, 0, big.size, (uint32_t)i);
+        nvn_vk_barrier(g.cb);
+        nvn_gpuprof_draw("0123456789abcdef", i == 2 ? "other" : "fedcba9876543210", 960, 540);
+    }
+    CHECK(nvn_vk_flush(&r));
+    double span = 0, parts = 0, between = 0, ns = 0;
+    uint64_t count = 0;
+    nvn_gpuprof_sums(&span, &parts, &between);
+    CHECK(fabs(parts - span) <= span * 1e-6);
+    CHECK(nvn_gpuprof_total("draw 960x540 vs 01234567 fs fedcba98", &ns, &count));
+    CHECK_EQ(count, 2u);
+    CHECK(ns > 0);
+    CHECK(nvn_gpuprof_total("draw 960x540 vs 01234567 fs other", &ns, &count));
+    CHECK_EQ(count, 1u);
+    nvn_vk_staging_free(&big);
+    unsetenv("RELIFT_GPU_PROFILE_DRAWS");
+    rl_settings_set("gpu.profile", "false");
+    nvn_gpuprof_reset();
+}
+
 TEST(nvn_gpu_profile_parts_add_up_to_each_batch_span)
 {
     t_boot(NULL);

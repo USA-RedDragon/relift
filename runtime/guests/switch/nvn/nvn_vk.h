@@ -1497,7 +1497,9 @@ VkDescriptorSet nvn_pools_set(uint32_t slot);
 /** @brief The pieces of the pool table as written last, and the spans left out of it (no room), for the log. */
 void nvn_pools_counts(uint32_t *pieces, uint32_t *spans, uint32_t *dropped);
 /** @brief Counts a draw into the open render pass, naming the pass by its first fragment program (gpu.profile). */
-void nvn_vk_pass_drew(const char *fs);
+void nvn_vk_pass_drew(const char *vs, const char *fs);
+/** @brief With RELIFT_GPU_PROFILE_DRAWS=1: a timestamp after a draw, labelled by its programs and the pass's size. */
+void nvn_gpuprof_draw(const char *vs, const char *fs, uint32_t w, uint32_t h);
 /** @brief Whether gpu.profile is on (nvn_gpuprof.c); made on first use, with the device up. */
 bool nvn_gpuprof_on(void);
 /** @brief Starts the profile of the batch g.cb begins (after vkBeginCommandBuffer). */
