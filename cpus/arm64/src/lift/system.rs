@@ -143,6 +143,31 @@ fn sysreg(insn: &Insn) -> SysReg {
     )
 }
 
+/// An `MRS` of an ID register at EL0 on an OS that answers it
+/// ([`crate::cpu::Cpu::user_ids`]): the value [`crate::idregs::user_id_reg`]
+/// gives; `None` for any other instruction or register.
+pub(super) fn user_id_mrs(
+    insn: Insn,
+    pc: u64,
+    features: &crate::decode::Features,
+    midr: u64,
+) -> Option<relift_ir::Block> {
+    if insn.encoding != Encoding::MRS_RS_systemmove {
+        return None;
+    }
+    let v = crate::idregs::user_id_reg(features, midr, sysreg(&insn))?;
+    let mut b = Builder::new(crate::regs::regs(), Width::W64, pc);
+    let k = b.konst(Width::W64, u128::from(v));
+    write_x(&mut b, insn.get("Rt"), k);
+    Some(b.finish(
+        4,
+        Exit {
+            next: Next::Const(pc.wrapping_add(4)),
+            flow: Flow::Jump,
+        },
+    ))
+}
+
 fn mrs(insn: Insn, b: &mut Builder) -> Result<End, LiftError> {
     let t = insn.get("Rt");
     let v = match sysreg(&insn) {

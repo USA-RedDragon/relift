@@ -338,3 +338,66 @@ fn rcpc_loads_keep_their_weaker_ordering_apart_from_ldar() {
         load_order(ldapur)
     );
 }
+
+/// LDAPRB, LDAPRH and LDAPR W and X (FEAT_LRCPC), and LDAPURB, LDAPURH and
+/// LDAPUR W and X (FEAT_LRCPC2), of `X1` into register 0.
+const RCPC_LOADS: [(&str, u32); 8] = [
+    ("LDAPRB W0, [X1]", 0x38bf_c020),
+    ("LDAPRH W0, [X1]", 0x78bf_c020),
+    ("LDAPR W0, [X1]", 0xb8bf_c020),
+    ("LDAPR X0, [X1]", 0xf8bf_c020),
+    ("LDAPURB W0, [X1]", 0x1940_0020),
+    ("LDAPURH W0, [X1]", 0x5940_0020),
+    ("LDAPUR W0, [X1]", 0x9940_0020),
+    ("LDAPUR X0, [X1]", 0xd940_0020),
+];
+
+#[test]
+fn every_size_of_ldapr_and_ldapur_lifts_on_the_a78c_and_is_undefined_on_the_a57() {
+    let a78c = Cpu::new(Features::CORTEX_A78C, Va::BITS39);
+    let a57 = Cpu::new(Features::CORTEX_A57, Va::BITS39);
+    for (name, word) in RCPC_LOADS {
+        let text = lift(word, PC, &a78c)
+            .unwrap_or_else(|e| panic!("{name}: {e:?}"))
+            .to_string();
+        assert!(
+            text.lines()
+                .any(|l| l.contains("load") && l.contains("acquirepc")),
+            "{name}: {text}"
+        );
+        assert!(
+            matches!(lift(word, PC, &a57), Err(LiftError::Unallocated(_))),
+            "{name} on the A57"
+        );
+    }
+}
+
+/// The value `MRS X0, <reg>` leaves in X0 on `cpu`, for (op1, CRn, CRm, op2).
+fn mrs_value(cpu: &Cpu, (op1, crn, crm, op2): (u32, u32, u32, u32)) -> Result<u64, LiftError> {
+    let word = 0xd530_0000 | 1 << 19 | op1 << 16 | crn << 12 | crm << 8 | op2 << 5;
+    let b = lift(word, PC, cpu)?;
+    let mut s = state();
+    let mut m = mem();
+    interp::run(&b, &mut s, &mut m, &mut NoIntrinsics).expect("runs");
+    Ok(x(&s, 0))
+}
+
+#[test]
+fn an_mrs_of_an_id_register_reads_the_features_where_the_os_answers_it() {
+    use relift_cpu_arm64::idregs::{ID_AA64ISAR1_EL1, user_id_reg};
+    let f = Features::CORTEX_A78C;
+    let linux = Cpu::new(f, Va::BITS39).with_user_ids(0x410f_d4b2);
+    let (_, op1, crn, crm, op2) = ID_AA64ISAR1_EL1;
+    let isar1 = mrs_value(&linux, (op1, crn, crm, op2)).expect("lifts");
+    assert_eq!(Some(isar1), user_id_reg(&f, 0x410f_d4b2, ID_AA64ISAR1_EL1));
+    assert_eq!(isar1 >> 20 & 0xf, 2, "LRCPC2");
+    assert_eq!(
+        mrs_value(&linux, (0, 0, 0, 0)).expect("MIDR lifts"),
+        0x410f_d4b2
+    );
+    let plain = Cpu::new(f, Va::BITS39);
+    assert!(
+        mrs_value(&plain, (op1, crn, crm, op2)).is_err(),
+        "no OS answers it"
+    );
+}

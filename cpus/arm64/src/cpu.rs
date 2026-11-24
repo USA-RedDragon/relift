@@ -52,11 +52,29 @@ pub struct Cpu {
     pub features: Features,
     /// The address layout the OS gives the process.
     pub va: Va,
+    /// When the OS answers an `MRS` of the ID registers at EL0 (Linux does),
+    /// the `MIDR_EL1` it shows; the other ID registers follow from
+    /// `features` ([`crate::idregs::user_id_reg`]). `None`: such an `MRS` is
+    /// not lifted.
+    pub user_ids: Option<u64>,
 }
 
 impl Cpu {
     /// A CPU with `features` running code with the layout `va`.
     pub const fn new(features: Features, va: Va) -> Cpu {
-        Cpu { features, va }
+        Cpu {
+            features,
+            va,
+            user_ids: None,
+        }
+    }
+
+    /// This CPU with the OS answering `MRS` of the ID registers at EL0,
+    /// showing `midr` as `MIDR_EL1`.
+    pub const fn with_user_ids(self, midr: u64) -> Cpu {
+        Cpu {
+            user_ids: Some(midr),
+            ..self
+        }
     }
 }

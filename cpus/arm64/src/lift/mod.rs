@@ -99,6 +99,11 @@ pub fn lift_insn(insn: Insn, pc: u64, cpu: &Cpu) -> Result<Block, LiftError> {
     {
         return sail::lift_insn(insn, pc, cpu);
     }
+    if let Some(midr) = cpu.user_ids
+        && let Some(b) = system::user_id_mrs(insn, pc, &cpu.features, midr)
+    {
+        return Ok(b);
+    }
     if let Some(l) = system::lifter(insn.encoding) {
         return run_lifter(l, insn, pc);
     }
