@@ -9,11 +9,21 @@
  * presentation layer takes the queued frames with rl_vi_acquire_frame and
  * hands the buffers back with rl_vi_release_frame. Pixels are never touched
  * here: a frame names its nvmap buffer and describes it.
+ *
+ * The frame trace (relift/trace.h) kinds the Switch writes: vsyncs,
+ * presents, acquires, scheduler hand-overs and slow svcs. Per present, N
+ * carries the ns the present slept for the vsync grid, and T, X and Y the
+ * presenting thread's costs since its last present (wall, CPU and NVN replay
+ * ns; upload, write-back and pipeline creation ns; their counts and uploaded
+ * bytes). D and W time a movie frame's decode and its write into the output
+ * image.
  */
 #ifndef RELIFT_VI_H
 #define RELIFT_VI_H
 
 #include "services.h"
+
+#include <relift/trace.h>
 
 #include <pthread.h>
 #include <string.h>
@@ -413,19 +423,5 @@ int64_t vi_clock_flip(vi_clock *c, int64_t t);
 bool vi_clock_locked(const vi_clock *c);
 /** @brief A time the host display showed a present of the guest (CLOCK_MONOTONIC ns): steers the vi vsync grid. */
 void vi_host_flip(int64_t t);
-
-/** @brief Whether stats.trace names a frame trace file (frame_trace.c); read once. */
-bool vi_trace_on(void);
-/** @brief CLOCK_MONOTONIC nanoseconds while the frame trace is on, else 0. */
-int64_t vi_trace_now(void);
-/** @brief Whether a trace limited to kinds (the letters after its path's bar; empty for all) writes kind. */
-bool vi_trace_kind_listed(const char *kinds, char kind);
-/** @brief Writes one frame trace line of this kind when the trace is on. */
-void vi_trace(char kind, uint64_t a, uint64_t b, uint64_t c);
-/**
- * @brief Writes a frame trace line with a and the calling thread's CPU time; reads neither for a kind the trace
- * leaves out.
- */
-void vi_trace_cpu(char kind, uint64_t a);
 
 #endif

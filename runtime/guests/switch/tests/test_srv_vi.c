@@ -1161,9 +1161,9 @@ TEST(vi_frame_callback_and_layers)
 
 TEST(vi_frame_trace_kinds_name_the_lines_it_writes)
 {
-    CHECK(vi_trace_kind_listed("", 'c'));
-    CHECK(vi_trace_kind_listed("NUS", 'N'));
-    CHECK(!vi_trace_kind_listed("NUS", 'c'));
-    CHECK(!vi_trace_kind_listed("NUS", 'C'));
-    CHECK(!vi_trace_kind_listed("NUS", 0));
+    CHECK(rl_trace_kind_listed("", 'c'));
+    CHECK(rl_trace_kind_listed("NUS", 'N'));
+    CHECK(!rl_trace_kind_listed("NUS", 'c'));
+    CHECK(!rl_trace_kind_listed("NUS", 'C'));
+    CHECK(!rl_trace_kind_listed("NUS", 0));
 }

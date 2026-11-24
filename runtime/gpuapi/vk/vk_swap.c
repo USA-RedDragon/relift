@@ -1061,8 +1061,8 @@ static VkResult swap_acquire(vkf_swap *s, uint64_t timeout, VkSemaphore sem, VkF
         break;
     }
     pthread_mutex_unlock(&s->lock);
-    if (vi_trace_on())
-        vi_trace('A', (uint64_t)start, (uint64_t)slept, (uint64_t)host_ns | (uint64_t)fence_ns << 32);
+    if (rl_trace_on())
+        rl_trace('A', (uint64_t)start, (uint64_t)slept, (uint64_t)host_ns | (uint64_t)fence_ns << 32);
     return r;
 }
 
@@ -1258,8 +1258,8 @@ static void show(vkf_swap *s, uint32_t i)
 {
     int64_t now = now_ns();
     int64_t at = vi_vsync_after(now > s->last_shown ? now : s->last_shown);
-    if (vi_trace_on())
-        vi_trace('P', (uint64_t)at, (uint64_t)s->last_shown, i | (uint64_t)s->n << 8);
+    if (rl_trace_on())
+        rl_trace('P', (uint64_t)at, (uint64_t)s->last_shown, i | (uint64_t)s->n << 8);
     s->last_shown = at;
     if (s->any_shown && s->shown != i)
         s->free_at[s->shown] = at;
@@ -1425,9 +1425,9 @@ static VkResult swap_present(vkf_swap *s, const vkf_dev *d, VkQueue q, const VkS
         .signalSemaphoreCount = s->offscreen ? 0 : 1,
         .pSignalSemaphores = &s->ready[hi],
     };
-    int64_t t_s = vi_trace_now();
+    int64_t t_s = rl_trace_now();
     r = DFN(s, vkQueueSubmit)(q, 1, &si, s->done[i]);
-    int64_t t_h = vi_trace_now();
+    int64_t t_h = rl_trace_now();
     s->held[i] = false;
     if (r < 0)
         goto out;
@@ -1447,13 +1447,13 @@ static VkResult swap_present(vkf_swap *s, const vkf_dev *d, VkQueue q, const VkS
         .pSwapchains = &s->host,
         .pImageIndices = &hi,
     };
-    int64_t t_x = vi_trace_now();
+    int64_t t_x = rl_trace_now();
     r = s->offscreen ? VK_SUCCESS : DFN(s, vkQueuePresentKHR)(q, &pi);
     if (!s->offscreen && r >= 0)
         vkf_flip_presented(d, s->dev, s->host, s->present_id);
     vkf_settle(s->fns, q);
     if (t_s)
-        vi_trace('H', (uint64_t)(t_h - t_s), (uint64_t)(t_x - t_h), (uint64_t)(vi_trace_now() - t_x));
+        rl_trace('H', (uint64_t)(t_h - t_s), (uint64_t)(t_x - t_h), (uint64_t)(rl_trace_now() - t_x));
     show(s, i);
     if (r == VK_ERROR_SURFACE_LOST_KHR) {
         lose(s);
@@ -1554,7 +1554,7 @@ uint64_t vkh_vkQueuePresentKHR(rl_ctx *restrict c, uint8_t *mem)
     }
     vkf_wait_enter(&k, 1);
     vkf_queue_enter(&k);
-    int64_t t_q = vi_trace_now();
+    int64_t t_q = rl_trace_now();
     uint32_t nwaits = vkf_g32(&k, g + offsetof(VkPresentInfoKHR, waitSemaphoreCount));
     uint64_t gwaits = vkf_g64(&k, g + offsetof(VkPresentInfoKHR, pWaitSemaphores));
     uint32_t nsw = vkf_g32(&k, g + offsetof(VkPresentInfoKHR, swapchainCount));
@@ -1577,10 +1577,10 @@ uint64_t vkh_vkQueuePresentKHR(rl_ctx *restrict c, uint8_t *mem)
                 repaint(s, q, vkf_g32(&k, gidx));
     }
     vkf_queue_unlock(&k);
-    int64_t t_p = vi_trace_now();
+    int64_t t_p = rl_trace_now();
     vkf_wait_return(&k);
     if (t_q)
-        vi_trace('Q', (uint64_t)(t_q - k.trace_t0), (uint64_t)(t_p - t_q), (uint64_t)(vi_trace_now() - t_p));
+        rl_trace('Q', (uint64_t)(t_q - k.trace_t0), (uint64_t)(t_p - t_q), (uint64_t)(rl_trace_now() - t_p));
     c->x[0] = (uint32_t)vkf_result(&k, VKG_vkQueuePresentKHR, all);
     return vkf_end(&k);
 }

@@ -98,7 +98,7 @@ void vi_host_flip(int64_t t)
     int64_t phase = vsync_clock.phase;
     bool locked = vi_clock_locked(&vsync_clock);
     pthread_mutex_unlock(&clock_lock);
-    vi_trace('F', (uint64_t)phase, (uint64_t)shift, locked);
+    rl_trace('F', (uint64_t)phase, (uint64_t)shift, locked);
 }
 
 void vi_script_frame(uint64_t n)
@@ -150,7 +150,7 @@ static void *vsync_main(void *arg)
         if (quit)
             return NULL;
         vi_vsync_tick(next);
-        int64_t woke = vi_trace_now();
+        int64_t woke = rl_trace_now();
         if (e) {
             rl_hos_event_signal(e);
             hos_kobj_unref(&e->obj);
@@ -158,7 +158,7 @@ static void *vsync_main(void *arg)
         vsync_signal_listeners();
         int64_t done = mono_ns();
         if (woke)
-            vi_trace('V', (uint64_t)next, (uint64_t)woke, (uint64_t)done);
+            rl_trace('V', (uint64_t)next, (uint64_t)woke, (uint64_t)done);
         next = vi_vsync_after(done > next ? done : next);
     }
 }

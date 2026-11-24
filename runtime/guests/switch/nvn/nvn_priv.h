@@ -1256,7 +1256,7 @@ void nvn_pace_acquire(uint32_t textures);
  * with that present queued, and one of two only once it is shown. 0 when all hold, else the failing step's number.
  */
 int nvn_pace_check(void);
-/** @brief One line of the frame trace (stats.trace), with vi_trace's kinds and fields. */
+/** @brief One line of the frame trace (stats.trace), with rl_trace's kinds and fields. */
 void nvn_trace(char kind, uint64_t a, uint64_t b, uint64_t c);
 /** @brief Whether the frame trace (stats.trace) is on. */
 bool nvn_trace_on(void);

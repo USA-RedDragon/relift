@@ -1,22 +1,12 @@
 /**
- * @file frame_trace.c
- * @brief The frame trace, a debugging aid: with stats.trace naming a file,
- * vsyncs, presents, acquires, scheduler hand-overs and slow svcs are written
- * there, one line each, to find why a vsync went without a new frame.
- *
- * A line is "<kind> <CLOCK_MONOTONIC ns> <guest thread id or 0> <a> <b> <c>"
- * with a, b and c in hex. "<file>|<kinds>" writes only the kinds listed.
- * Per present, N carries the ns the present slept for the vsync grid, and
- * T, X and Y the presenting thread's costs since its last present (wall,
- * CPU and NVN replay ns; upload, write-back and pipeline creation ns; their
- * counts and uploaded bytes). D and W time a movie frame's decode and its
- * write into the output image.
- * Off (the default), each trace point costs one load.
+ * @file trace.c
+ * @brief The frame trace (relift/trace.h): the file, the kinds filter, the
+ * clock and the line format, shared by every guest.
  */
-#include "hos.h"
-#include "vi.h"
+#include "core.h"
 
 #include <relift/settings.h>
+#include <relift/trace.h>
 
 #include <pthread.h>
 #include <stdio.h>
@@ -27,6 +17,7 @@ static int g_state;
 static FILE *g_file;
 static char g_kinds[64];
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t (*g_thread_id)(void);
 
 static int64_t mono_ns(void)
 {
@@ -35,7 +26,7 @@ static int64_t mono_ns(void)
     return (int64_t)ts.tv_sec * 1000000000ll + ts.tv_nsec;
 }
 
-bool vi_trace_on(void)
+bool rl_trace_on(void)
 {
     int s = __atomic_load_n(&g_state, __ATOMIC_ACQUIRE);
     if (s)
@@ -61,14 +52,14 @@ bool vi_trace_on(void)
     return s > 0;
 }
 
-int64_t vi_trace_now(void) { return vi_trace_on() ? mono_ns() : 0; }
+int64_t rl_trace_now(void) { return rl_trace_on() ? mono_ns() : 0; }
 
-bool vi_trace_kind_listed(const char *kinds, char kind) { return !kinds[0] || (kind && strchr(kinds, kind)); }
+bool rl_trace_kind_listed(const char *kinds, char kind) { return !kinds[0] || (kind && strchr(kinds, kind)); }
 
 /** @brief Whether the trace is on and writes lines of kind. */
-static bool traced(char kind) { return vi_trace_on() && vi_trace_kind_listed(g_kinds, kind); }
+static bool traced(char kind) { return rl_trace_on() && rl_trace_kind_listed(g_kinds, kind); }
 
-void vi_trace_cpu(char kind, uint64_t a)
+void rl_trace_cpu(char kind, uint64_t a)
 {
     if (!traced(kind))
         return;
@@ -84,16 +75,16 @@ void vi_trace_cpu(char kind, uint64_t a)
         fclose(f);
     }
 #endif
-    vi_trace(kind, a, (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec, wait);
+    rl_trace(kind, a, (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec, wait);
 }
 
-void vi_trace(char kind, uint64_t a, uint64_t b, uint64_t c)
+void rl_trace(char kind, uint64_t a, uint64_t b, uint64_t c)
 {
     if (!traced(kind))
         return;
     int64_t t = mono_ns();
-    hos_thread *h = hos_current();
-    uint64_t id = h ? h->id : 0;
+    uint64_t (*idf)(void) = __atomic_load_n(&g_thread_id, __ATOMIC_ACQUIRE);
+    uint64_t id = idf ? idf() : 0;
     pthread_mutex_lock(&g_lock);
     fprintf(g_file, "%c %lld %llu %llx %llx %llx\n", kind, (long long)t, (unsigned long long)id, (unsigned long long)a,
             (unsigned long long)b, (unsigned long long)c);
@@ -101,3 +92,5 @@ void vi_trace(char kind, uint64_t a, uint64_t b, uint64_t c)
         fflush(g_file);
     pthread_mutex_unlock(&g_lock);
 }
+
+void rl_trace_set_thread_id(uint64_t (*fn)(void)) { __atomic_store_n(&g_thread_id, fn, __ATOMIC_RELEASE); }

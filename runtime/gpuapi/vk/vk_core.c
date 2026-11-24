@@ -78,7 +78,7 @@ void vkf_begin(vkf_call *k, rl_ctx *c, uint8_t *mem)
     k->mark.used = t_arena.cur ? t_arena.cur->used : 0;
     k->outer = t_call;
     k->left = false;
-    k->trace_t0 = vi_trace_now();
+    k->trace_t0 = rl_trace_now();
     k->trace_site = (uintptr_t)__builtin_return_address(0);
     t_call = k;
 }
@@ -93,8 +93,8 @@ uint64_t vkf_end(vkf_call *k)
         t_arena.cur->used = 0;
     }
     t_call = k->outer;
-    if (k->trace_t0 && vi_trace_now() - k->trace_t0 >= 500000)
-        vi_trace('K', k->trace_site, (uint64_t)k->trace_t0, k->c ? k->c->x[30] : 0);
+    if (k->trace_t0 && rl_trace_now() - k->trace_t0 >= 500000)
+        rl_trace('K', k->trace_site, (uint64_t)k->trace_t0, k->c ? k->c->x[30] : 0);
     return k->rc == RL_OK ? rl_arm64_ret(k->c) : k->rc;
 }
 

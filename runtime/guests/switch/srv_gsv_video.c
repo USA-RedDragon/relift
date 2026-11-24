@@ -900,11 +900,11 @@ static void step(video_session *v)
         memmove(&v->free[0], &v->free[1], (v->nfree - 1) * sizeof v->free[0]);
         v->nfree--;
         pthread_mutex_unlock(&v->mu);
-        int64_t t0 = vi_trace_now();
+        int64_t t0 = rl_trace_now();
         if (!f.end)
             put_frame(v, h.image, &f);
         if (t0)
-            vi_trace('W', (uint64_t)(vi_trace_now() - t0), h.image, f.pts);
+            rl_trace('W', (uint64_t)(rl_trace_now() - t0), h.image, f.pts);
         frame_free(&f);
         pthread_mutex_lock(&v->mu);
         if (v->ndone < RING)
@@ -921,11 +921,11 @@ static void step(video_session *v)
     pthread_mutex_unlock(&v->mu);
     int shown = 0;
     rl_vp9_image im;
-    int64_t t0 = vi_trace_now();
+    int64_t t0 = rl_trace_now();
     if (in.size)
         shown = v->vp9 ? v->vp9->decode(v->dec, in.data, in.size, &im) : v->av1->decode(v->dec, in.data, in.size, &im);
     if (t0)
-        vi_trace('D', (uint64_t)(vi_trace_now() - t0), in.size, (uint64_t)shown);
+        rl_trace('D', (uint64_t)(rl_trace_now() - t0), in.size, (uint64_t)shown);
     frame pic = { 0 }, end = { 0 };
     bool have = shown > 0 && frame_from(&pic, &im, in.pts, false);
     if (in.end)

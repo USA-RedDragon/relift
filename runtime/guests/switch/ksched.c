@@ -235,9 +235,9 @@ static void grant(int32_t c, hos_thread *t)
         k->last = t;
         s->handovers++;
     }
-    vi_trace('G', (uint64_t)c, t->id, 0);
+    rl_trace('G', (uint64_t)c, t->id, 0);
     if (t == hos_current())
-        vi_trace_cpu('c', t->id);
+        rl_trace_cpu('c', t->id);
     stat_tick(now);
     pthread_cond_signal(&t->cv);
 }
@@ -306,9 +306,9 @@ static void release(hos_thread *t)
     hos_sched *s = &hos.sched;
     int32_t c = t->cur_core;
     hos_core *k = &s->cores[c];
-    vi_trace('L', (uint64_t)c, t->id, k->preempt_ns);
+    rl_trace('L', (uint64_t)c, t->id, k->preempt_ns);
     if (t == hos_current())
-        vi_trace_cpu('C', t->id);
+        rl_trace_cpu('C', t->id);
     k->holder = NULL;
     t->cur_core = -1;
     rl_preempt_clear(t->rt->ctx);
@@ -343,8 +343,16 @@ static void preempted(rl_ctx *c)
     sched_point(hos_current());
 }
 
+/** @brief The guest thread id a frame trace line names (relift/trace.h). */
+static uint64_t trace_thread_id(void)
+{
+    hos_thread *h = hos_current();
+    return h ? h->id : 0;
+}
+
 void hos_sched_init(void)
 {
+    rl_trace_set_thread_id(trace_thread_id);
     const char *e = getenv("RELIFT_SCHED");
     hos.sched.fixed = rl_setting_bool("clock.fixed_step");
     hos.sched.free = !hos.sched.fixed && e && strstr(e, "free");
@@ -362,7 +370,7 @@ void hos_sched_ready(hos_thread *t)
 {
     if (t->runnable)
         return;
-    vi_trace('R', t->id, 0, 0);
+    rl_trace('R', t->id, 0, 0);
     t->runnable = true;
     enqueue(t, false);
     update();
@@ -418,7 +426,7 @@ void hos_sched_run(hos_thread *t)
             release(t);
         if (t->cur_core >= 0) {
             if (waited)
-                vi_trace_cpu('c', t->id);
+                rl_trace_cpu('c', t->id);
             return;
         }
         if (c >= 0 && s->cores[c].selected == t && !s->cores[c].holder) {
