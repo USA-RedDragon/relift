@@ -1952,6 +1952,25 @@ TEST(nvn_a_submit_returns_before_the_device_finished_and_a_settle_sees_its_resul
     CHECK_EQ(nvn_vk_async_check(), 0);
 }
 
+TEST(nvn_a_chunk_is_due_only_at_a_pass_boundary_after_its_time)
+{
+    CHECK(!nvn_vk_chunk_due(9000000, false, false, 0));
+    CHECK(!nvn_vk_chunk_due(1000000, false, false, 2000000));
+    CHECK(!nvn_vk_chunk_due(3000000, true, false, 2000000));
+    CHECK(!nvn_vk_chunk_due(3000000, false, true, 2000000));
+    CHECK(nvn_vk_chunk_due(2000000, false, false, 2000000));
+}
+
+TEST(nvn_chunks_of_one_command_set_run_in_order_each_as_its_own_batch)
+{
+    nvn_probes p;
+    if (!nvn_vk_probes(&p)) {
+        fprintf(stderr, "nvn_chunks_of_one_command_set_run_in_order_each_as_its_own_batch: no host Vulkan device, skipped\n");
+        return;
+    }
+    CHECK_EQ(nvn_vk_chunk_check(), 0);
+}
+
 TEST(nvn_a_read_of_bytes_the_open_batch_writes_waits_for_it)
 {
     nvn_probes p;

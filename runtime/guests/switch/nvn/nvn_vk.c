@@ -2376,6 +2376,11 @@ static int64_t chunk_ns(void)
     return v;
 }
 
+bool nvn_vk_chunk_due(int64_t age_ns, bool pass_open, bool compute_open, int64_t limit_ns)
+{
+    return limit_ns > 0 && !pass_open && !compute_open && age_ns >= limit_ns;
+}
+
 bool nvn_vk_begin(replay *r)
 {
     (void)r;
@@ -3039,6 +3044,50 @@ int nvn_vk_open_write_check(void)
     if (!rc && (!nvn_vk_reading_guest(0x10004ff0ull, 0x20) || g_recording || nvn_vk_finished() != nvn_vk_submitted()))
         rc = 3;
     nvn_vk_settle();
+    nvn_unlock();
+    return rc;
+}
+
+int nvn_vk_chunk_check(void)
+{
+    pthread_once(&g.once, bring_up);
+    if (!g.ok)
+        return -1;
+    nvn_lock();
+    nvn_vk_settle();
+    staging a, out;
+    if (!nvn_vk_staging_new(&a, 4096) || !nvn_vk_readback_new(&out, 4096)) {
+        nvn_unlock();
+        return 1;
+    }
+    memset(out.map, 0, 4096);
+    replay r = { 0 };
+    int rc = 0;
+    uint64_t sub = nvn_vk_submitted();
+    /* Chunk one fills a; the chunk submit ends it, chunk two copies a to out. The second reads what the first wrote, and each chunk is its own batch with its own timeline value. */
+    nvn_vk_begin(&r);
+    VK(vkCmdFillBuffer)(g.cb, a.buf, 0, 4096, 0x11223344u);
+    nvn_vk_barrier(g.cb);
+    uint64_t v1 = g.timeline_value;
+    if (!nvn_vk_submit(&r) || g_recording || nvn_vk_submitted() != sub + 1)
+        rc = 2;
+    uint64_t v2 = g.timeline_value;
+    if (!rc && g.timeline_ok && v2 != v1 + 1)
+        rc = 3;
+    if (!rc) {
+        nvn_vk_begin(&r);
+        VkBufferCopy bc = { 0, 0, 4096 };
+        VK(vkCmdCopyBuffer)(g.cb, a.buf, out.buf, 1, &bc);
+        nvn_vk_barrier(g.cb);
+        if (!nvn_vk_submit(&r) || nvn_vk_submitted() != sub + 2)
+            rc = 4;
+    }
+    if (!rc && (!nvn_vk_settle() || nvn_vk_finished() != nvn_vk_submitted()))
+        rc = 5;
+    if (!rc && (((uint32_t *)out.map)[0] != 0x11223344u || ((uint32_t *)out.map)[1023] != 0x11223344u))
+        rc = 6;
+    nvn_vk_staging_free(&a);
+    nvn_vk_staging_free(&out);
     nvn_unlock();
     return rc;
 }
@@ -6287,8 +6336,8 @@ static int sched_exec(void *user, const nvn_cmd *e, const nvn_cmdset *s)
     int rc = run_cmd(r, e);
     if (nvn_trace_active)
         nvn_trace_command(r, e, true);
-    if (rc == RL_OK && g_recording && !open_pass.open && !open_cs.open && chunk_ns() > 0 &&
-        now_ns() - g_batch_t0 >= chunk_ns() && !nvn_vk_submit(r))
+    if (rc == RL_OK && g_recording && nvn_vk_chunk_due(now_ns() - g_batch_t0, open_pass.open, open_cs.open, chunk_ns()) &&
+        !nvn_vk_submit(r))
         rc = nvn_vk_stop(r, "the host device failed a chunk submit after %s", nvn_cmd_name(e->op));
     if (rc == RL_OK && sync_each_command() && !nvn_vk_flush(r)) {
         rl_log(RL_LOG_ERROR, "nvn", "the host device failed after %s; last %s", nvn_cmd_name(e->op), nvn_draw_last());

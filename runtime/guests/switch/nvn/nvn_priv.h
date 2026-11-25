@@ -147,6 +147,10 @@ uint64_t nvn_vk_finished(void);
  * what the batch wrote. 0 when both hold, the failing step's number otherwise, -1 with no device.
  */
 int nvn_vk_async_check(void);
+/** @brief Whether a chunked submit (RELIFT_NVN_CHUNK_MS) is due: the batch recorded for at least limit_ns (above 0) with no render pass and no compute set open. */
+bool nvn_vk_chunk_due(int64_t age_ns, bool pass_open, bool compute_open, int64_t limit_ns);
+/** @brief Checks that two chunks of one command set, each submitted as its own batch, run in order: the second reads what the first wrote, and each takes one timeline value. 0 when they do, -1 with no device. */
+int nvn_vk_chunk_check(void);
 /**
  * @brief Checks that a read of guest bytes the open batch writes (a noted write range) submits that batch and waits
  * for it, and that a read beside the range leaves it open. 0 when both hold.
