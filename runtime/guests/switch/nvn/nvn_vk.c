@@ -3705,8 +3705,11 @@ static uint64_t uploads_total;
 
 uint64_t nvn_vk_uploads(void) { return __atomic_load_n(&uploads_total, __ATOMIC_RELAXED); }
 
+static void image_watch(const vimg *v, const char *how, const vimg *from);
+
 static bool upload(replay *r, vimg *v)
 {
+    image_watch(v, "upload from guest bytes", NULL);
     __atomic_fetch_add(&uploads_total, 1, __ATOMIC_RELAXED);
     int64_t t0 = now_ns();
     if (g_recording && !open_pass.open)
@@ -3887,6 +3890,33 @@ void nvn_vk_wb_note(vimg *u)
     wb_log[i].lo = u->storage;
     wb_log[i].hi = u->storage + u->d.size;
     wb_log[i].stamp = u->written;
+}
+
+/** @brief The op of the command being replayed, for the RELIFT_NVN_IMAGE_WATCH lines. */
+static uint32_t watch_op;
+
+/**
+ * @brief RELIFT_NVN_IMAGE_WATCH=format:width:height logs each write to a host image of that format and size (or whose size
+ * is that block grid, a quarter of each side), with the replayed op and, for a sync from an alias, the source's format and size.
+ */
+static void image_watch(const vimg *v, const char *how, const vimg *from)
+{
+    static int on = -1;
+    static uint32_t fmt, w, h;
+    if (on < 0) {
+        const char *e = getenv("RELIFT_NVN_IMAGE_WATCH");
+        on = e && sscanf(e, "%u:%u:%u", &fmt, &w, &h) == 3;
+    }
+    bool full = v->d.width == w && v->d.height == h, blocks = v->d.width == w / 4 && v->d.height == h / 4;
+    if (!on || !(full || blocks) || (full && v->d.format != fmt && !(from && from->d.format == fmt)))
+        return;
+    static uint32_t n;
+    if (n++ > 2000)
+        return;
+    rl_log(RL_LOG_INFO, "imgwatch", "present %llu op %s %s: image storage 0x%llx fmt %u %ux%ux%u target %u block_h %u%s fmt %u %ux%u",
+           (unsigned long long)g.presents, watch_op ? nvn_cmd_name(watch_op) : "-", how, (unsigned long long)v->storage, v->d.format,
+           v->d.width, v->d.height, v->d.depth, v->d.target, v->d.block_h, from ? " from" : "", from ? from->d.format : 0,
+           from ? from->d.width : 0, from ? from->d.height : 0);
 }
 
 static vimg *sync_alias(replay *r, vimg *v);
@@ -4116,6 +4146,8 @@ static vimg *sync_from(replay *r, vimg *v, uint64_t since, bool deferred)
             return v;
         if (src->sync_pending && !sync_alias(r, src))
             return NULL;
+        image_watch(v, src->storage == v->storage && same_rows(&src->d, &v->d) && copy_keeps_bytes(src, v) ? "alias copy" : "alias via guest bytes",
+                    src);
         if (src->storage == v->storage && same_rows(&src->d, &v->d) && copy_keeps_bytes(src, v)) {
             uint32_t h = src->d.height < v->d.height ? src->d.height : v->d.height;
             nvn_vk_begin(r);
@@ -4160,6 +4192,7 @@ static void unlist_written(vimg *v)
 void nvn_vk_written(vimg *v)
 {
     v->written = ++g.write_stamp;
+    image_watch(v, "written", NULL);
     if (v->written_at)
         return;
     if (gpu_written.n == gpu_written.cap) {
@@ -6058,6 +6091,7 @@ static int sched_exec(void *user, const nvn_cmd *e, const nvn_cmdset *s)
 {
     replay *r = &((vk_run *)user)->r;
     r->s = s;
+    watch_op = e->op;
     g_exec_ctx = r->c;
     if (s && e >= s->cmds && e < s->cmds + s->n)
         nvn_label_command(s, (uint32_t)(e - s->cmds), e->op);
