@@ -17,11 +17,14 @@ extensions = []
 [thunks]
 # Written by hand in runtime/gpuapi/i386/vulkan_hand.c as tgh_<name>:
 # function lookup gives guest thunk addresses; host-visible memory must be
-# mapped inside the guest window (VK_EXT_map_memory_placed).
+# mapped inside the guest window (VK_EXT_map_memory_placed); heap sizes
+# are capped for a 32-bit address space (vulkan_heaps.h).
 hand_commands = [
     "vkGetInstanceProcAddr",
     "vkGetDeviceProcAddr",
     "vkMapMemory",
+    "vkGetPhysicalDeviceMemoryProperties",
+    "vkGetPhysicalDeviceMemoryProperties2",
 ]
 # Host allocation callbacks are never forwarded: the driver allocates.
 drop_types = ["VkAllocationCallbacks"]

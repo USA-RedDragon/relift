@@ -15,6 +15,9 @@ cc=${CC:-cc}
 lib32=${LIB32:-/usr/lib32}
 mkdir -p "$out"
 
+"$cc" -std=gnu11 -O2 -Wall -Wextra -Werror -o "$out/vulkan_heaps_test" "$here/vulkan_heaps_test.c"
+"$out/vulkan_heaps_test"
+
 "$zig" cc -target x86-linux-gnu -std=c11 -c -o "$out/vki_layout.o" "$root/runtime/gpuapi/vk/gen/i386/vki_layout.c"
 "$zig" cc -target x86-linux-gnu -O2 -o "$out/vulkan_native" "$here/vulkan_native.c" -ldl -Wl,-rpath,"$lib32"
 "$cc" -std=gnu11 -O2 -Wall -Wextra -Werror -I"$root/runtime/core/include" -I"$root/runtime/core" -o "$out/vulkan_harness" \

@@ -9,9 +9,9 @@
  *
  * Two answers belong to the driver build, not to the thunks, and are left
  * out: pipelineCacheUUID (each driver build has its own caches) and the
- * number of queue families (the x86-64 NVIDIA driver offers one more). Every call is its own statement before the printf
- * that reports it. The includer defines gaddr, galloc, gp and vk(name,
- * slots, n).
+ * number of queue families (the x86-64 NVIDIA driver offers one more).
+ * Every call is its own statement before the printf that reports it. The
+ * includer defines gaddr, galloc, gp and vk(name, slots, n).
  */
 #include <stdio.h>
 #include <string.h>
@@ -42,6 +42,7 @@ enum {
     ST_VK11_FEATURES = 49,
     ST_FEATURES2 = 1000059000,
     ST_PROPS2 = 1000059001,
+    ST_MEMPROPS2 = 1000059006,
     ST_DRIVER_PROPERTIES = 1000196000,
 };
 
@@ -120,6 +121,10 @@ static void scenario(void)
     printf("queue family 0 %08x flags %x\n", fnv(qf, SZ_QFP), rd(qf));
     gaddr mp = galloc(SZ_MEMPROPS);
     VK("vkGetPhysicalDeviceMemoryProperties", pd, mp);
+    gaddr mp2 = galloc(8 + SZ_MEMPROPS);
+    wr(mp2, ST_MEMPROPS2);
+    VK("vkGetPhysicalDeviceMemoryProperties2", pd, mp2);
+    printf("memory properties2 same %d\n", memcmp(gp(mp2 + 8), gp(mp), SZ_MEMPROPS) == 0);
     printf("memory properties %08x types %u heaps %u\n", fnv(mp, SZ_MEMPROPS), rd(mp), rd(mp + 260));
 
     gaddr v11 = galloc(SZ_VK11F);

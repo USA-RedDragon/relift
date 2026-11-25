@@ -12296,6 +12296,8 @@ static void vki_chain_out(tg_call *k, uint32_t g, const void *h)
 uint64_t tgh_vkGetInstanceProcAddr(rl_ctx *c, uint8_t *mem);
 uint64_t tgh_vkGetDeviceProcAddr(rl_ctx *c, uint8_t *mem);
 uint64_t tgh_vkMapMemory(rl_ctx *c, uint8_t *mem);
+uint64_t tgh_vkGetPhysicalDeviceMemoryProperties(rl_ctx *c, uint8_t *mem);
+uint64_t tgh_vkGetPhysicalDeviceMemoryProperties2(rl_ctx *c, uint8_t *mem);
 
 static uint64_t vki_vkAllocateCommandBuffers(rl_ctx *c, uint8_t *mem)
 {
@@ -15017,40 +15019,6 @@ static uint64_t vki_vkGetPhysicalDeviceImageFormatProperties2(rl_ctx *c, uint8_t
     return tg_end(k, 0);
 }
 
-static uint64_t vki_vkGetPhysicalDeviceMemoryProperties(rl_ctx *c, uint8_t *mem)
-{
-    tg_call kk, *k = &kk;
-    tg_begin(k, c, mem);
-    VkPhysicalDevice a0 = (VkPhysicalDevice)tg_unhandle(tg_arg32(k, 0), "vkGetPhysicalDeviceMemoryProperties");
-    uint32_t g1 = tg_arg32(k, 4);
-    uint64_t n1 = 1;
-    VkPhysicalDeviceMemoryProperties *a1 = vki_ain_VkPhysicalDeviceMemoryProperties(k, g1, n1);
-    PFN_vkGetPhysicalDeviceMemoryProperties fn = (PFN_vkGetPhysicalDeviceMemoryProperties)vki_host(179, "vkGetPhysicalDeviceMemoryProperties");
-    fn(a0, a1);
-    {
-        uint64_t w1 = 1;
-        vki_aout_VkPhysicalDeviceMemoryProperties(k, g1, a1, w1 < n1 ? w1 : n1);
-    }
-    return tg_end(k, 0);
-}
-
-static uint64_t vki_vkGetPhysicalDeviceMemoryProperties2(rl_ctx *c, uint8_t *mem)
-{
-    tg_call kk, *k = &kk;
-    tg_begin(k, c, mem);
-    VkPhysicalDevice a0 = (VkPhysicalDevice)tg_unhandle(tg_arg32(k, 0), "vkGetPhysicalDeviceMemoryProperties2");
-    uint32_t g1 = tg_arg32(k, 4);
-    uint64_t n1 = 1;
-    VkPhysicalDeviceMemoryProperties2 *a1 = vki_ain_VkPhysicalDeviceMemoryProperties2(k, g1, n1);
-    PFN_vkGetPhysicalDeviceMemoryProperties2 fn = (PFN_vkGetPhysicalDeviceMemoryProperties2)vki_host(180, "vkGetPhysicalDeviceMemoryProperties2");
-    fn(a0, a1);
-    {
-        uint64_t w1 = 1;
-        vki_aout_VkPhysicalDeviceMemoryProperties2(k, g1, a1, w1 < n1 ? w1 : n1);
-    }
-    return tg_end(k, 0);
-}
-
 static uint64_t vki_vkGetPhysicalDeviceProperties(rl_ctx *c, uint8_t *mem)
 {
     tg_call kk, *k = &kk;
@@ -15727,8 +15695,8 @@ static const tg_fn vki_table[215] = {
     {"vkGetPhysicalDeviceFormatProperties2", vki_vkGetPhysicalDeviceFormatProperties2},
     {"vkGetPhysicalDeviceImageFormatProperties", vki_vkGetPhysicalDeviceImageFormatProperties},
     {"vkGetPhysicalDeviceImageFormatProperties2", vki_vkGetPhysicalDeviceImageFormatProperties2},
-    {"vkGetPhysicalDeviceMemoryProperties", vki_vkGetPhysicalDeviceMemoryProperties},
-    {"vkGetPhysicalDeviceMemoryProperties2", vki_vkGetPhysicalDeviceMemoryProperties2},
+    {"vkGetPhysicalDeviceMemoryProperties", tgh_vkGetPhysicalDeviceMemoryProperties},
+    {"vkGetPhysicalDeviceMemoryProperties2", tgh_vkGetPhysicalDeviceMemoryProperties2},
     {"vkGetPhysicalDeviceProperties", vki_vkGetPhysicalDeviceProperties},
     {"vkGetPhysicalDeviceProperties2", vki_vkGetPhysicalDeviceProperties2},
     {"vkGetPhysicalDeviceQueueFamilyProperties", vki_vkGetPhysicalDeviceQueueFamilyProperties},

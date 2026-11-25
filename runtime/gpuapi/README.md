@@ -14,7 +14,7 @@ rest is hand-written. Design: `.work/design/017-gpu-api-forwarding.md`.
 | `i386/gl_hand.c` | Buffer offsets in pointer arguments (`tg_gl_offset`, decided by the bound buffer) and buffer mapping through a guest copy |
 | `i386/glx_hand.c` | Every GLX command: the bridge from the guest's lifted X11 display and visuals to a host connection |
 | `i386/egl_hand.c` | eglGetDisplay, eglGetPlatformDisplay (the guest's X11 display), eglGetProcAddress (guest thunk addresses) |
-| `i386/vulkan_hand.c` | vkGetInstanceProcAddr and vkGetDeviceProcAddr (guest thunk addresses); vkMapMemory fails until the guest layer places host mappings in the guest window |
+| `i386/vulkan_hand.c`, `i386/vulkan_heaps.h` | vkGetInstanceProcAddr and vkGetDeviceProcAddr (guest thunk addresses); vkGetPhysicalDeviceMemoryProperties and its 2 form (host-visible heaps capped at 3 GiB for a 32-bit guest); vkMapMemory fails until the guest layer places host mappings in the guest window |
 | `i386/tests/` | `gl_check.sh` (GL over EGL), `glx_check.sh` (GL over GLX on Xvfb), `vulkan_check.sh`: each scenario built natively for i386 and through the thunks, reports compared (`scripts/ci/tests-gpuapi.sh`) |
 
 Regenerate after a change to `gpus/apigen` or a configuration:
