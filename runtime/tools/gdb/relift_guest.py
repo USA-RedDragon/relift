@@ -14,8 +14,9 @@ gets an empty reply.
 
 import gdb
 import gdb.unwinder
+from gdb.FrameDecorator import FrameDecorator
 
-# Frames per thread for the current stop: {thread number: [(pc, sp, fp), ...]}.
+# Frames per thread for the current stop: {thread number: [(pc, sp, fp, name), ...]}.
 _cache = {}
 
 
@@ -43,7 +44,10 @@ def _frames(thread):
         if isinstance(reply, bytes):
             reply = reply.decode("ascii", "replace")
         if reply and reply[0] != "E":
-            frames = [tuple(int(v, 16) for v in f.split(",")) for f in reply.split(";")]
+            frames = []
+            for f in reply.split(";"):
+                pc, sp, fp, name = f.split(",")
+                frames.append((int(pc, 16), int(sp, 16), int(fp, 16), bytes.fromhex(name).decode("utf-8", "replace")))
     _cache[thread.num] = frames
     return frames
 
@@ -88,12 +92,12 @@ class ReliftGuestUnwinder(gdb.unwinder.Unwinder):
         spv = pending.read_register("sp")
         fpv = pending.read_register("x29")
         pc, sp = int(pcv), int(spv)
-        for i, (fpc, fsp, _) in enumerate(frames):
+        for i, (fpc, fsp, _, _) in enumerate(frames):
             if fpc != pc or fsp != sp:
                 continue
             info = pending.create_unwind_info(_FrameId(sp, pc))
             if i + 1 < len(frames):
-                npc, nsp, nfp = frames[i + 1]
+                npc, nsp, nfp, _ = frames[i + 1]
             else:
                 # The outermost guest frame: a zero return address ends the backtrace.
                 npc, nsp, nfp = 0, sp, 0
@@ -105,4 +109,33 @@ class ReliftGuestUnwinder(gdb.unwinder.Unwinder):
 
 
 gdb.unwinder.register_unwinder(None, ReliftGuestUnwinder(), replace=True)
+
+
+class ReliftGuestEnd:
+    """Drops the zero-pc frame that the outermost guest frame's zero return address leaves after it, so bt ends at
+    the outermost guest call, and names each guest frame."""
+
+    def __init__(self):
+        self.name = "relift guest end"
+        self.priority = 100
+        self.enabled = True
+        gdb.frame_filters[self.name] = self
+
+    def filter(self, frames):
+        return (_Named(f) for f in frames if f.inferior_frame().level() == 0 or f.inferior_frame().pc() != 0)
+
+
+class _Named(FrameDecorator):
+    """A guest frame named for its lifted function (`module+0xoff name`), as the server's walk names it."""
+
+    def function(self):
+        frame = self.inferior_frame()
+        thread = gdb.selected_thread()
+        for f in _cache.get(thread.num) or () if thread else ():
+            if f[0] == frame.pc() and f[3]:
+                return f[3]
+        return super().function()
+
+
+ReliftGuestEnd()
 _prefetch()

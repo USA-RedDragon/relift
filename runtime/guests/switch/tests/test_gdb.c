@@ -169,6 +169,14 @@ TEST(gdb_server_reads_and_writes_guest_registers_and_memory)
     CHECK(strcmp(s.detach, "OK") == 0);
 }
 
+/** @brief A stand-in host function for the frame-walk maps. */
+static uint64_t bt_fn(rl_ctx *c, uint8_t *mem)
+{
+    (void)c;
+    (void)mem;
+    return RL_OK;
+}
+
 /**
  * @brief For tools/gdb/stub-test.sh, which runs a real gdb against it: with RELIFT_GDB_TEST_PORT set, serves the
  * guest with known registers and memory until the debugger writes 1 to the word at heap + 16 (up to 30 s);
@@ -204,6 +212,17 @@ TEST(gdb_serve_for_a_debugger)
     rl_st64(m, fp_mid + 8, heap + 0x814);
     rl_st64(m, fp_outer, 0);
     rl_st64(m, fp_outer + 8, 0);
+    static rl_fn_info nest[3];
+    for (int i = 0; i < 3; i++)
+        nest[i] = (rl_fn_info){ .guest_addr = heap + 0x800 + 0x100u * (uint64_t)i,
+                                .fn_addr = heap + 0x800 + 0x100u * (uint64_t)i,
+                                .guest_size = 0x100,
+                                .fn = bt_fn,
+                                .host_sym = i == 0 ? "outer" : i == 1 ? "mid" : "inner" };
+    static rl_fn_map nest_map = { RL_FN_MAP_VERSION, 3, nest, "nest", "nest-0", 0, NULL, NULL };
+    nest_map.module_base = heap;
+    const rl_fn_map *nest_maps[] = { &nest_map };
+    CHECK_EQ(rl_fn_maps_register(nest_maps, 1), 0);
     c->x[29] = fp_inner;
     c->x[30] = heap + 0x914;
     c->sp = heap + 0xec0;
@@ -490,14 +509,6 @@ static bool stack_read(uint64_t a, void *dst, size_t n)
         return false;
     memcpy(dst, (uint8_t *)g_stack + (a - 0x9000), n);
     return true;
-}
-
-/** @brief A stand-in host function for the frame-walk map. */
-static uint64_t bt_fn(rl_ctx *c, uint8_t *mem)
-{
-    (void)c;
-    (void)mem;
-    return RL_OK;
 }
 
 /** @brief Registers outer, mid and inner at guest 0x7000000, + 0x100 and + 0x200, 0x100 bytes each. */

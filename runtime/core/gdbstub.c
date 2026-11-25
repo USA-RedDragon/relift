@@ -749,6 +749,65 @@ static uint32_t walk(rl_gdb_thread *t, rl_gdb_frame *out, uint32_t max)
     return G.cpu->frames(t->ctx, pc, out, max, frame_read);
 }
 
+/** @brief The number of the register named name (len bytes) in the target description, or -1. */
+static int reg_by_name(const char *name, size_t len)
+{
+    int n = 0;
+    for (const char *p = G.cpu->target_xml; (p = strstr(p, "<reg ")); p++, n++) {
+        const char *e = strchr(p, '>'), *rn = strstr(p, "regnum=\""), *nm = strstr(p, "name=\"");
+        if (rn && rn < e)
+            n = atoi(rn + 8);
+        if (nm && nm < e && strncmp(nm + 6, name, len) == 0 && nm[6 + len] == '"')
+            return n;
+    }
+    return -1;
+}
+
+/**
+ * docgen:region monitor-args
+ * @brief The address argument of a monitor command. gdb sends the text after `monitor` as typed, without evaluating
+ * it, so the server reads it here: a hex number (0x optional), or a register of the current thread by its name in the
+ * target description, with or without `$` (`$pc`, `x30`), either one optionally followed by `+` or `-` and a hex
+ * number. False when the text is none of these.
+ * docgen:end
+ */
+static bool monitor_addr(const char *p, uint64_t *out)
+{
+    while (*p == ' ')
+        p++;
+    bool reg = *p == '$';
+    p += reg;
+    const char *s = p;
+    while ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') || *p == '_')
+        p++;
+    const char *num = s + (s[0] == '0' && (s[1] == 'x' || s[1] == 'X') ? 2 : 0), *q = num;
+    uint64_t v = parse_hex(&q);
+    if (reg || q != p || q == num) {
+        int r = p > s ? reg_by_name(s, (size_t)(p - s)) : -1;
+        rl_gdb_thread *t = thread_by_id(G.cur);
+        if (r < 0 || !t || !t->ctx || G.cpu->reg_size((uint32_t)r) > 8)
+            return false;
+        uint8_t b[8] = { 0 };
+        reg_read(t->ctx, (uint32_t)r, b);
+        memcpy(&v, b, 8);
+    }
+    while (*p == ' ')
+        p++;
+    if (*p == '+' || *p == '-') {
+        char op = *p++;
+        while (*p == ' ')
+            p++;
+        if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X'))
+            p += 2;
+        uint64_t d = parse_hex(&p);
+        v = op == '+' ? v + d : v - d;
+    }
+    while (*p == ' ')
+        p++;
+    *out = v;
+    return *p == 0;
+}
+
 static void monitor(const char *hex)
 {
     char cmd[256];
@@ -760,12 +819,11 @@ static void monitor(const char *hex)
     cmd[n] = 0;
     char text[1024];
     if (strncmp(cmd, "sym ", 4) == 0) {
-        const char *p = cmd + 4;
-        if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X'))
-            p += 2;
-        uint64_t a = parse_hex(&p);
+        uint64_t a = 0;
         char nm[512] = "";
-        if (!name_at(nm, sizeof nm, a))
+        if (!monitor_addr(cmd + 4, &a))
+            snprintf(nm, sizeof nm, "not an address or a register: %s", cmd + 4);
+        else if (!name_at(nm, sizeof nm, a))
             snprintf(nm, sizeof nm, "no lifted function holds 0x%llx", (unsigned long long)a);
         snprintf(text, sizeof text, "%s\n", nm);
     } else if (strcmp(cmd, "bt") == 0) {
@@ -782,7 +840,7 @@ static void monitor(const char *hex)
                                   nm[0] ? nm : "(no lifted function)");
         }
     } else {
-        snprintf(text, sizeof text, "relift monitor commands: sym <guest address>, bt\n");
+        snprintf(text, sizeof text, "relift monitor commands: sym <address, $register or $register+offset>, bt\n");
     }
     G.out[0] = 'O';
     to_hex(G.out + 1, (const uint8_t *)text, strlen(text));
@@ -882,15 +940,20 @@ static void serve(void)
         } else if ((a = after(p, "qRcmd,"))) {
             monitor(a);
         } else if ((a = after(p, "qRelift.frames:"))) {
-            /* The guest backtrace of one thread for tools/gdb/relift_guest.py: pc,sp,fp per frame, innermost first. */
+            /* The guest backtrace of one thread for tools/gdb/relift_guest.py: pc,sp,fp,hex name per frame, innermost first. */
             rl_gdb_frame f[MAX_FRAMES];
             uint32_t n = walk(thread_by_id(parse_hex(&a)), f, MAX_FRAMES);
             size_t o = 0;
             G.out[0] = 0;
-            for (uint32_t i = 0; i < n; i++)
-                o += (size_t)snprintf(G.out + o, sizeof G.out - o, "%s%llx,%llx,%llx", i ? ";" : "",
+            for (uint32_t i = 0; i < n && o + 400 < sizeof G.out; i++) {
+                char nm[180] = "";
+                size_t w = name_at(nm, sizeof nm, f[i].pc);
+                o += (size_t)snprintf(G.out + o, sizeof G.out - o, "%s%llx,%llx,%llx,", i ? ";" : "",
                                       (unsigned long long)f[i].pc, (unsigned long long)f[i].sp,
                                       (unsigned long long)f[i].fp);
+                to_hex(G.out + o, (const uint8_t *)nm, w);
+                o += 2 * w;
+            }
             reply(n ? G.out : "E01");
         } else if (strcmp(p, "?") == 0) {
             stop_reply(5);

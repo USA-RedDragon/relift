@@ -2,7 +2,8 @@
 # Tests the runtime's GDB server (core/gdbstub.c) with a real gdb: starts the
 # Switch layer's test guest serving on a port (the switch_tests test
 # gdb_serve_for_a_debugger), then gdb in batch mode attaches, lists the
-# threads, walks the guest backtrace of three nested calls, reads x0 and
+# threads, walks the guest backtrace of three nested calls (monitor bt and
+# bt with relift_guest.py), names $pc and x30 - 4 with monitor sym, reads x0 and
 # guest memory, writes x2, stops at a breakpoint and a write watchpoint
 # (x86-64 hosts), writes a word, and detaches.
 #
@@ -64,7 +65,8 @@ if [ -z "$heap" ]; then
     echo "stub-test: the test guest did not start"; cat "$out/serve.log"; kill $pid 2>/dev/null; exit 1
 fi
 "$gdb_bin" -batch -nx -iex "set debuginfod enabled off" -ex "set architecture aarch64" ${GDB_DEBUG:+-ex "set debug remote 1"} \
-    -ex "source $here/relift_guest.py" -ex "target remote 127.0.0.1:$port" -ex 'info threads' -ex 'monitor bt' -ex bt -ex 'p/x $x0' -ex "x/2gx $heap" \
+    -ex "source $here/relift_guest.py" -ex "target remote 127.0.0.1:$port" -ex 'info threads' -ex 'monitor bt' -ex bt \
+    -ex 'monitor sym $pc' -ex 'monitor sym x30 - 4' -ex 'p/x $x0' -ex "x/2gx $heap" \
     -ex 'set $x2 = 0x42' -ex 'break *0x8001000' -ex continue -ex 'p/x $pc' -ex delete \
     -ex "watch *(long *)($heap + 0x40)" -ex continue -ex continue -ex continue -ex continue -ex delete \
     -ex "set {int}($heap + 16) = 1" -ex detach >"$out/gdb.log" 2>&1 || true
@@ -80,8 +82,12 @@ expect '0x123456789abcdef'
 expect '0x1122334455667788'
 expect '0x99aabbccddeeff00'
 # The test guest stops in the innermost of three nested calls (frame records at heap + 0xf00).
-expect "#2 $(printf '0x%x' $((heap + 0x814)))"
-expect "#2  $(printf '0x%016x' $((heap + 0x814))) in"
+expect "#2 $(printf '0x%x' $((heap + 0x814))) nest+0x800 outer"
+expect "#2  $(printf '0x%016x' $((heap + 0x814))) in nest+0x800 outer ()"
+if grep -q '^#3 ' "$out/gdb.log"; then echo "stub-test: bt goes past the outermost guest frame"; fail=1; fi
+# monitor reads registers of the current thread: gdb sends the text unevaluated.
+expect '^nest+0xa00 inner$'
+expect '^nest+0x900 mid$'
 if [ "$(uname -m)" = x86_64 ]; then
     expect 'Breakpoint 1, 0x0000000008001000'
     expect 'atchpoint 2: '
