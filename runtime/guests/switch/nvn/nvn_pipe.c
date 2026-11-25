@@ -16,6 +16,7 @@
 
 #include <errno.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <dirent.h>
@@ -221,10 +222,14 @@ static entry *claim(table *t, const void *key, size_t len, bool *mine)
     return e;
 }
 
+/** @brief Counts every change a draw's pipeline can depend on: an entry finished, or the warm-up ended. */
+static _Atomic uint64_t g_gen;
+
 static void finish(entry *e, VkPipeline p)
 {
     pthread_mutex_lock(&P.lock);
     e->p = p;
+    atomic_fetch_add_explicit(&g_gen, 1, memory_order_release);
     e->state = p ? 1 : 2;
     pthread_cond_broadcast(&P.cv);
     pthread_mutex_unlock(&P.lock);
@@ -1136,7 +1141,37 @@ void nvn_pipe_stats_log(VkPipeline p, const char *vs, const char *fs)
     pthread_mutex_unlock(&mu);
 }
 
+/**
+ * @brief The last pipelines nvn_pipe_graphics gave a thread, by key: a draw whose key is one of them, with nothing made
+ * or finished since, gets its pipeline without the hashes of the library keys and the table walks (a scene draws
+ * hundreds of times a present with a few keys).
+ */
+#define GFX_MEMO 16u
+static _Thread_local struct {
+    nvn_pipe_key k;
+    VkPipeline p;
+    uint64_t gen;
+} t_gfx_memo[GFX_MEMO];
+
+static VkPipeline graphics_made(const nvn_pipe_key *k);
+
 VkPipeline nvn_pipe_graphics(const nvn_pipe_key *k)
+{
+    uint64_t gen = atomic_load_explicit(&g_gen, memory_order_acquire);
+    uintptr_t m = (uintptr_t)k->mods[0] * 31u + (uintptr_t)k->mods[1];
+    uint32_t i = (uint32_t)((m >> 4) ^ (m >> 9)) % GFX_MEMO;
+    if (t_gfx_memo[i].p && t_gfx_memo[i].gen == gen && !memcmp(&t_gfx_memo[i].k, k, sizeof *k))
+        return t_gfx_memo[i].p;
+    VkPipeline p = graphics_made(k);
+    if (p && !k->capture_stats && atomic_load_explicit(&g_gen, memory_order_acquire) == gen) {
+        t_gfx_memo[i].k = *k;
+        t_gfx_memo[i].p = p;
+        t_gfx_memo[i].gen = gen;
+    }
+    return p;
+}
+
+static VkPipeline graphics_made(const nvn_pipe_key *k)
 {
     maybe_save();
     if (!P.gpl || k->mesh_mode || extra_stages(k) || k->capture_stats) {
@@ -1301,8 +1336,17 @@ VkPipeline nvn_pipe_mesh_compute(nvn_shader_id m, uint32_t n, const VkSpecializa
 /** @brief Adds rec to the records of this launch unless one with the same bytes is there; true when it was new. */
 static bool record(const nvn_pipe_rec *rec)
 {
+    /* A record seen stays seen for the launch, and a scene repeats a few hundred of them per present: the thread's last
+     * ones are compared by bytes before the table is asked. */
+    static _Thread_local nvn_pipe_rec recent[32];
+    static _Thread_local uint32_t next;
+    for (uint32_t i = 0; i < 32; i++)
+        if (!memcmp(&recent[i], rec, sizeof *rec))
+            return false;
     bool mine;
     entry *e = claim(&P.seen, rec, sizeof *rec, &mine);
+    if (e)
+        recent[next++ % 32] = *rec;
     if (!e || !mine)
         return false;
     finish(e, NULL);
@@ -1371,10 +1415,15 @@ void nvn_pipe_warmed(void)
 {
     P.warmed = true;
     nvn_module_release_idle();
+    atomic_fetch_add_explicit(&g_gen, 1, memory_order_release);
     nvn_pipe_save();
 }
 
-void nvn_pipe_set_warmed(bool warmed) { P.warmed = warmed; }
+void nvn_pipe_set_warmed(bool warmed)
+{
+    P.warmed = warmed;
+    atomic_fetch_add_explicit(&g_gen, 1, memory_order_release);
+}
 
 void nvn_pipe_stats(uint64_t *made, uint64_t *made_ns, uint64_t *late, uint64_t *late_ns)
 {
