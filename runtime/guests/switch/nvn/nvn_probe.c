@@ -79,12 +79,17 @@ bool nvn_probe_gfma_check(const uint32_t *w)
         if (den)
             continue;
         /* A NaN is any NaN (the translator canonicalizes it); every other result matches bit for bit, signed zeros included. */
-        if (gfma_nan(f) ? !gfma_nan(g) : g != f)
+        if (gfma_nan(f) ? !gfma_nan(g) : g != f) {
+            rl_log(RL_LOG_INFO, "nvn", "fused multiply-add probe: row %u a %08x b %08x c %08x gave %08x, fmaf %08x", i, w[3 * i],
+                   w[3 * i + 1], w[3 * i + 2], g, f);
             return false;
+        }
         uint32_t u;
         memcpy(&u, &unfused, 4);
         differ += u != f && !gfma_nan(f);
     }
+    if (differ < 64)
+        rl_log(RL_LOG_INFO, "nvn", "fused multiply-add probe: only %u rows tell a fused result from two roundings", differ);
     return differ >= 64;
 }
 
