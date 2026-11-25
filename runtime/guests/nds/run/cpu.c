@@ -30,6 +30,8 @@
  */
 #include "cpu.h"
 
+#include "gdbstub.h"
+
 #include "bios.h"
 
 #include <stdio.h>
@@ -785,8 +787,78 @@ static void body(rl_sched_cpu *s, void *arg)
         k->stopped = 2;
 }
 
+#if defined(RL_DEBUG_STUB)
+/** @brief The run the GDB server serves. */
+static rl_nds_run *g_gdb_run;
+
+/**
+ * docgen:region gdb
+ * @brief The GDB server's threads: 1 the ARM9, 2 the ARM7. Both CPUs are fibers of one host thread, so a stop ends
+ * when the first of them parks at a sync point (one_runs); the other is then suspended inside the scheduler with its
+ * registers stored, at its last sync point (pc exact) or at a memory access it made since (pc of that sync point,
+ * marked so in the thread list).
+ * docgen:end
+ */
+static uint32_t gdb_threads(rl_gdb_thread *out, uint32_t max)
+{
+    rl_nds_run *r = g_gdb_run;
+    if (!r)
+        return 0;
+    for (uint32_t i = 0; i < 2 && i < max; i++) {
+        rl_nds_arm *k = &r->cpu[i];
+        uint64_t pc = 0;
+        bool exact = rl_sched_sync_pc(k->k, &pc);
+        if (!pc) {
+            /* No sync point yet: the CPU has not run, or waits at an access of its first block. */
+            pc = k->entry;
+            exact = false;
+        }
+        bool running = !k->stopped;
+        out[i] = (rl_gdb_thread){ .id = i + 1u, .ctx = k->c, .core = (int32_t)i, .running = running,
+                                  .has_pc = pc != 0, .pc_exact = exact, .pc = pc };
+    }
+    return 2;
+}
+
+/**
+ * docgen:region gdb-memory
+ * @brief Memory of the selected CPU's map (thread 1 the ARM9's, 2 the ARM7's) without timing (rl_nds_read). The
+ * I/O registers (0x04000000 to 0x04FFFFFF) are refused for now: their reads go through the scheduler, which catches
+ * devices up.
+ * docgen:end
+ */
+static size_t gdb_read(uint64_t tid, uint64_t a, uint8_t *dst, size_t n)
+{
+    rl_nds_run *r = g_gdb_run;
+    unsigned cpu = tid == 2 ? RL_NDS_ARM7 : RL_NDS_ARM9;
+    size_t i = 0;
+    for (; r && i < n && a + i <= UINT32_MAX && (a + i) >> 24 != 0x4; i++)
+        dst[i] = (uint8_t)rl_nds_read(r->m, cpu, (uint32_t)(a + i), 1);
+    return i;
+}
+
+static bool gdb_write(uint64_t tid, uint64_t a, const uint8_t *src, size_t n)
+{
+    rl_nds_run *r = g_gdb_run;
+    unsigned cpu = tid == 2 ? RL_NDS_ARM7 : RL_NDS_ARM9;
+    if (!r || a + n > (uint64_t)UINT32_MAX + 1)
+        return false;
+    for (size_t i = 0; i < n; i++)
+        rl_nds_write(r->m, cpu, (uint32_t)(a + i), 1, src[i]);
+    return true;
+}
+
+static const rl_gdb_guest g_gdb_guest = {
+    .threads = gdb_threads, .mem_read = gdb_read, .mem_write = gdb_write, .clocked = true, .one_runs = true
+};
+#endif
+
 int rl_nds_run_start(rl_nds_run *r)
 {
+#if defined(RL_DEBUG_STUB)
+    g_gdb_run = r;
+    rl_gdb_start(rl_arm32_gdb(), &g_gdb_guest);
+#endif
     for (unsigned i = 0; i < 2; i++)
         if (rl_sched_spawn(r->cpu[i].k, body, &r->cpu[i]) != 0)
             return -1;
@@ -797,6 +869,10 @@ int rl_nds_run_start(rl_nds_run *r)
 
 void rl_nds_run_free(rl_nds_run *r)
 {
+#if defined(RL_DEBUG_STUB)
+    if (g_gdb_run == r)
+        g_gdb_run = NULL;
+#endif
     rl_arm32_set_miss(NULL);
     if (r->s)
         rl_sched_destroy(r->s);

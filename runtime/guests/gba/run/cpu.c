@@ -400,8 +400,9 @@ static uint32_t gdb_threads(rl_gdb_thread *out, uint32_t max)
  * from its state without catching up; writes go through the bus as the CPU's stores do (rl_gba_write).
  * docgen:end
  */
-static size_t gdb_read(uint64_t a, uint8_t *dst, size_t n)
+static size_t gdb_read(uint64_t tid, uint64_t a, uint8_t *dst, size_t n)
 {
+    (void)tid;
     size_t i = 0;
     for (; i < n && a + i <= UINT32_MAX && g_run; i++) {
         uint32_t at = (uint32_t)(a + i), v;
@@ -414,8 +415,9 @@ static size_t gdb_read(uint64_t a, uint8_t *dst, size_t n)
     return i;
 }
 
-static bool gdb_write(uint64_t a, const uint8_t *src, size_t n)
+static bool gdb_write(uint64_t tid, uint64_t a, const uint8_t *src, size_t n)
 {
+    (void)tid;
     if (!g_run || a + n > (uint64_t)UINT32_MAX + 1)
         return false;
     for (size_t i = 0; i < n; i++)

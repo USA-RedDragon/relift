@@ -46,6 +46,9 @@ struct rl_sched_cpu {
     void *arg;
     bool active;
     bool halted;
+    /** @brief In rl_sync, which saw sync_pc as its next pc; set for a debugger (rl_sched_sync_pc). */
+    bool in_sync;
+    uint64_t sync_pc;
 };
 
 struct rl_sched {

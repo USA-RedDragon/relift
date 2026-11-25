@@ -235,6 +235,11 @@ RL_RUNTIME_API rl_sched *rl_sched_of(const rl_sched_cpu *c);
 RL_RUNTIME_API uint32_t rl_sched_index(const rl_sched_cpu *c);
 /** @brief The number of CPUs s has. */
 RL_RUNTIME_API uint32_t rl_sched_cpu_count(const rl_sched *s);
+/**
+ * @brief For a debugger: the next pc of c's last sync point in *pc, and true while c waits inside that sync point
+ * (false: it waits at an access since, its registers stored but its pc from before). False with *pc 0 before any.
+ */
+RL_RUNTIME_API bool rl_sched_sync_pc(const rl_sched_cpu *c, uint64_t *pc);
 /** @brief The CPU that holds the run (the one whose access or sync is being served), or NULL. */
 RL_RUNTIME_API rl_sched_cpu *rl_sched_current(rl_sched *s);
 /** @brief The code a spawned CPU runs: body(c, arg) on c's fiber. */

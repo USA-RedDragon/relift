@@ -54,11 +54,33 @@ static rl_sched_cpu *ctx_clock(rl_ctx *c)
     return t ? t->clock : NULL;
 }
 
+bool rl_sched_sync_pc(const rl_sched_cpu *c, uint64_t *pc)
+{
+    *pc = c->sync_pc;
+    return c->in_sync;
+}
+
+static int sync_run(rl_ctx *c, rl_sched_cpu *k, uint8_t *mem, uint64_t next);
+
 int rl_sync(rl_ctx *c, uint8_t *mem, uint64_t next)
 {
     rl_sched_cpu *k = ctx_clock(c);
     if (!k)
         return rl_guest_fatal(c, "sched", "sync point reached on a thread without a scheduler clock");
+    /* An interrupt handler entered here runs its own sync points: the outer one is restored after. */
+    bool was = k->in_sync;
+    uint64_t was_pc = k->sync_pc;
+    k->sync_pc = next;
+    k->in_sync = true;
+    int r = sync_run(c, k, mem, next);
+    k->in_sync = was;
+    k->sync_pc = was ? was_pc : next;
+    return r;
+}
+
+/** @brief The body of rl_sync. */
+static int sync_run(rl_ctx *c, rl_sched_cpu *k, uint8_t *mem, uint64_t next)
+{
     /* docgen:region sync-point */
     /* A sync point is a safe point for the GDB server: the exit's registers are stored and next is the guest pc. A
      * stop request ends the budget (rl_preempt_request), so the thread parks here at its next sync point. */

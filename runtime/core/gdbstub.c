@@ -202,9 +202,15 @@ static void stop_all(void)
     pthread_mutex_lock(&G.lock);
     for (;;) {
         list_threads();
-        bool all = true;
-        for (uint32_t i = 0; i < G.nth && all; i++)
-            all = !G.th[i].running || find_parked(G.th[i].ctx);
+        bool all = true, any = false, live = false;
+        for (uint32_t i = 0; i < G.nth; i++) {
+            bool parked_now = find_parked(G.th[i].ctx) != NULL;
+            all = all && (!G.th[i].running || parked_now);
+            any = any || parked_now;
+            live = live || G.th[i].running;
+        }
+        if (G.guest->one_runs)
+            all = any || !live;
         if (all || now_ns() >= until)
             break;
         struct timespec ts;
@@ -472,11 +478,15 @@ static void threads_xml(const char *args)
         uint64_t pc = t->ctx && G.cpu->pc ? G.cpu->pc(t->ctx) : 0;
         if (p && p->has_pc)
             pc = p->pc;
+        else if (!p && t->has_pc)
+            pc = t->pc;
         name_at(nm, sizeof nm, pc);
         escape_xml(esc, sizeof esc, nm);
         const char *state = p ? (p->exact ? "stopped" : "stopped at a preemption check, registers of its last call")
-                            : t->running ? "running (did not reach a safe point)"
-                                         : "waiting in the runtime";
+                            : t->running && !(G.guest->one_runs && G.nparked) ? "running (did not reach a safe point)"
+                            : t->has_pc && !t->pc_exact
+                                ? "waiting at a memory access; registers exact, pc of its last sync point"
+                                : "waiting in the runtime";
         o += (size_t)snprintf(xml + o, sizeof xml - o, "<thread id=\"%llx\" core=\"%d\" name=\"%llu\">%s; pc 0x%llx %s</thread>",
                               (unsigned long long)t->id, t->core, (unsigned long long)t->id, state,
                               (unsigned long long)pc, esc);
@@ -490,7 +500,7 @@ static void threads_xml(const char *args)
 static size_t mem_read(uint64_t a, uint8_t *dst, size_t n)
 {
     if (G.guest->mem_read)
-        return G.guest->mem_read(a, dst, n);
+        return G.guest->mem_read(G.cur, a, dst, n);
     rl_vm *vm = G.guest->vm;
     size_t done = 0;
     while (done < n) {
@@ -511,7 +521,7 @@ static size_t mem_read(uint64_t a, uint8_t *dst, size_t n)
 static bool mem_write(uint64_t a, const uint8_t *src, size_t n)
 {
     if (G.guest->mem_write)
-        return G.guest->mem_write(a, src, n);
+        return G.guest->mem_write(G.cur, a, src, n);
     rl_vm *vm = G.guest->vm;
     if (!rl_vm_contains(vm, a, n))
         return false;
@@ -899,8 +909,12 @@ static void reg_read(rl_ctx *c, uint32_t r, uint8_t *out)
     G.cpu->reg_read(c, r, out);
     pthread_mutex_lock(&G.lock);
     parked *p = find_parked(c);
+    uint32_t w = G.cpu->reg_size(r) < 8 ? G.cpu->reg_size(r) : 8;
     if (p && p->has_pc && r == G.cpu->pc_reg)
-        memcpy(out, &p->pc, 8);
+        memcpy(out, &p->pc, w);
+    for (uint32_t i = 0; !p && r == G.cpu->pc_reg && i < G.nth; i++)
+        if (G.th[i].ctx == c && G.th[i].has_pc)
+            memcpy(out, &G.th[i].pc, w);
     pthread_mutex_unlock(&G.lock);
 }
 

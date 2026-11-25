@@ -75,6 +75,12 @@ typedef struct rl_gdb_thread {
     int32_t core;
     /** @brief True while it may be running lifted code (it holds a core); false when it waits in the runtime. */
     bool running;
+    /**
+     * @brief For a waiting thread whose context does not hold its pc: the guest pc it resumes at (pc_exact), or the
+     * next pc of its last sync point (registers exact, pc from before its current access); has_pc false otherwise.
+     */
+    bool has_pc, pc_exact;
+    uint64_t pc;
 } rl_gdb_thread;
 
 /** @brief A guest layer's side of the stub. */
@@ -87,14 +93,22 @@ typedef struct rl_gdb_guest {
      * @brief Reads n bytes at guest address a into dst without side effects (a register read never clears a flag or
      * pops a queue); returns how many it read from the start. NULL: read vm.
      */
-    size_t (*mem_read)(uint64_t a, uint8_t *dst, size_t n);
-    /** @brief Writes n bytes at guest address a as the guest's own stores would; false where it cannot. NULL: write vm. */
-    bool (*mem_write)(uint64_t a, const uint8_t *src, size_t n);
+    size_t (*mem_read)(uint64_t tid, uint64_t a, uint8_t *dst, size_t n);
+    /**
+     * @brief Writes n bytes at guest address a as the guest's own stores would; false where it cannot. NULL: write vm.
+     * Both callbacks get the id of the thread the debugger selected, for guests whose CPUs see different maps.
+     */
+    bool (*mem_write)(uint64_t tid, uint64_t a, const uint8_t *src, size_t n);
     /**
      * @brief The guest runs on a cycle clock whose own events bring it to a sync point often (rl_sync): a stop waits
      * for that and leaves the budget alone, since ending the budget early would move the guest's clock.
      */
     bool clocked;
+    /**
+     * @brief The guest's threads take turns on one host thread (fibers of one scheduler): a stop is complete once one
+     * of them parks, since no other can run until it resumes.
+     */
+    bool one_runs;
 } rl_gdb_guest;
 
 #if defined(RL_DEBUG_STUB)
