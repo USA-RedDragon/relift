@@ -37,6 +37,7 @@
 #include "spirvval.h"
 
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdarg.h>
 #if !defined(_WIN32)
 #include <sys/mman.h>
@@ -6137,10 +6138,37 @@ bool nvn_vk_upload_bank(replay *r, const void *src, uint64_t n, uint64_t pad, ui
     return true;
 }
 
+static void getter_count(const char *name);
+
+/** @brief Guest calls replay made through nvn_vk_getter since the last per-present line, by getter name (a diagnostic of what keeps replay on a guest thread). */
+static struct {
+    const char *name[64];
+    _Atomic uint64_t n[64];
+    _Atomic uint64_t view_reads;
+} gc;
+
+void nvn_vk_count_guest_call(const char *name) { getter_count(name); }
+
+static void getter_count(const char *name)
+{
+    for (uint32_t i = 0; i < 64; i++) {
+        if (gc.name[i] == name) {
+            atomic_fetch_add_explicit(&gc.n[i], 1, memory_order_relaxed);
+            return;
+        }
+        if (!gc.name[i]) {
+            gc.name[i] = name;
+            atomic_fetch_add_explicit(&gc.n[i], 1, memory_order_relaxed);
+            return;
+        }
+    }
+}
+
 int nvn_vk_getter(replay *r, const char *name, const void *blob, size_t n, const uint64_t *args, unsigned nargs,
                   unsigned out_n, uint32_t *out, uint64_t *ret)
 {
     rl_ctx *c = r->c;
+    getter_count(name);
     uint64_t sp = c->sp, base = (sp - 512) & ~15ull;
     uint64_t b = base, o = base + 256;
     if (n > 256 || out_n > 4)
@@ -7151,6 +7179,22 @@ static void log_call_counts(double frames)
     uint64_t cmds = nvn_vk_count_cmds - last_cmds, draws = nvn_vk_count_draws - last_draws;
     last_cmds = nvn_vk_count_cmds;
     last_draws = nvn_vk_count_draws;
+    {
+        static uint64_t last_g[64];
+        char gl[400];
+        int gn = 0;
+        uint64_t total = 0;
+        for (uint32_t i = 0; i < 64 && gc.name[i]; i++) {
+            uint64_t v = atomic_load_explicit(&gc.n[i], memory_order_relaxed);
+            total += v - last_g[i];
+            if (v - last_g[i] && gn < (int)sizeof gl - 60)
+                gn += snprintf(gl + gn, sizeof gl - (size_t)gn, " %s %.1f", gc.name[i] + 4, (double)(v - last_g[i]) / frames);
+            last_g[i] = v;
+        }
+        gl[gn] = 0;
+        if (total)
+            rl_log(RL_LOG_INFO, "nvn", "per present: %.1f guest getter calls in replay:%s", (double)total / frames, gl);
+    }
     rl_log(RL_LOG_INFO, "nvn", "per present: %.1f NVN commands replayed, %.1f draws, %.1f host Vulkan calls (%.2f per draw)",
            (double)cmds / frames, (double)draws / frames, (double)sum / frames, draws ? (double)sum / (double)draws : 0.0);
     static uint64_t last_reports[NVN_COUNTERS];

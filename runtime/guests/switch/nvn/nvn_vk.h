@@ -1203,6 +1203,8 @@ void nvn_vk_wb_note(vimg *u);
  * written back to their storage (nvn_vk_wb_current), oldest write first: at most max in out. Returns how many there
  * are, which is more than max when they do not all fit.
  */
+/** @brief Counts one guest call made while replaying, under name, for the per-present line (a diagnostic). */
+void nvn_vk_count_guest_call(const char *name);
 uint32_t nvn_vk_unsaved_over(uint64_t guest, uint64_t size, vimg **out, uint32_t max);
 /**
  * @brief Before a command reads guest bytes [guest, guest + size) through a buffer: writes back the images over them

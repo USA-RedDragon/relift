@@ -9,6 +9,7 @@
  * more than half, never taller than level 0's.
  */
 #include "nvn_priv.h"
+#include "nvn_vk.h"
 
 #include <pthread.h>
 #include <stdlib.h>
@@ -453,6 +454,7 @@ uint64_t nvnh_nvnTextureFinalize(rl_ctx *c, uint8_t *mem)
 int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], nvn_view *out)
 {
     memset(out, 0, sizeof *out);
+    nvn_vk_count_guest_call("nvn_view_read x6");
     uint64_t sp = c->sp, base = (sp - 64) & ~15ull;
     uint64_t v = base, o = base + NVN_VIEW_BYTES;
     memcpy(mem + v, view, NVN_VIEW_BYTES);
