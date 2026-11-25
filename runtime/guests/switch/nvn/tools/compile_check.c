@@ -26,6 +26,8 @@
 #include "nvn_module.h"
 #include "nvn_pipe.h"
 
+#include <relift/settings.h>
+
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -731,7 +733,9 @@ static int run_one(opts *o, const char *prefix)
     if (!o->dir)
         return 2;
     snprintf(tp, sizeof tp, "%s/table.rlspv", o->dir);
-    if (!is_file(tp)) {
+    char tn[1300];
+    snprintf(tn, sizeof tn, "%s/table-native.rlspv", o->dir);
+    if (!is_file(tp) && !is_file(tn)) {
         snprintf(dir, sizeof dir, "%s/shaders", o->dir);
         o->dir = dir;
     }
@@ -741,6 +745,13 @@ static int run_one(opts *o, const char *prefix)
     if (realpath(o->dir, dk))
         o->dir = dk;
     set_env(o);
+    const char *math = getenv("RELIFT_GPU_MATH");
+    if (math && *math) {
+        rl_settings_declare_runtime();
+        rl_setting_status st = rl_settings_set("gpu.math", math);
+        if (st != RL_SETTING_OK)
+            fprintf(stderr, "gpu.math=%s refused (%d)\n", math, (int)st);
+    }
     nvn_texset_layout_only();
     char key[65], why[300];
     for (uint32_t i = 0; nvn_shader_key_at(i, key); i++) {
