@@ -8,10 +8,10 @@ The output below is real. It comes from a dev build of a hand-assembled Switch t
 
 | Tool | Sees | Stops | Works on |
 |---|---|---|---|
-| The GDB server (`debug.gdb`) | guest threads, guest registers (A64, or ARMv4T on the Game Boy Advance), guest memory by guest address, lifted functions by guest address | the guest, at a safe point | Switch, Switch 2 and Game Boy Advance programs; every host but Windows and iOS |
+| The GDB server (`debug.gdb`) | guest threads, guest registers (A64, or ARM on the Game Boy Advance and Nintendo DS), guest memory by guest address, lifted functions by guest address | the guest, at a safe point | Switch, Switch 2, Game Boy Advance and Nintendo DS programs; every host but Windows and iOS |
 | gdb on the host process | the lifted C (`-gline-tables-only`), the runtime, host threads and their stacks | everything, including the server | every guest and host gdb runs on |
 
-The server is in the runtime of dev builds (`relift run`, `relift build --dev`), of desktop builds with `package.appimage = "never"`, and of APKs signed with the debug key. It is never in a player package: an AppImage, a signed macOS app, an iOS app, or an APK signed with the project's own key (`package.android-keystore`) is built with `RL_NO_DEBUG_STUB`. It listens only when `debug.gdb` names a port. Game Boy, Nintendo 64 and Nintendo DS programs do not start the server today: `rl_gdb_start` is called by the Switch layer (`guests/switch/kthread.c`) and the Game Boy Advance run (`guests/gba/run/cpu.c`) only. For those guests use gdb on the host process (below).
+The server is in the runtime of dev builds (`relift run`, `relift build --dev`), of desktop builds with `package.appimage = "never"`, and of APKs signed with the debug key. It is never in a player package: an AppImage, a signed macOS app, an iOS app, or an APK signed with the project's own key (`package.android-keystore`) is built with `RL_NO_DEBUG_STUB`. It listens only when `debug.gdb` names a port. Game Boy and Nintendo 64 programs do not start the server today: `rl_gdb_start` is called by the Switch layer (`guests/switch/kthread.c`), the Game Boy Advance run (`guests/gba/run/cpu.c`) and the Nintendo DS run (`guests/nds/run/cpu.c`) only. For those guests use gdb on the host process (below).
 
 ## Start a game with the server
 
@@ -87,6 +87,14 @@ $1 = 0x55
 ```
 
 Registers are the current mode's `r0` to `r12`, `sp`, `lr`, `pc` and `cpsr`. Memory is the bus by address, read without wait states or side effects; a write goes through the bus as the CPU's store would. The I/O registers at `0x04000000` read as the CPU would read them but without side effects: no device catches up and nothing is cleared or sampled, so a register shows its device's state as of the device's last catch-up, which can lag the CPU's cycle (a timer counter or `VCOUNT` a little behind). A stop does not move the guest's clock: the server waits for the CPU's own next sync point instead of ending its cycle budget, and the test `gdb_server_stops_a_gba_run_at_a_sync_point_and_keeps_its_timing` checks that a run stopped halfway ends on the same cycle as one never stopped. Breakpoints, watchpoints, `monitor bt` and `relift_guest.py` are for Switch programs only.
+
+## A Nintendo DS program
+
+The server speaks gdb's `arm` target for a Nintendo DS program too, with two threads: 1 is the ARM9 and 2 the ARM7. Both CPUs take turns on one host thread, so a stop ends when the first of them reaches a sync point; the other is suspended where it gave up its turn. Its registers are exact either way, because lifted code stores them before every sync point and memory access, but if it gave up its turn at a memory access its `pc` is that of its last sync point, and the thread list says so:
+
+`info threads` lists both, and `thread 2` then `x/wx 0x02380000` reads the ARM7's map.
+
+Memory reads and writes go through the selected thread's CPU map, which differ between the ARM9 and the ARM7. I/O registers read as on the Game Boy Advance, without side effects: the geometry engine and the sound unit answer as they last ran, the cartridge data port shows its last word, and the IPC receive FIFO shows its front word without taking it. The test `gdb_server_stops_both_nds_cpus_and_keeps_their_timing` stops both CPUs halfway, reads registers, memory and I/O twice, and checks that each CPU ends on the same cycle as in a run never stopped.
 
 ## Breakpoints
 
@@ -231,6 +239,6 @@ The packets the server answers, its limits, the monitor commands and the registe
 
 ## Not available
 
-- No server for Game Boy, Nintendo 64 and Nintendo DS programs, as above.
+- No server for Game Boy and Nintendo 64 programs, as above.
 - Breakpoints and write watchpoints are x86-64 Linux only. On other hosts the server answers registers, memory and threads, and gdb reports the breakpoint as unsupported.
 - No breakpoint at a guest address that is not a function entry, and none at a function clang inlined.

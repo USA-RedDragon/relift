@@ -402,6 +402,12 @@ typedef struct rl_gdb_thread {
     int32_t core;
     /** @brief True while it may be running lifted code (it holds a core); false when it waits in the runtime. */
     bool running;
+    /**
+     * @brief For a waiting thread whose context does not hold its pc: the guest pc it resumes at (pc_exact), or the
+     * next pc of its last sync point (registers exact, pc from before its current access); has_pc false otherwise.
+     */
+    bool has_pc, pc_exact;
+    uint64_t pc;
 } rl_gdb_thread;
 ```
 <!-- /docgen:code -->
@@ -443,14 +449,22 @@ typedef struct rl_gdb_guest {
      * @brief Reads n bytes at guest address a into dst without side effects (a register read never clears a flag or
      * pops a queue); returns how many it read from the start. NULL: read vm.
      */
-    size_t (*mem_read)(uint64_t a, uint8_t *dst, size_t n);
-    /** @brief Writes n bytes at guest address a as the guest's own stores would; false where it cannot. NULL: write vm. */
-    bool (*mem_write)(uint64_t a, const uint8_t *src, size_t n);
+    size_t (*mem_read)(uint64_t tid, uint64_t a, uint8_t *dst, size_t n);
+    /**
+     * @brief Writes n bytes at guest address a as the guest's own stores would; false where it cannot. NULL: write vm.
+     * Both callbacks get the id of the thread the debugger selected, for guests whose CPUs see different maps.
+     */
+    bool (*mem_write)(uint64_t tid, uint64_t a, const uint8_t *src, size_t n);
     /**
      * @brief The guest runs on a cycle clock whose own events bring it to a sync point often (rl_sync): a stop waits
      * for that and leaves the budget alone, since ending the budget early would move the guest's clock.
      */
     bool clocked;
+    /**
+     * @brief The guest's threads take turns on one host thread (fibers of one scheduler): a stop is complete once one
+     * of them parks, since no other can run until it resumes.
+     */
+    bool one_runs;
 } rl_gdb_guest;
 ```
 <!-- /docgen:code -->
@@ -516,6 +530,34 @@ changes nothing, not a bug.
 * @brief A peek of the keypad registers: the keys as last sampled and KEYCNT. Its read samples the host's input first,
 * which can raise the keypad interrupt, so a debugger's read must not. Every other GBA I/O reader is a function of the
 * device's state and the tick alone, so it is its own peek.
+```
+<!-- /docgen:code -->
+
+The Nintendo DS sets `one_runs` as well: its two CPUs are fibers of one host
+thread, and a thread that is not parked reports the next pc of its last
+sync point (`rl_sched_sync_pc`).
+
+<!-- docgen:code file=runtime/guests/nds/run/cpu.c region=gdb -->
+```c
+* @brief The GDB server's threads: 1 the ARM9, 2 the ARM7. Both CPUs are fibers of one host thread, so a stop ends
+* when the first of them parks at a sync point (one_runs); the other is then suspended inside the scheduler with its
+* registers stored, at its last sync point (pc exact) or at a memory access it made since (pc of that sync point,
+* marked so in the thread list).
+```
+<!-- /docgen:code -->
+
+<!-- docgen:code file=runtime/guests/nds/run/cpu.c region=gdb-memory -->
+```c
+* @brief Memory of the selected CPU's map (thread 1 the ARM9's, 2 the ARM7's) without timing or side effects
+* (rl_nds_peek: the I/O registers through their devices' peeks); writes as the CPU's untimed stores (rl_nds_write).
+```
+<!-- /docgen:code -->
+
+<!-- docgen:code file=runtime/guests/nds/io.c region=io-peek -->
+```c
+* @brief The debugger's read of the NDS I/O registers (rl_device.peek): read32 with peek, so the units that run on
+* a read (geometry engine, sound) answer as they last ran, the cartridge's data port gives its last word, and the IPC
+* receive FIFO shows its front word without taking it. The other registers' reads change nothing already.
 ```
 <!-- /docgen:code -->
 
