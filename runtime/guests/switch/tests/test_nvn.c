@@ -192,6 +192,16 @@ static void async_nested(void *arg)
     atomic_store(&async_seen[atomic_fetch_add(&async_n, 1)], 999);
 }
 
+TEST(nvn_async_every_proc_has_a_class)
+{
+    /* The table of classes (free, queued, drain) names every generated proc but the command buffer's; one missing would
+     * be drained by default, so the list is checked whole. */
+    const char *missing = nvn_async_unclassified();
+    CHECK(missing == NULL);
+    if (missing)
+        printf("no async class for %s\n", missing);
+}
+
 TEST(nvn_async_worker_runs_items_in_order_and_drains)
 {
     atomic_store(&async_n, 0);

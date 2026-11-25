@@ -802,6 +802,9 @@ static void async_submit_run(void *arg)
 {
     async_submit *a = arg;
     int rc = nvn_vk_run(a->c, a->mem, a->queue, a->s);
+    for (uint32_t i = 0; i < a->s->n; i++)
+        if (a->s->cmds[i].op == NVN_CMD_FENCE_SYNC)
+            nvn_sync_queue_mark(a->s->cmds[i].x[1], -1);
     if (rc != RL_OK)
         rl_log(RL_LOG_ERROR, "nvn", "a submit replayed on the worker returned %d", rc);
     free(a->c);
@@ -828,8 +831,14 @@ int nvn_cmd_submit(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t handle)
             a->mem = mem;
             a->queue = queue;
             a->s = s;
+            for (uint32_t i = 0; i < s->n; i++)
+                if (s->cmds[i].op == NVN_CMD_FENCE_SYNC)
+                    nvn_sync_queue_mark(s->cmds[i].x[1], 1);
             if (nvn_async_post(async_submit_run, a))
                 return RL_OK;
+            for (uint32_t i = 0; i < s->n; i++)
+                if (s->cmds[i].op == NVN_CMD_FENCE_SYNC)
+                    nvn_sync_queue_mark(s->cmds[i].x[1], -1);
             free(a->c);
         }
         free(a);

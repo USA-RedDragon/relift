@@ -126,6 +126,10 @@ void nvn_sync_signal(uint64_t sync);
 void nvn_sync_signal_at(uint64_t sync, uint64_t seq);
 /** @brief sync was fenced behind work not replayed yet: it is unsignaled until that work finishes. */
 void nvn_sync_fenced(uint64_t sync);
+/** @brief Counts a fence of the sync queued for (+1) or run by (-1) the replay worker. */
+void nvn_sync_queue_mark(uint64_t sync, int delta);
+/** @brief Whether a fence of the sync waits in the replay worker's queue. */
+bool nvn_sync_has_queued(uint64_t sync);
 /** @brief Whether sync is signaled (true for an address that names no sync, which nothing can wait on). */
 bool nvn_sync_is_signaled(uint64_t sync);
 /**
@@ -1608,6 +1612,10 @@ static inline const char *nvn_str(uint8_t *mem, uint64_t a, size_t max)
 
 /** @brief With RELIFT_NVN_SET_LOG=1, logs a named call and its first argument with the time (the order of a game's queue and sync calls). */
 void nvn_evlog(const char *what, uint64_t a);
+/** @brief The first generated proc without an entry in the replay worker's class table (nvn_core.c); NULL when every one has. */
+const char *nvn_async_unclassified(void);
+/** @brief Whether RELIFT_NVN_SET_LOG=1. */
+bool nvn_set_log_on(void);
 
 #define NVN_DECLARE(name) uint64_t nvnh_##name(rl_ctx *c, uint8_t *mem);
 #define NVN_DECLARE_RECORDED(op, name) NVN_DECLARE(name)

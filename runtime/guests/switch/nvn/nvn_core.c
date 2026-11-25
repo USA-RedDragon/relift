@@ -34,7 +34,16 @@ typedef struct nvn_impl {
 #define NVN_DRAIN_WRAP(name) \
     static uint64_t drained_##name(rl_ctx *c, uint8_t *mem) \
     { \
-        nvn_async_drain(); \
+        if (nvn_async_pending()) { \
+            static bool first_##name = true; \
+            int64_t t0 = rl_clock_ns(); \
+            nvn_async_drain(); \
+            if (first_##name) { \
+                first_##name = false; \
+                rl_log(RL_LOG_INFO, "nvn", "replay worker: first drain by %s waited %.3f ms", #name, \
+                       (double)(rl_clock_ns() - t0) / 1e6); \
+            } \
+        } \
         return nvnh_##name(c, mem); \
     }
 #define NVN_DRAIN_WRAP_RECORDED(op, name) NVN_DRAIN_WRAP(name)
@@ -43,16 +52,94 @@ NVN_RECORDED(NVN_DRAIN_WRAP_RECORDED)
 #undef NVN_DRAIN_WRAP_RECORDED
 
 /**
- * @brief Whether a proc runs on the game's thread without waiting for the replay worker: recording a command buffer
- * touches only that buffer, and a submit, present or queue sync is queued behind the worker's items.
+ * @brief How a proc meets the replay worker (RELIFT_NVN_ASYNC_REPLAY), decided once from what it reads and writes.
+ *  - FREE: touches only the object's own guest-side state (an address, a size, a label, a handle computed from ids, the
+ *    window's own fields, a command buffer being recorded): runs on the game's thread without waiting.
+ *  - QUEUED: becomes an item of the worker, behind the items before it (submit, present, fence and wait syncs, the
+ *    window acquire's wait, freeing a finalized command handle), or answers without the worker (nvnSyncWait).
+ *  - DRAIN: reads what the GPU or replay wrote (counters, events, sync status, texels, queue finish), changes what a
+ *    queued replay reads (pools, programs, textures, depth mode), or frees memory the GPU may still use: waits for
+ *    the worker to be idle first. A proc with no entry is DRAIN.
  */
-static bool async_whitelisted(const char *name)
+typedef enum { NVN_ASYNC_DRAIN = 0, NVN_ASYNC_FREE, NVN_ASYNC_QUEUED } nvn_async_class;
+
+typedef struct nvn_async_entry {
+    const char *name;
+    nvn_async_class cls;
+} nvn_async_entry;
+
+#define AF(n) { #n, NVN_ASYNC_FREE }
+#define AQ(n) { #n, NVN_ASYNC_QUEUED }
+#define AD(n) { #n, NVN_ASYNC_DRAIN }
+static const nvn_async_entry async_table[] = {
+    AD(nvnBootstrapLoader),
+    AD(nvnBufferFinalize), AF(nvnBufferGetAddress), AF(nvnBufferGetMemoryOffset), AF(nvnBufferGetMemoryPool),
+    AF(nvnBufferGetSize), AD(nvnBufferInitialize), AD(nvnBufferFlushMappedRange), AD(nvnBufferInvalidateMappedRange),
+    AF(nvnBufferMap), AF(nvnBufferSetDebugLabel),
+    AD(nvnDeviceApplyDeferredFinalizes), AD(nvnDeviceFinalize), AQ(nvnDeviceFinalizeCommandHandle),
+    AF(nvnDeviceGenerateDebugDomainId), AF(nvnDeviceGetCommandHandleMemorySize),
+    AF(nvnDeviceGetCurrentTimestampInNanoseconds), AF(nvnDeviceGetDepthMode), AF(nvnDeviceGetImageHandle),
+    AF(nvnDeviceGetInteger), AF(nvnDeviceGetProcAddress), AF(nvnDeviceGetSeparateSamplerHandle),
+    AF(nvnDeviceGetSeparateTextureHandle), AF(nvnDeviceGetTexelFetchHandle), AF(nvnDeviceGetTextureHandle),
+    AF(nvnDeviceGetTimestampInNanoseconds), AF(nvnDeviceGetUniformBufferHandle), AF(nvnDeviceGetWindowOriginMode),
+    AD(nvnDeviceInitialize), AF(nvnDeviceInstallDebugCallback), AF(nvnDeviceIsExternalDebuggerAttached),
+    AD(nvnDeviceRegisterFastClearColor), AD(nvnDeviceRegisterFastClearDepth),
+    AF(nvnDeviceSetAutomaticCheckpointsByDebugGroup), AF(nvnDeviceSetAutomaticCheckpointsEnable),
+    AF(nvnDeviceSetAutomaticCheckpointsMask), AF(nvnDeviceSetAutomaticCheckpointsSamplingInterval),
+    AF(nvnDeviceSetCheckpointCallStacksEnable), AF(nvnDeviceSetCheckpointMaxCallStacksDepth), AF(nvnDeviceSetDebugLabel),
+    AD(nvnDeviceSetDepthMode), AD(nvnDeviceSetIntermediateShaderCache), AD(nvnDeviceSetWindowOriginMode),
+    AD(nvnDlssNetworkBuilderGetOptimalSettings), AD(nvnDlssNetworkBuilderGetStorageSize),
+    AD(nvnDlssNetworkBuilderGetTextureIDs), AD(nvnDlssNetworkBuilderSetTextureIDs), AD(nvnDlssNetworkFinalize),
+    AD(nvnDlssNetworkInitialize), AD(nvnDlssNetworkResize),
+    AD(nvnEventFinalize), AF(nvnEventGetMemoryOffset), AF(nvnEventGetMemoryPool), AD(nvnEventGetValue),
+    AD(nvnEventInitialize), AD(nvnEventSignal),
+    AD(nvnMemoryPoolBuilderSetNativeHandleNVX), AD(nvnMemoryPoolFinalize), AD(nvnMemoryPoolFlushMappedRange),
+    AF(nvnMemoryPoolGetBufferAddress), AF(nvnMemoryPoolGetFlags), AF(nvnMemoryPoolGetSize), AD(nvnMemoryPoolInitialize),
+    AD(nvnMemoryPoolInvalidateMappedRange), AF(nvnMemoryPoolMap), AD(nvnMemoryPoolMapVirtual),
+    AF(nvnMemoryPoolSetDebugLabel),
+    AD(nvnProgramFinalize), AD(nvnProgramInitialize), AD(nvnProgramInitializeFromBuilder), AF(nvnProgramSetDebugLabel),
+    AD(nvnProgramSetSampleShading), AD(nvnProgramSetShaders), AD(nvnProgramSetShadersExt),
+    AQ(nvnQueueAcquireTexture), AQ(nvnQueueFenceSync), AD(nvnQueueFinalize), AD(nvnQueueFinish), AF(nvnQueueFlush),
+    AF(nvnQueueGetError), AF(nvnQueueGetTotalCommandMemoryUsed), AF(nvnQueueGetTotalComputeMemoryUsed),
+    AF(nvnQueueGetTotalControlMemoryUsed), AD(nvnQueueInitialize), AQ(nvnQueuePresentTexture),
+    AF(nvnQueueResetMemoryUsageCounts), AF(nvnQueueSetDebugLabel), AQ(nvnQueueSubmitCommands), AQ(nvnQueueWaitSync),
+    AD(nvnSamplerFinalize), AD(nvnSamplerInitialize), AD(nvnSamplerPoolFinalize), AF(nvnSamplerPoolGetMemoryOffset),
+    AF(nvnSamplerPoolGetMemoryPool), AF(nvnSamplerPoolGetSize), AD(nvnSamplerPoolInitialize),
+    AD(nvnSamplerPoolRegisterSampler), AF(nvnSamplerPoolSetDebugLabel), AF(nvnSamplerSetDebugLabel),
+    AD(nvnSyncFinalize), AD(nvnSyncInitialize), AF(nvnSyncSetDebugLabel), AQ(nvnSyncWait),
+    AF(nvnTextureBuilderGetStorageAlignment), AF(nvnTextureBuilderGetStorageClass), AF(nvnTextureBuilderGetStorageSize),
+    AF(nvnTextureBuilderGetZCullStorageSize), AF(nvnTextureCompare), AD(nvnTextureFinalize), AD(nvnTextureFlushTexels),
+    AF(nvnTextureGetDepth), AF(nvnTextureGetDepthStencilMode), AF(nvnTextureGetFlags), AF(nvnTextureGetFormat),
+    AF(nvnTextureGetHeight), AF(nvnTextureGetLevels), AF(nvnTextureGetMemoryOffset), AF(nvnTextureGetMemoryPool),
+    AF(nvnTextureGetSamples), AF(nvnTextureGetStorageClass), AF(nvnTextureGetStorageSize), AF(nvnTextureGetStride),
+    AF(nvnTextureGetSwizzle), AF(nvnTextureGetTarget), AF(nvnTextureGetTextureAddress), AF(nvnTextureGetWidth),
+    AD(nvnTextureInitialize), AD(nvnTextureInvalidateTexels), AD(nvnTexturePoolFinalize),
+    AF(nvnTexturePoolGetMemoryOffset), AF(nvnTexturePoolGetMemoryPool), AF(nvnTexturePoolGetSize),
+    AD(nvnTexturePoolInitialize), AD(nvnTexturePoolRegisterImage), AD(nvnTexturePoolRegisterTexture),
+    AF(nvnTexturePoolSetDebugLabel), AD(nvnTextureReadTexels), AF(nvnTextureSetDebugLabel), AD(nvnTextureWriteTexels),
+    AQ(nvnWindowAcquireTexture), AD(nvnWindowFinalize), AF(nvnWindowGetCrop), AF(nvnWindowGetNativeWindow),
+    AF(nvnWindowGetNumActiveTextures), AF(nvnWindowGetNumTextures), AF(nvnWindowGetPresentInterval),
+    AD(nvnWindowInitialize), AF(nvnWindowSetCrop), AF(nvnWindowSetDebugLabel), AF(nvnWindowSetNumActiveTextures),
+    AF(nvnWindowSetPresentInterval),
+};
+#undef AF
+#undef AQ
+#undef AD
+
+/** @brief The class of a proc: the command buffer's procs record into the buffer on the game's thread (FREE), the others come from the table, an unknown name is DRAIN. */
+static nvn_async_class async_class_of(const char *name)
 {
-    return !strncmp(name, "nvnCommandBuffer", 16) || !strcmp(name, "nvnQueueSubmitCommands") ||
-           !strcmp(name, "nvnQueuePresentTexture") || !strcmp(name, "nvnQueueFenceSync") ||
-           !strcmp(name, "nvnQueueWaitSync") || !strcmp(name, "nvnWindowAcquireTexture") ||
-           !strcmp(name, "nvnQueueAcquireTexture");
+    if (!strncmp(name, "nvnCommandBuffer", 16))
+        return NVN_ASYNC_FREE;
+    for (size_t i = 0; i < sizeof async_table / sizeof async_table[0]; i++)
+        if (!strcmp(async_table[i].name, name))
+            return async_table[i].cls;
+    return NVN_ASYNC_DRAIN;
 }
+
+/** @brief Whether a proc runs without draining the worker. */
+static bool async_whitelisted(const char *name) { return async_class_of(name) != NVN_ASYNC_DRAIN; }
+
 
 #define NVN_ENTRY(name) { #name, nvnh_##name, NVN_STATS_IMPL, drained_##name },
 #define NVN_ENTRY_RECORDED(op, name) NVN_ENTRY(name)
@@ -62,6 +149,22 @@ static const nvn_impl impls[] = { NVN_PROCS(NVN_ENTRY) NVN_RECORDED(NVN_ENTRY_RE
 #undef NVN_ENTRY_RECORDED
 #undef NVN_ENTRY
 #define N_IMPLS (sizeof impls / sizeof impls[0])
+
+/** @brief The first proc (other than the command buffer's) of the generated lists with no entry in the class table; NULL when every one has. */
+const char *nvn_async_unclassified(void)
+{
+    for (uint32_t i = 0; i < N_IMPLS; i++) {
+        const char *n = impls[i].name;
+        if (!strncmp(n, "nvnCommandBuffer", 16))
+            continue;
+        bool found = false;
+        for (size_t k = 0; k < sizeof async_table / sizeof async_table[0] && !found; k++)
+            found = !strcmp(async_table[k].name, n);
+        if (!found)
+            return n;
+    }
+    return NULL;
+}
 
 static struct {
     bool up;

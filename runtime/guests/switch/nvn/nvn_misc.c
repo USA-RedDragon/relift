@@ -4,6 +4,7 @@
  * events, and the queries of queues, pools and windows.
  */
 #include "nvn_priv.h"
+#include "nvn_async.h"
 
 /** @brief nvnDeviceGetSeparateTextureHandle(const NVNdevice *, int id): the id with the NVN1 mark, as the driver encodes it. */
 uint64_t nvnh_nvnDeviceGetSeparateTextureHandle(rl_ctx *c, uint8_t *mem)
@@ -47,9 +48,15 @@ uint64_t nvnh_nvnDeviceGetCommandHandleMemorySize(rl_ctx *c, uint8_t *mem)
 }
 
 /** @brief nvnDeviceFinalizeCommandHandle(NVNdevice *, NVNcommandHandle). */
+static void finalize_run(void *arg) { nvn_cmdset_free((uint64_t)(uintptr_t)arg); }
+
 uint64_t nvnh_nvnDeviceFinalizeCommandHandle(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
+    /* A set the game finalizes may still be queued for the replay worker: it is freed behind it. */
+    if (nvn_async_enabled() && nvn_async_post(finalize_run, (void *)(uintptr_t)c->x[1]))
+        return nvn_ret(c);
+    nvn_async_drain();
     nvn_cmdset_free(c->x[1]);
     return nvn_ret(c);
 }

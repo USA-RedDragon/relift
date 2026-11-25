@@ -13,6 +13,7 @@
  */
 #include "nvn_priv.h"
 #include "nvn_async.h"
+#include <stdatomic.h>
 #include "nvn_watch.h"
 #include "vkdev.h"
 #include "services.h"
@@ -418,6 +419,8 @@ typedef struct nvn_sync {
     /** @brief The sync was fenced; it is signaled once the host device finished batch seq (nvn_vk_submitted). */
     bool signaled;
     uint64_t seq;
+    /** @brief Fences for this sync queued for the replay worker and not yet run: a wait on it must drain first. */
+    _Atomic uint32_t queued;
 } nvn_sync;
 
 static void trace(const char *fmt, ...) RL_PRINTF(1, 2);
@@ -794,6 +797,8 @@ static void async_sync_run(void *arg)
 {
     async_sync *a = arg;
     int rc = nvn_vk_queue_sync(a->c, a->mem, a->queue, a->sync, a->wait);
+    if (!a->wait)
+        nvn_sync_queue_mark(a->sync, -1);
     if (rc != RL_OK)
         rl_log(RL_LOG_ERROR, "nvn", "a queue sync run on the worker returned %d", rc);
     free(a->c);
@@ -810,8 +815,12 @@ static bool queue_sync_posted(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t 
     a->queue = queue;
     a->sync = sync;
     a->wait = wait;
+    if (!wait)
+        nvn_sync_queue_mark(sync, 1);
     if (a->c && nvn_async_post(async_sync_run, a))
         return true;
+    if (!wait)
+        nvn_sync_queue_mark(sync, -1);
     free(a->c);
     free(a);
     return false;
@@ -1510,6 +1519,23 @@ void nvn_sync_signal_at(uint64_t sync, uint64_t seq)
     }
 }
 
+void nvn_sync_queue_mark(uint64_t sync, int delta)
+{
+    nvn_sync *s = sync ? (nvn_sync *)nvn_obj_get(sync, NVN_SYNC) : NULL;
+    if (s) {
+        if (delta > 0)
+            atomic_fetch_add(&s->queued, 1);
+        else
+            atomic_fetch_sub(&s->queued, 1);
+    }
+}
+
+bool nvn_sync_has_queued(uint64_t sync)
+{
+    nvn_sync *s = sync ? (nvn_sync *)nvn_obj_get(sync, NVN_SYNC) : NULL;
+    return s && atomic_load(&s->queued) != 0;
+}
+
 void nvn_sync_fenced(uint64_t sync)
 {
     nvn_sync *s = sync ? (nvn_sync *)nvn_obj_get(sync, NVN_SYNC) : NULL;
@@ -1534,6 +1560,15 @@ enum { SYNC_ALREADY_SIGNALED = 0, SYNC_CONDITION_SATISFIED = 1, SYNC_TIMEOUT_EXP
 uint64_t nvnh_nvnSyncWait(rl_ctx *c, uint8_t *mem)
 {
     nvn_evlog("SyncWait", c->x[0]);
+    if (nvn_sync_has_queued(c->x[0])) {
+        /* A poll of a fence the replay worker has not reached is a poll of work the GPU has not finished: not
+         * signaled, as on the console; a wait with a time goes through the worker. */
+        if (c->x[1] == 0) {
+            c->x[0] = SYNC_TIMEOUT_EXPIRED;
+            return nvn_ret(c);
+        }
+        nvn_async_drain();
+    }
     (void)mem;
     nvn_sync *s = (nvn_sync *)nvn_obj_get(c->x[0], NVN_SYNC);
     uint64_t rc = SYNC_FAILED;
