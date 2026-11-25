@@ -33,6 +33,24 @@ typedef struct session {
     volatile int done;
 } session;
 
+/**
+ * @brief A TCP port on 127.0.0.1 that nothing listens on now: the kernel picks one (bind to port 0) and the test
+ * hands it to the stub. The machine's other processes (a shared test host runs many) make a port derived from the
+ * pid collide now and then; this one is free when asked for.
+ */
+static int free_port(void)
+{
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in sa = { .sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
+    socklen_t n = sizeof sa;
+    int port = 0;
+    if (fd >= 0 && bind(fd, (struct sockaddr *)&sa, sizeof sa) == 0 && getsockname(fd, (struct sockaddr *)&sa, &n) == 0)
+        port = ntohs(sa.sin_port);
+    if (fd >= 0)
+        close(fd);
+    return port;
+}
+
 static int fd_of(int port)
 {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -121,7 +139,7 @@ static void *client(void *arg)
 TEST(gdb_server_reads_and_writes_guest_registers_and_memory)
 {
     rl_ctx *c = t_boot(NULL);
-    session s = { .port = 20000 + (int)(getpid() % 20000) };
+    session s = { .port = free_port() };
     char port[16];
     snprintf(port, sizeof port, "%d", s.port);
     CHECK_EQ(rl_settings_set("debug.gdb", port), RL_SETTING_OK);
@@ -258,7 +276,7 @@ static void *trap_client(void *arg)
 TEST(gdb_server_stops_at_a_breakpoint_and_a_watchpoint)
 {
     rl_ctx *c = t_boot(NULL);
-    traps s = { .port = 20000 + (int)((getpid() + 7) % 20000) };
+    traps s = { .port = free_port() };
     char port[16];
     snprintf(port, sizeof port, "%d", s.port);
     CHECK_EQ(rl_settings_set("debug.gdb", port), RL_SETTING_OK);
@@ -381,11 +399,11 @@ static uint64_t b_writer(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-static void continue_after_watch_hits(bool step, int port_bias, int writers)
+static void continue_after_watch_hits(bool step, int writers)
 {
     enum { ROUNDS = 40 };
     rl_ctx *c = t_boot(NULL);
-    repeat s = { .port = 20000 + (int)((getpid() + port_bias) % 20000), .want = 6, .step = step };
+    repeat s = { .port = free_port(), .want = 6, .step = step };
     char port[16];
     snprintf(port, sizeof port, "%d", s.port);
     CHECK_EQ(rl_settings_set("debug.gdb", port), RL_SETTING_OK);
@@ -434,18 +452,18 @@ static void continue_after_watch_hits(bool step, int port_bias, int writers)
         CHECK_EQ(s.from_b, 6);
 }
 
-TEST(gdb_server_continues_after_each_write_watch_hit) { continue_after_watch_hits(false, 13, WRITER_MAIN); }
+TEST(gdb_server_continues_after_each_write_watch_hit) { continue_after_watch_hits(false, WRITER_MAIN); }
 
-TEST(gdb_server_steps_over_a_write_watch_hit_and_continues) { continue_after_watch_hits(true, 17, WRITER_MAIN); }
+TEST(gdb_server_steps_over_a_write_watch_hit_and_continues) { continue_after_watch_hits(true, WRITER_MAIN); }
 
-TEST(gdb_server_reports_a_write_watch_hit_of_a_second_thread) { continue_after_watch_hits(false, 23, WRITER_B); }
+TEST(gdb_server_reports_a_write_watch_hit_of_a_second_thread) { continue_after_watch_hits(false, WRITER_B); }
 
 TEST(gdb_server_continues_after_both_threads_hit_a_write_watch)
 {
-    continue_after_watch_hits(false, 29, WRITER_MAIN | WRITER_B);
+    continue_after_watch_hits(false, WRITER_MAIN | WRITER_B);
 }
 
-TEST(gdb_server_steps_over_hits_of_two_threads) { continue_after_watch_hits(true, 31, WRITER_MAIN | WRITER_B); }
+TEST(gdb_server_steps_over_hits_of_two_threads) { continue_after_watch_hits(true, WRITER_MAIN | WRITER_B); }
 #endif
 
 #endif
