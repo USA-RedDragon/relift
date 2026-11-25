@@ -3541,6 +3541,11 @@ int nvn_vk_stage(replay *r, int (*stage)(replay *r, void *arg), void *arg, const
 /** @brief The listed images the GPU has written (vimg.written_at), which nvn_vk_unsaved_over searches. */
 static struct {
     vimg **v;
+    /** @brief Each listed image's storage range, in step with v: the search reads these, not the images, so a scan over
+     * thousands of listed images stays in the cache. */
+    struct {
+        uint64_t lo, hi;
+    } *range;
     uint32_t n, cap;
 } gpu_written;
 
@@ -4067,9 +4072,12 @@ static bool write_back_body(replay *r, vimg *u)
 uint32_t nvn_vk_unsaved_over(uint64_t guest, uint64_t size, vimg **out, uint32_t max)
 {
     uint32_t n = 0;
+    const uint64_t end = guest + size;
     for (uint32_t i = 0; i < gpu_written.n; i++) {
+        if (gpu_written.range[i].lo >= end || guest >= gpu_written.range[i].hi)
+            continue;
         vimg *u = gpu_written.v[i];
-        if (!u->written || u->storage >= guest + size || guest >= u->storage + u->d.size || nvn_vk_wb_current(u))
+        if (!u->written || nvn_vk_wb_current(u))
             continue;
         if (n < max) {
             uint32_t k = n;
@@ -4289,6 +4297,7 @@ static void unlist_written(vimg *v)
         return;
     vimg *last = gpu_written.v[--gpu_written.n];
     gpu_written.v[i - 1] = last;
+    gpu_written.range[i - 1] = gpu_written.range[gpu_written.n];
     last->written_at = i;
     v->written_at = 0;
 }
@@ -4302,14 +4311,19 @@ void nvn_vk_written(vimg *v)
     if (gpu_written.n == gpu_written.cap) {
         uint32_t cap = gpu_written.cap ? 2 * gpu_written.cap : 256;
         vimg **p = realloc(gpu_written.v, cap * sizeof *p);
-        if (!p) {
+        void *rg = p ? realloc(gpu_written.range, cap * sizeof *gpu_written.range) : NULL;
+        if (p)
+            gpu_written.v = p;
+        if (!p || !rg) {
             (void)rl_report_unknown(0x4e564e5752495454ull, "nvn",
                                     "out of memory listing the images the GPU wrote: a buffer read over one sees older bytes");
             return;
         }
-        gpu_written.v = p;
+        gpu_written.range = rg;
         gpu_written.cap = cap;
     }
+    gpu_written.range[gpu_written.n].lo = v->storage;
+    gpu_written.range[gpu_written.n].hi = v->storage + v->d.size;
     gpu_written.v[gpu_written.n++] = v;
     v->written_at = gpu_written.n;
 }
