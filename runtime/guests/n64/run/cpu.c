@@ -396,14 +396,65 @@ void rl_n64_run_free(rl_n64_run *r)
 }
 
 #if defined(RL_DEBUG_STUB)
-/** @brief The GDB server's thread: the VR4300 (id 1). */
+/** @brief The SP memory window, DMEM then IMEM, in the CPU's physical map. */
+#define SP_MEM 0x04000000u
+#define SP_IMEM 0x04001000u
+
+/**
+ * docgen:region rsp
+ * @brief The RSP as the GDB server's thread 2, in the same mips register numbering: r0 to r31 sign-extended from 32
+ * bits, pc the IMEM address SP_PC names in the CPU's map (0x04001000 + SP_PC), the rest zero. It runs in slices inside
+ * the CPU's device catch-up, so while the CPU is stopped it is between slices. Its registers are read-only here.
+ * Thread 2 reads the SP memory window (0x04000000 to 0x04001FFF, DMEM then IMEM, also by its kseg0 and kseg1
+ * addresses), where the RSP's code and data are.
+ * docgen:end
+ */
+static void rsp_reg_read(const rl_ctx *c, uint32_t n, uint8_t *o)
+{
+    const rl_rsp *rsp = (const rl_rsp *)(const void *)c;
+    uint64_t v = n < 32 ? (uint64_t)(int64_t)(int32_t)rl_rsp_gpr(rsp, n)
+                 : n == 37 && g_run ? SP_IMEM + (rl_n64_sp_pc(g_run->m) & 0xFFCu)
+                                    : 0;
+    for (int i = 0; i < 8; i++)
+        o[i] = (uint8_t)(v >> (56 - 8 * i));
+}
+
+static void rsp_reg_write(rl_ctx *c, uint32_t n, const uint8_t *in)
+{
+    (void)c;
+    (void)n;
+    (void)in;
+}
+
+static uint32_t rsp_reg_size(uint32_t n)
+{
+    (void)n;
+    return 8;
+}
+
+static uint64_t rsp_pc(const rl_ctx *c)
+{
+    (void)c;
+    return g_run ? SP_IMEM + (rl_n64_sp_pc(g_run->m) & 0xFFCu) : 0;
+}
+
+static const rl_gdb_cpu g_rsp_gdb = {
+    .reg_size = rsp_reg_size, .reg_read = rsp_reg_read, .reg_write = rsp_reg_write, .pc = rsp_pc, .pc_reg = 37,
+    .big_endian = true,
+};
+
+/** @brief The GDB server's threads: 1 the VR4300, 2 the RSP where the program runs one. */
 static uint32_t gdb_threads(rl_gdb_thread *out, uint32_t max)
 {
     if (!g_run || !g_run->c)
         return 0;
-    if (max)
-        out[0] = (rl_gdb_thread){ .id = 1, .ctx = g_run->c, .core = 0, .running = true };
-    return 1;
+    uint32_t n = 0;
+    if (n < max)
+        out[n++] = (rl_gdb_thread){ .id = 1, .ctx = g_run->c, .core = 0, .running = true };
+    if (n < max && g_run->rsp)
+        out[n++] = (rl_gdb_thread){ .id = 2, .ctx = (rl_ctx *)(void *)g_run->rsp, .core = 1, .has_pc = true,
+                                    .pc_exact = true, .pc = rsp_pc(NULL), .cpu = &g_rsp_gdb };
+    return n;
 }
 
 /**
@@ -427,11 +478,22 @@ static bool gdb_paddr(uint64_t a, bool write, uint32_t *pa)
     return true;
 }
 
+/** @brief Thread 2's SP window offset of a, or -1. */
+static int sp_off(uint64_t a)
+{
+    uint32_t pa = (uint32_t)a & 0x1FFFFFFFu;
+    return (a <= UINT32_MAX || a >> 32 == 0xFFFFFFFFu) && pa >= SP_MEM && pa < SP_MEM + 0x2000u ? (int)(pa - SP_MEM) : -1;
+}
+
 static size_t gdb_read(uint64_t tid, uint64_t a, uint8_t *dst, size_t n)
 {
-    (void)tid;
     size_t i = 0;
     uint32_t pa;
+    if (tid == 2) {
+        for (int o; g_run && i < n && (o = sp_off(a + i)) >= 0; i++)
+            dst[i] = rl_n64_spmem(g_run->m)[o];
+        return i;
+    }
     for (; i < n && gdb_paddr(a + i, false, &pa); i++)
         rl_n64_rdram_get_cpu(g_run->m, pa, &dst[i], 1);
     return i;
@@ -439,8 +501,9 @@ static size_t gdb_read(uint64_t tid, uint64_t a, uint8_t *dst, size_t n)
 
 static bool gdb_write(uint64_t tid, uint64_t a, const uint8_t *src, size_t n)
 {
-    (void)tid;
     uint32_t pa;
+    if (tid == 2)
+        return false;
     for (size_t i = 0; i < n; i++) {
         if (!gdb_paddr(a + i, true, &pa))
             return false;

@@ -475,7 +475,8 @@ static void threads_xml(const char *args)
         rl_gdb_thread *t = &G.th[i];
         parked *p = find_parked(t->ctx);
         char nm[200] = "", esc[260];
-        uint64_t pc = t->ctx && G.cpu->pc ? G.cpu->pc(t->ctx) : 0;
+        const rl_gdb_cpu *tc = t->cpu ? t->cpu : G.cpu;
+        uint64_t pc = t->ctx && tc->pc ? tc->pc(t->ctx) : 0;
         if (p && p->has_pc)
             pc = p->pc;
         else if (!p && t->has_pc)
@@ -760,7 +761,7 @@ static bool frame_read(uint64_t a, void *dst, size_t n) { return mem_read(a, dst
 /** @brief The guest call frames of thread t, innermost first, with the pc gdb reads for it; 0 without a walk. */
 static uint32_t walk(rl_gdb_thread *t, rl_gdb_frame *out, uint32_t max)
 {
-    if (!t || !t->ctx || !G.cpu->frames)
+    if (!t || !t->ctx || t->cpu || !G.cpu->frames)
         return 0;
     uint8_t pcb[8];
     uint64_t pc;
@@ -903,6 +904,15 @@ static bool run_until_interrupt(rl_ctx *step)
     }
 }
 
+/** @brief The register layer of the thread whose context is c: its own (rl_gdb_thread.cpu) or the server's. */
+static const rl_gdb_cpu *cpu_for(const rl_ctx *c)
+{
+    for (uint32_t i = 0; i < G.nth; i++)
+        if (G.th[i].ctx == c && G.th[i].cpu)
+            return G.th[i].cpu;
+    return G.cpu;
+}
+
 /** @brief Writes v as a register of w bytes in the target's byte order. */
 static void put_reg(uint8_t *out, uint64_t v, uint32_t w)
 {
@@ -913,7 +923,7 @@ static void put_reg(uint8_t *out, uint64_t v, uint32_t w)
 /** @brief Reads register r of c: the guest pc of a breakpoint stop where the thread stopped at one. */
 static void reg_read(rl_ctx *c, uint32_t r, uint8_t *out)
 {
-    G.cpu->reg_read(c, r, out);
+    cpu_for(c)->reg_read(c, r, out);
     pthread_mutex_lock(&G.lock);
     parked *p = find_parked(c);
     uint32_t w = G.cpu->reg_size(r) < 8 ? G.cpu->reg_size(r) : 8;
@@ -1015,7 +1025,7 @@ static void serve(void)
                 uint32_t sz = G.cpu->reg_size(r);
                 ok = strlen(q) >= 2 * sz && from_hex(buf, q, sz);
                 if (ok)
-                    G.cpu->reg_write(t->ctx, r, buf);
+                    cpu_for(t->ctx)->reg_write(t->ctx, r, buf);
                 q += 2 * sz;
             }
             reply(ok ? "OK" : "E01");
@@ -1038,7 +1048,7 @@ static void serve(void)
                 !from_hex(buf, q + 1, G.cpu->reg_size((uint32_t)r))) {
                 reply("E01");
             } else {
-                G.cpu->reg_write(t->ctx, (uint32_t)r, buf);
+                cpu_for(t->ctx)->reg_write(t->ctx, (uint32_t)r, buf);
                 reply("OK");
             }
         } else if (p[0] == 'm') {

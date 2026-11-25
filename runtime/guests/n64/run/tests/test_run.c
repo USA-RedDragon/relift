@@ -335,7 +335,7 @@ TEST(gdb_serve_an_n64_run_for_a_debugger)
 /** @brief What the client saw. */
 typedef struct mclient {
     int port;
-    char xml[64], r8[20], r9[20], pc[20], mem[16], io[8], det[8];
+    char xml[64], r8[20], r9[20], pc[20], mem[16], io[8], det[8], threads[512], rpc[20], imem[16];
     bool ok;
 } mclient;
 
@@ -389,6 +389,12 @@ static void *mclient_run(void *arg)
     snprintf(s->mem, sizeof s->mem, "%s", r);
     s->ok = s->ok && mask(fd, "mffffffffa4400010,4", r, sizeof r);
     snprintf(s->io, sizeof s->io, "%s", r);
+    s->ok = s->ok && mask(fd, "qXfer:threads:read::0,1ff", r, sizeof r);
+    snprintf(s->threads, sizeof s->threads, "%s", r);
+    s->ok = s->ok && mask(fd, "Hg2", r, sizeof r) && mask(fd, "p25", r, sizeof r);
+    snprintf(s->rpc, sizeof s->rpc, "%s", r);
+    s->ok = s->ok && mask(fd, "m4001000,4", r, sizeof r);
+    snprintf(s->imem, sizeof s->imem, "%s", r);
     s->ok = s->ok && mask(fd, "D", r, sizeof r);
     snprintf(s->det, sizeof s->det, "%s", r);
     close(fd);
@@ -414,6 +420,10 @@ TEST(gdb_server_stops_an_n64_run_at_a_sync_point_and_keeps_its_timing)
     rl_settings_declare_runtime();
     CHECK_EQ(rl_settings_set("debug.gdb", port), RL_SETTING_OK);
     CHECK(boot(fns_count, 1) == 0);
+    char why[128];
+    CHECK_EQ(rl_n64_run_rsp(&run, NULL, 0, why, sizeof why), 0);
+    static const uint8_t ucode[4] = { 0x24, 0x01, 0x00, 0x05 };
+    memcpy(rl_n64_spmem(mach) + 0x1000, ucode, 4);
     pthread_t th;
     CHECK_EQ(pthread_create(&th, NULL, mclient_run, &s), 0);
     rl_n64_run_start(&run);
@@ -430,6 +440,10 @@ TEST(gdb_server_stops_an_n64_run_at_a_sync_point_and_keeps_its_timing)
     snprintf(want, sizeof want, "%02x%02x%02x%02x", rom[0x1000], rom[0x1001], rom[0x1002], rom[0x1003]);
     CHECK(strcmp(s.mem, want) == 0);
     CHECK(strcmp(s.io, "E14") == 0);
+    /* Thread 2, the RSP: its pc in the SP window and IMEM read there. */
+    CHECK(strstr(s.threads, "<thread id=\"2\"") != NULL);
+    CHECK(strcmp(s.rpc, "0000000004001000") == 0);
+    CHECK(strcmp(s.imem, "24010005") == 0);
     CHECK(strcmp(s.det, "OK") == 0);
     CHECK_EQ(cs.cycles, ref);
 }

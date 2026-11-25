@@ -83,6 +83,11 @@ typedef struct rl_gdb_thread {
      */
     bool has_pc, pc_exact;
     uint64_t pc;
+    /**
+     * @brief The register layer of this thread's CPU, or NULL for the server's. It numbers registers as the server's
+     * target description does; ctx is then whatever that layer reads (a coprocessor's own state).
+     */
+    const struct rl_gdb_cpu *cpu;
 } rl_gdb_thread;
 
 /** @brief A guest layer's side of the stub. */
