@@ -463,6 +463,7 @@ void nvn_gpuprof_report(double frames)
 {
     if (gp.on <= 0 || frames <= 0)
         return;
+    nvn_vk_alias_report(frames);
     static uint64_t ticks0, n0;
     uint64_t ticks = 0, pn = 0;
     rl_present_gpu_stats(&ticks, &pn);

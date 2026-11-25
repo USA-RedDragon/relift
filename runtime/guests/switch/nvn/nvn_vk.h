@@ -1573,6 +1573,8 @@ void nvn_gpuprof_mark_kinds(void);
 void nvn_gpuprof_done(uint32_t s);
 /** @brief Logs the ranking of the parts since the last report, per present over frames presents. */
 void nvn_gpuprof_report(double frames);
+/** @brief Logs the image pairs that went through guest bytes since the last report (alias syncs), most frequent first. */
+void nvn_vk_alias_report(double frames);
 /** @brief The batches' spans, the sum of their parts and the time between batches since the last report (ns). */
 void nvn_gpuprof_sums(double *span_ns, double *parts_ns, double *between_ns);
 /** @brief The GPU time (ns) and intervals counted under label lab since the last report; false when none were. */

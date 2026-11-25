@@ -4177,6 +4177,46 @@ static vimg *defer_sync(vimg *v)
  * first; deferred: v's sync was deferred (defer_sync) and it keeps its own write stamp, taking only images written
  * before it.
  */
+/** @brief The image pairs whose bytes went through the guest (a write-back and an upload) rather than a GPU copy, counted for the GPU profile. */
+static struct alias_pair {
+    uint32_t sfmt, sw, sh, vfmt, vw, vh;
+    uint64_t n, bytes;
+} alias_pairs[24];
+static uint32_t n_alias_pairs;
+
+static void alias_pair_count(const vimg *src, const vimg *v)
+{
+    struct alias_pair *p = NULL;
+    for (uint32_t i = 0; i < n_alias_pairs && !p; i++)
+        if (alias_pairs[i].sfmt == src->d.format && alias_pairs[i].sw == src->d.width && alias_pairs[i].sh == src->d.height &&
+            alias_pairs[i].vfmt == v->d.format && alias_pairs[i].vw == v->d.width && alias_pairs[i].vh == v->d.height)
+            p = &alias_pairs[i];
+    if (!p && n_alias_pairs < 24)
+        *(p = &alias_pairs[n_alias_pairs++]) = (struct alias_pair){ src->d.format, src->d.width, src->d.height,
+                                                                   v->d.format, v->d.width, v->d.height, 0, 0 };
+    if (p) {
+        p->n++;
+        p->bytes += src->d.size;
+    }
+}
+
+void nvn_vk_alias_report(double frames)
+{
+    for (uint32_t k = 0; k < 6; k++) {
+        uint32_t b = 24;
+        for (uint32_t i = 0; i < n_alias_pairs; i++)
+            if (alias_pairs[i].n && (b == 24 || alias_pairs[i].n > alias_pairs[b].n))
+                b = i;
+        if (b == 24)
+            break;
+        struct alias_pair *p = &alias_pairs[b];
+        rl_log(RL_LOG_INFO, "nvn", "alias through guest bytes %6.1f per present, %7.2f MiB per present: format %u %ux%u written, read as format %u %ux%u",
+               (double)p->n / frames, (double)p->bytes / frames / 1048576.0, p->sfmt, p->sw, p->sh, p->vfmt, p->vw, p->vh);
+        p->n = 0;
+        p->bytes = 0;
+    }
+}
+
 static vimg *sync_from(replay *r, vimg *v, uint64_t since, bool deferred)
 {
     if (v->alias_epoch != g.image_epoch && !list_aliases(r, v))
@@ -4209,7 +4249,7 @@ static vimg *sync_from(replay *r, vimg *v, uint64_t since, bool deferred)
                 nvn_flash_wrote(v, 0, 0);
                 nvn_flash_thumbs(r, "alias");
             }
-        } else if (!write_back(r, src) || !upload(r, v)) {
+        } else if ((alias_pair_count(src, v), !write_back(r, src)) || !upload(r, v)) {
             nvn_vk_stop(r,
                         "texture storage 0x%llx (format %u, %ux%u) was written as format %u, %ux%u, which cannot be "
                         "read back into the guest's layout",
