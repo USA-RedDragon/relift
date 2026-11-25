@@ -579,6 +579,38 @@ uint32_t nvn_check_children_fit(uint64_t avail, uint64_t reserve, uint64_t footp
  * RELIFT_WARM_THREADS count, 0 when unset.
  */
 bool nvn_warm_maps_note(uint64_t count, uint64_t limit, uint32_t forced, char *buf, size_t n);
+/**
+ * @brief How many more compiles of a footprint may start now: avail is MemAvailable, in_use how much of the running
+ * compiles' growth is already counted in it (the process's growth since the gate was idle), est a compile's measured
+ * footprint (0 before one is measured, when only a first compile may run), running the compiles in flight and wanted
+ * the most at once. The running compiles will still grow to est each, so avail less that remainder, less reserve, must
+ * hold est for one more.
+ */
+uint32_t nvn_warm_gate_fit(uint64_t avail, uint64_t reserve, uint64_t est, uint64_t in_use, uint32_t running, uint32_t wanted);
+/** @brief The memory gate of the warm-up's compiles: the samples it reads, so a test can give its own. */
+typedef struct nvn_gate_src {
+    /** @brief Bytes the system can still give (MemAvailable); 0 when unknown, which lifts the cap. */
+    uint64_t (*avail)(void);
+    /** @brief This process's peak resident bytes so far (VmHWM) and its current ones (VmRSS). */
+    uint64_t (*peak)(void);
+    uint64_t (*rss)(void);
+    /** @brief Starts a new peak window (VmHWM from now); NULL where the system has none. */
+    void (*reset_peak)(void);
+} nvn_gate_src;
+/** @brief Sets up the compile gate: at most wanted compiles at once, reserve bytes kept free; src NULL for the system's. */
+void nvn_gate_init(const nvn_gate_src *src, uint32_t wanted, uint64_t reserve);
+/** @brief Waits until a compile of the measured footprint fits, then counts it in; pair with nvn_gate_leave. */
+void nvn_gate_enter(void);
+/**
+ * @brief Counts a compile out and raises the footprint to the largest per-compile growth seen so far: the process's
+ * peak over the busy period (from the first compile in flight to the last) less what it held when it began, the whole
+ * of it taken as one compile's (conservative when several ran).
+ */
+void nvn_gate_leave(void);
+/** @brief The footprint the gate has measured so far, in bytes (0 until a compile ran alone). */
+uint64_t nvn_gate_footprint(void);
+/** @brief The most compiles the gate has seen in flight at once. */
+uint32_t nvn_gate_high_water(void);
 /** @brief What the launch warm-up makes, from RELIFT_PIPELINE_WARM and the counts of recorded pipelines and table programs. */
 typedef struct nvn_warm_plan {
     /** @brief Items the compile screen counts and the first submit may wait for: the recorded pipelines, and the table when they lead. */

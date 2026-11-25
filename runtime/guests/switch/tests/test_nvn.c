@@ -15,9 +15,11 @@
 #include <limits.h>
 #include <math.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -32,6 +34,111 @@ static uint64_t call(rl_ctx *c, rl_fn_t *fn, uint64_t x0, uint64_t x1, uint64_t 
     c->x[3] = x3;
     c->x[30] = RET;
     return fn(c, t_mem());
+}
+
+/** @brief The fake memory of the compile gate tests: gate_avail bytes free when idle, less what each running compile holds. */
+static uint64_t gate_avail;
+static _Atomic uint64_t gate_cur, gate_peak;
+static _Atomic uint32_t gate_in_flight, gate_over;
+
+static uint64_t fake_avail(void)
+{
+    uint64_t cur = atomic_load(&gate_cur);
+    return gate_avail > cur ? gate_avail - cur : 1;
+}
+
+static uint64_t fake_peak(void) { return atomic_load(&gate_peak); }
+
+static uint64_t fake_rss(void) { return atomic_load(&gate_cur); }
+
+static void fake_reset(void) { atomic_store(&gate_peak, atomic_load(&gate_cur)); }
+
+static void *gate_compile(void *arg)
+{
+    uint64_t size = *(uint64_t *)arg;
+    nvn_gate_enter();
+    uint32_t now = atomic_fetch_add(&gate_in_flight, 1) + 1;
+    uint32_t over = atomic_load(&gate_over);
+    while (now > over && !atomic_compare_exchange_weak(&gate_over, &over, now)) {
+    }
+    uint64_t cur = atomic_fetch_add(&gate_cur, size) + size;
+    uint64_t pk = atomic_load(&gate_peak);
+    while (cur > pk && !atomic_compare_exchange_weak(&gate_peak, &pk, cur)) {
+    }
+    struct timespec ts = { 0, 15 * 1000 * 1000 };
+    nanosleep(&ts, NULL);
+    atomic_fetch_sub(&gate_cur, size);
+    atomic_fetch_sub(&gate_in_flight, 1);
+    nvn_gate_leave();
+    return NULL;
+}
+
+static void gate_run(uint64_t *size, int n)
+{
+    pthread_t t[16];
+    for (int i = 0; i < n; i++)
+        CHECK_EQ(pthread_create(&t[i], NULL, gate_compile, size), 0);
+    for (int i = 0; i < n; i++)
+        pthread_join(t[i], NULL);
+}
+
+TEST(nvn_warm_gate_fit_counts_what_running_compiles_will_still_take)
+{
+    uint64_t G = 1ull << 30;
+    /* Before a footprint is measured only a first compile runs. */
+    CHECK_EQ(nvn_warm_gate_fit(16 * G, 2 * G, 0, 0, 0, 8), 1u);
+    CHECK_EQ(nvn_warm_gate_fit(16 * G, 2 * G, 0, 0, 1, 8), 0u);
+    /* 16 GiB free, 2 kept, 3 per compile: four fit. */
+    CHECK_EQ(nvn_warm_gate_fit(16 * G, 2 * G, 3 * G, 0, 0, 8), 4u);
+    /* Two running that have taken nothing yet still owe 6 GiB: 10 GiB left, three more would be 9. */
+    CHECK_EQ(nvn_warm_gate_fit(16 * G, 2 * G, 3 * G, 0, 2, 8), 2u);
+    /* Once they have taken their 6 GiB the free memory already shows it. */
+    CHECK_EQ(nvn_warm_gate_fit(10 * G, 2 * G, 3 * G, 6 * G, 2, 8), 2u);
+    CHECK_EQ(nvn_warm_gate_fit(1 * G, 2 * G, 3 * G, 0, 0, 8), 0u);
+    /* The wanted count caps it. */
+    CHECK_EQ(nvn_warm_gate_fit(64 * G, 0, 1 * G, 0, 6, 8), 2u);
+    CHECK_EQ(nvn_warm_gate_fit(64 * G, 0, 1 * G, 0, 8, 8), 0u);
+}
+
+TEST(nvn_warm_gate_keeps_compiles_in_flight_within_the_memory)
+{
+    uint64_t G = 1ull << 30, small = 3 * G, big = 6 * G;
+    nvn_gate_src src = { fake_avail, fake_peak, fake_rss, fake_reset };
+    gate_avail = 10 * G;
+    atomic_store(&gate_cur, 0);
+    atomic_store(&gate_peak, 0);
+    atomic_store(&gate_over, 0);
+    nvn_gate_init(&src, 8, 1 * G);
+    /* The first compile ran alone and measured 3 GiB; then (10 - 1) / 3 compiles at once, no more. */
+    gate_run(&small, 12);
+    CHECK(nvn_gate_footprint() >= small);
+    CHECK(atomic_load(&gate_over) <= 3u);
+    CHECK(nvn_gate_high_water() >= 2u);
+    /* A bigger program comes along: its growth raises the footprint, and fewer compiles fit from then on. */
+    gate_run(&big, 1);
+    CHECK(nvn_gate_footprint() >= big);
+    atomic_store(&gate_over, 0);
+    gate_run(&small, 12);
+    CHECK_EQ(atomic_load(&gate_over), 1u);
+    CHECK(nvn_gate_footprint() >= big);
+    /* One big and two small in flight at once: the footprint is at least the big one's, not a third of the sum. */
+    gate_avail = 64 * G;
+    nvn_gate_init(&src, 8, 1 * G);
+    pthread_t bt, st[2];
+    CHECK_EQ(pthread_create(&bt, NULL, gate_compile, &big), 0);
+    for (int i = 0; i < 2; i++)
+        CHECK_EQ(pthread_create(&st[i], NULL, gate_compile, &small), 0);
+    pthread_join(bt, NULL);
+    for (int i = 0; i < 2; i++)
+        pthread_join(st[i], NULL);
+    CHECK(nvn_gate_footprint() >= big);
+    /* With memory short and nothing running, one compile still goes. */
+    gate_avail = 1 * G;
+    gate_avail = 1 * G;
+    atomic_store(&gate_over, 0);
+    nvn_gate_init(&src, 8, 2 * G);
+    gate_run(&small, 3);
+    CHECK_EQ(atomic_load(&gate_over), 1u);
 }
 
 TEST(nvn_warm_makes_the_rest_of_the_table_after_the_record_in_the_background)

@@ -53,6 +53,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #if defined(_WIN32)
 #include <windows.h>
@@ -280,12 +281,137 @@ void nvn_warm_key(nvn_pipe_key *k, const nvn_module *m, uint32_t stage)
     k->depth_clamp = st.depth_clamp;
 }
 
+/** @brief The system's samples for the compile gate: /proc/meminfo and /proc/self/status (Linux and Android). */
+static uint64_t proc_kib(const char *path, const char *field)
+{
+    FILE *f = fopen(path, "r");
+    char line[256];
+    unsigned long long kib = 0;
+    size_t n = strlen(field);
+    while (f && fgets(line, sizeof line, f))
+        if (!strncmp(line, field, n) && line[n] == ':') {
+            kib = strtoull(line + n + 1, NULL, 10);
+            break;
+        }
+    if (f)
+        fclose(f);
+    return (uint64_t)kib << 10;
+}
+
+static uint64_t sys_avail(void) { return proc_kib("/proc/meminfo", "MemAvailable"); }
+
+static uint64_t sys_peak(void) { return proc_kib("/proc/self/status", "VmHWM"); }
+
+static uint64_t sys_rss(void) { return proc_kib("/proc/self/status", "VmRSS"); }
+
+/** @brief Writes 5 to clear_refs: the kernel restarts VmHWM at the current RSS. */
+static void sys_reset_peak(void)
+{
+    FILE *f = fopen("/proc/self/clear_refs", "w");
+    if (f) {
+        fputs("5", f);
+        fclose(f);
+    }
+}
+
+static struct {
+    pthread_mutex_t lock;
+    pthread_cond_t cv;
+    nvn_gate_src src;
+    uint32_t wanted, running, high;
+    uint64_t reserve, est, idle_rss;
+    /** @brief The most compiles in flight at once since the gate was last idle. */
+    uint32_t busy_max;
+} G = { .lock = PTHREAD_MUTEX_INITIALIZER, .cv = PTHREAD_COND_INITIALIZER, .wanted = 0xffffffffu };
+
+uint32_t nvn_warm_gate_fit(uint64_t avail, uint64_t reserve, uint64_t est, uint64_t in_use, uint32_t running, uint32_t wanted)
+{
+    if (running >= wanted)
+        return 0;
+    if (!est)
+        return running ? 0 : 1;
+    uint64_t committed = (uint64_t)running * est;
+    uint64_t remaining = committed > in_use ? committed - in_use : 0;
+    if (avail < reserve + remaining)
+        return 0;
+    uint64_t n = (avail - reserve - remaining) / est;
+    return n < wanted - running ? (uint32_t)n : wanted - running;
+}
+
+void nvn_gate_init(const nvn_gate_src *src, uint32_t wanted, uint64_t reserve)
+{
+    pthread_mutex_lock(&G.lock);
+    G.src = src ? *src : (nvn_gate_src){ sys_avail, sys_peak, sys_rss, sys_reset_peak };
+    G.wanted = wanted ? wanted : 1u;
+    G.reserve = reserve;
+    G.est = 0;
+    G.running = G.high = 0;
+    G.busy_max = 0;
+    pthread_mutex_unlock(&G.lock);
+}
+
+void nvn_gate_enter(void)
+{
+    pthread_mutex_lock(&G.lock);
+    for (;;) {
+        uint64_t avail = G.src.avail ? G.src.avail() : 0;
+        uint32_t may;
+        if (!avail) {
+            may = G.running < G.wanted;
+        } else {
+            uint64_t rss = G.src.rss ? G.src.rss() : 0;
+            uint64_t in_use = G.running && rss > G.idle_rss ? rss - G.idle_rss : 0;
+            may = nvn_warm_gate_fit(avail, G.reserve, G.est, in_use, G.running, G.wanted);
+            /* Nothing running and memory short: the one compile still goes, or the warm-up would stall for good. */
+            if (!may && !G.running)
+                may = 1;
+        }
+        if (may)
+            break;
+        pthread_cond_wait(&G.cv, &G.lock);
+    }
+    if (!G.running) {
+        if (G.src.reset_peak)
+            G.src.reset_peak();
+        G.idle_rss = G.src.rss ? G.src.rss() : 0;
+        G.busy_max = 0;
+    }
+    G.running++;
+    if (G.running > G.high)
+        G.high = G.running;
+    if (G.running > G.busy_max)
+        G.busy_max = G.running;
+    pthread_mutex_unlock(&G.lock);
+}
+
+void nvn_gate_leave(void)
+{
+    pthread_mutex_lock(&G.lock);
+    if (G.src.peak && G.busy_max) {
+        uint64_t peak = G.src.peak();
+        uint64_t grew = peak > G.idle_rss ? peak - G.idle_rss : 0;
+        /* Conservative: the whole growth is one compile's, however many ran, since one big program beside small ones
+         * cannot be told from equal shares. */
+        uint64_t each = grew;
+        if (each > G.est)
+            G.est = each;
+    }
+    G.running--;
+    pthread_cond_broadcast(&G.cv);
+    pthread_mutex_unlock(&G.lock);
+}
+
+uint64_t nvn_gate_footprint(void) { return G.est; }
+
+uint32_t nvn_gate_high_water(void) { return G.high; }
+
+
 /**
  * @brief Makes what the driver compiles of the program with key and stage
  * (negative: the stage its translation names; wg: a compute program's
  * workgroup size, all zero when the game has not said).
  */
-static bool warm_program(const char *key, int stage, const uint32_t wg[3])
+static bool warm_program_inner(const char *key, int stage, const uint32_t wg[3])
 {
     static _Atomic bool ready;
     if (!ready) {
@@ -328,6 +454,15 @@ static bool warm_program(const char *key, int stage, const uint32_t wg[3])
         return true;
     fail_why(nvn_pipe_why());
     return false;
+}
+
+/** @brief [`warm_program_inner`] under the compile gate, so the compiles in flight never outgrow the memory. */
+static bool warm_program(const char *key, int stage, const uint32_t wg[3])
+{
+    nvn_gate_enter();
+    bool ok = warm_program_inner(key, stage, wg);
+    nvn_gate_leave();
+    return ok;
 }
 
 bool nvn_warm_check(const char *key, char *why, size_t why_n)
@@ -596,6 +731,19 @@ static void launch(void)
     W.extra = plan.extra;
     W.t0 = W.last_log = rl_clock_ns();
     uint32_t total = W.total, nthreads = worker_count();
+    /* The compiles in flight stay within the memory: a compile of a big program takes gigabytes of the driver's, and
+     * the workers together once ran an Android app out of it. RELIFT_WARM_RESERVE_MB sets the memory kept free (0
+     * lifts the cap). */
+#if defined(__ANDROID__)
+    uint64_t reserve_mb = 4096;
+#else
+    uint64_t reserve_mb = 2048;
+#endif
+    const char *rv = getenv("RELIFT_WARM_RESERVE_MB");
+    if (rv && *rv)
+        reserve_mb = strtoull(rv, NULL, 10);
+    if (reserve_mb)
+        nvn_gate_init(NULL, nthreads, reserve_mb << 20);
     pthread_mutex_unlock(&W.lock);
     if (nthreads > total + W.extra)
         nthreads = total + W.extra;
