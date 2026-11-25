@@ -628,6 +628,22 @@ TEST(nvn_texset_an_image_bound_first_time_on_an_unused_slot_does_not_wait)
     CHECK_EQ(nvn_vk_flush_epoch(), epoch0);
     nvn_texset_uses_recorded();
     CHECK(nvn_vk_flush(&r));
+    /* another texture takes the id while no unfinished batch used the slot: the old storage view is listed for destruction
+     * when the recording batch has run, the new one is written, and nothing waits for the device */
+    const uint64_t tex2 = 0x300;
+    nvn_tex_desc d2 = d;
+    d2.offset = 0x6000;
+    CHECK(nvn_tex_layout(&d2));
+    CHECK(nvn_texture_record(tex2, &d2, NULL));
+    c.x[1] = 41;
+    c.x[2] = tex2;
+    c.x[3] = 0;
+    nvnh_nvnTexturePoolRegisterTexture(&c, mem);
+    uint64_t epoch1 = nvn_vk_flush_epoch();
+    CHECK_EQ(nvn_texset_image(&r, 41u, &slot, &kind, &dim), RL_OK);
+    CHECK_EQ(nvn_vk_flush_epoch(), epoch1);
+    nvn_texset_uses_recorded();
+    CHECK(nvn_vk_flush(&r));
 }
 
 TEST(nvn_texset_a_bank_handle_rebound_while_an_earlier_batch_uses_it_gets_a_new_slot_and_leaves_the_old_one)

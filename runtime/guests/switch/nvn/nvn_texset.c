@@ -35,6 +35,9 @@ enum { ID_1D, ID_BUFFER, ID_1D_ARRAY, ID_2D, ID_2D_ARRAY, ID_3D };
 
 enum { DIM_1D, DIM_2D, DIM_3D, DIM_CUBE, DIM_1D_ARRAY, DIM_2D_ARRAY, DIM_CUBE_ARRAY, DIM_2D_MS, DIM_2D_MS_ARRAY };
 
+/** @brief How many replaced views one batch holds before the replacing bind waits for the device instead. */
+#define DEAD_VIEWS 512u
+
 static struct {
     bool tried, ok;
     /**
@@ -108,6 +111,10 @@ static struct {
     bool dynamic;
     /** @brief nvn_texset_sync_registered is binding: its binds are not uses of the slots. */
     bool syncing;
+    /** @brief Storage views replaced while unfinished batches may still read them: destroyed when the recording slot's batch has run. */
+    VkImageView dead_views[NVN_SLOTS][DEAD_VIEWS];
+    uint32_t ndead_views[NVN_SLOTS];
+    uint32_t cur_slot;
     /** @brief The epoch of the last use of the slot bind_texture_slot bound last, as it was before this bind (0: a fresh slot). */
     uint64_t last_was;
     /** @brief The kind of each texture id's bound view (its format's sampled type). */
@@ -211,6 +218,15 @@ static bool fill_samplers(void)
 
 /** @brief Make only the set layout (nvn_texset_layout_only). */
 static bool g_layout_only;
+
+void nvn_texset_slot(uint32_t slot) { t.cur_slot = slot; }
+
+void nvn_texset_release(uint32_t slot)
+{
+    for (uint32_t i = 0; i < t.ndead_views[slot]; i++)
+        VK(vkDestroyImageView)(g.dev, t.dead_views[slot][i], NULL);
+    t.ndead_views[slot] = 0;
+}
 
 void nvn_texset_layout_only(void) { g_layout_only = true; }
 
@@ -662,9 +678,15 @@ static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t l
                 continue;
             uint32_t at = 8u * k + d;
             if (t.img_views[slot][at]) {
-                if (!nvn_vk_flush(r))
-                    return nvn_vk_stop(r, "the host device failed a submit");
-                VK(vkDestroyImageView)(g.dev, t.img_views[slot][at], NULL);
+                /* The old view may be read by unfinished batches: it goes on the recording batch's list, destroyed when that batch
+                 * has run (earlier batches finish before it); only a full list waits for the device. */
+                if (t.ndead_views[t.cur_slot] == DEAD_VIEWS) {
+                    if (!nvn_vk_flush(r))
+                        return nvn_vk_stop(r, "the host device failed a submit");
+                    VK(vkDestroyImageView)(g.dev, t.img_views[slot][at], NULL);
+                } else {
+                    t.dead_views[t.cur_slot][t.ndead_views[t.cur_slot]++] = t.img_views[slot][at];
+                }
                 t.img_views[slot][at] = NULL;
             }
             VkImageView iv = nvn_vk_storage_view(v, types[d], f, level, layer, layers);

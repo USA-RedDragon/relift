@@ -2579,6 +2579,7 @@ static void use_slot(uint32_t s)
     g.arena_used = g.arena_used_of[s];
     nvn_draw_slot(s);
     nvn_untile_slot(s);
+    nvn_texset_slot(s);
     nvn_dlss_slot(s);
     nvn_counters_slot(s);
 }
@@ -2817,6 +2818,7 @@ static bool wait_slot(uint32_t s)
     if (done > __atomic_load_n(&g_finished, __ATOMIC_ACQUIRE))
         __atomic_store_n(&g_finished, done, __ATOMIC_RELEASE);
     nvn_untile_release(s);
+    nvn_texset_release(s);
     nvn_draw_reset(s);
     nvn_dlss_reset(s);
     return ok;
