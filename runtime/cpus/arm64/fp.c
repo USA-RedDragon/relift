@@ -1192,3 +1192,77 @@ RL_FP_COLD uint64_t rl_fp64_muladd_cold(uint64_t addend, uint64_t a, uint64_t b)
 RL_FP_COLD uint32_t rl_fp32_sqrt_cold(uint32_t a) { return rl_fp32_sqrt(a, 0, NULL); }
 
 RL_FP_COLD uint64_t rl_fp64_sqrt_cold(uint64_t a) { return rl_fp64_sqrt(a, 0, NULL); }
+
+#if defined(__x86_64__) && !defined(RL_FP_FLAGS)
+#include <immintrin.h>
+
+/** @brief Whether the host has FMA3, found once. */
+static int host_has_fma(void)
+{
+    static int have = -1;
+    if (have < 0)
+        have = __builtin_cpu_supports("fma") ? 1 : 0;
+    return have;
+}
+
+__attribute__((target("fma"), noinline)) static uint32_t fma32_ftz(uint32_t addend, uint32_t a, uint32_t b)
+{
+    float z, x, y;
+    memcpy(&z, &addend, 4);
+    memcpy(&x, &a, 4);
+    memcpy(&y, &b, 4);
+    uint32_t csr = _mm_getcsr();
+    _mm_setcsr(csr | 0x8040u);
+    __asm__ volatile("" : "+x"(x), "+x"(y), "+x"(z));
+    __m128 r = _mm_fmadd_ss(_mm_set_ss(x), _mm_set_ss(y), _mm_set_ss(z));
+    __asm__ volatile("" : "+x"(r));
+    _mm_setcsr(csr);
+    float f = _mm_cvtss_f32(r);
+    uint32_t u;
+    memcpy(&u, &f, 4);
+    return u;
+}
+
+__attribute__((target("fma"), noinline)) static uint64_t fma64_ftz(uint64_t addend, uint64_t a, uint64_t b)
+{
+    double z, x, y;
+    memcpy(&z, &addend, 8);
+    memcpy(&x, &a, 8);
+    memcpy(&y, &b, 8);
+    uint32_t csr = _mm_getcsr();
+    _mm_setcsr(csr | 0x8040u);
+    __asm__ volatile("" : "+x"(x), "+x"(y), "+x"(z));
+    __m128d r = _mm_fmadd_sd(_mm_set_sd(x), _mm_set_sd(y), _mm_set_sd(z));
+    __asm__ volatile("" : "+x"(r));
+    _mm_setcsr(csr);
+    double f = _mm_cvtsd_f64(r);
+    uint64_t u;
+    memcpy(&u, &f, 8);
+    return u;
+}
+
+uint32_t rl_fp32_muladd_fz(uint32_t addend, uint32_t a, uint32_t b)
+{
+    if (host_has_fma()) {
+        uint32_t u = fma32_ftz(addend, a, b);
+        uint32_t mag = u & 0x7FFFFFFFu;
+        /* a NaN, or the smallest normal (a tiny result may have rounded up to it), is the exact path's */
+        if (mag > 0x7F800000u || mag == 0x00800000u)
+            return rl_fp32_muladd(addend, a, b, RL_FPCR_FZ, NULL);
+        return u;
+    }
+    return rl_fp32_muladd(addend, a, b, RL_FPCR_FZ, NULL);
+}
+
+uint64_t rl_fp64_muladd_fz(uint64_t addend, uint64_t a, uint64_t b)
+{
+    if (host_has_fma()) {
+        uint64_t u = fma64_ftz(addend, a, b);
+        uint64_t mag = u & 0x7FFFFFFFFFFFFFFFull;
+        if (mag > 0x7FF0000000000000ull || mag == 0x0010000000000000ull)
+            return rl_fp64_muladd(addend, a, b, RL_FPCR_FZ, NULL);
+        return u;
+    }
+    return rl_fp64_muladd(addend, a, b, RL_FPCR_FZ, NULL);
+}
+#endif

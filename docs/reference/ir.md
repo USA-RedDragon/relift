@@ -256,12 +256,14 @@ block 0x1004 len 4 regs arm64
 block 0x1000 len 4 regs arm64
   v0:i32 = get fpcr
   v1:i32 = const 0x0
-  v2:i1 = cmp.ne v0, v1
-  guard v2, 0x46504352
-  v4:i128 = get v1
-  v5:i64 = extract v4, 0
-  v6:i64 = fp.tosint.z v5
-  set x0, v6
+  v2:i32 = const 0xfeffffff
+  v3:i32 = and v0, v2
+  v4:i1 = cmp.ne v3, v1
+  guard v4, 0x4650465a
+  v6:i128 = get v1
+  v7:i64 = extract v6, 0
+  v8:i64 = fp.tosint.z v7
+  set x0, v8
   exit jump 0x1004
 ```
 <!-- /docgen:output -->
@@ -879,11 +881,11 @@ pub enum FpRound {
 ```text
 ; 0x1000 1e622820 FADD_D_floatdp2
 block 0x1000 len 4 regs arm64
-  v8:i64 = fp.add v5, v7
+  v10:i64 = fp.add v7, v9
   exit jump 0x1004
 ; 0x1004 1e390020 FCVTZU_32S_float2int
 block 0x1004 len 4 regs arm64
-  v6:i32 = fp.touint.z v5
+  v8:i32 = fp.touint.z v7
   exit jump 0x1008
 ```
 <!-- /docgen:output -->

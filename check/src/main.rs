@@ -60,7 +60,7 @@ mod z80;
 use std::process::ExitCode;
 
 use relift_cpu_arm64::decode::{Encoding, Insn};
-use relift_cpu_arm64::lift::sail::{SLOW_FLAGS, SLOW_FPCR};
+use relift_cpu_arm64::lift::sail::{SLOW_FLAGS, SLOW_FPCR, SLOW_FPCR_FZ};
 use relift_cpu_arm64::lift::{lifter, supported};
 
 use emu::{Guest, compare, interpret, lift_all};
@@ -140,9 +140,12 @@ fn run_all(
         // The FP guards; an alignment guard (`SLOW_ALIGN`) is a fault and
         // leaves no block for the FP slow path.
         let guarded = blocks.iter().any(|b| {
-            b.insts
-                .iter()
-                .any(|i| matches!(i.op, relift_ir::Op::Guard(_, SLOW_FPCR | SLOW_FLAGS)))
+            b.insts.iter().any(|i| {
+                matches!(
+                    i.op,
+                    relift_ir::Op::Guard(_, SLOW_FPCR | SLOW_FPCR_FZ | SLOW_FLAGS)
+                )
+            })
         });
         // In a flag-producing program, blocks with host FP operations get
         // their flags from the host, which the interpreter does not model:

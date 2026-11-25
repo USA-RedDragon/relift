@@ -205,7 +205,9 @@ pub fn raises(b: &Block) -> bool {
         Op::Fp(op, _) => !matches!(op, FpOp::Neg | FpOp::Abs),
         Op::Intrinsic(call) => call.name == crate::lift::system::FP_RAISE,
         Op::Guard(_, code) => {
-            *code == crate::lift::sail::SLOW_FPCR || *code == crate::lift::sail::SLOW_FLAGS
+            *code == crate::lift::sail::SLOW_FPCR
+                || *code == crate::lift::sail::SLOW_FPCR_FZ
+                || *code == crate::lift::sail::SLOW_FLAGS
         }
         _ => false,
     })

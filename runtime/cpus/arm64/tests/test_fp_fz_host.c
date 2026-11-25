@@ -369,6 +369,67 @@ TEST(fz_on_fmax_fmin_fcmp_is_a_flush_of_the_inputs_then_the_default_operation)
     }
     CHECK_EQ(bad, 0u);
 }
+/** @brief The inline operation the lifted code runs under FPCR.FZ, as the emitter writes it, for op and precision. */
+static uint64_t inline_op(int op, bool dbl, uint64_t a, uint64_t b, uint64_t k)
+{
+    const uint32_t fz = RL_FPCR_FZ;
+    if (dbl)
+        switch (op) {
+        case OP_ADD: return rl_fadd64(a, b, fz, 0);
+        case OP_SUB: return rl_fsub64(a, b, fz, 0);
+        case OP_MUL: return rl_fmul64(a, b, fz, 0);
+        case OP_DIV: return rl_fdiv64(a, b, fz, 0);
+        case OP_SQRT: return rl_fsqrt64(a, fz, 0);
+        default: return rl_fmuladd64(k, a, b, fz, 0);
+        }
+    switch (op) {
+    case OP_ADD: return rl_fadd32((uint32_t)a, (uint32_t)b, fz, 0);
+    case OP_SUB: return rl_fsub32((uint32_t)a, (uint32_t)b, fz, 0);
+    case OP_MUL: return rl_fmul32((uint32_t)a, (uint32_t)b, fz, 0);
+    case OP_DIV: return rl_fdiv32((uint32_t)a, (uint32_t)b, fz, 0);
+    case OP_SQRT: return rl_fsqrt32((uint32_t)a, fz, 0);
+    default: return rl_fmuladd32((uint32_t)k, (uint32_t)a, (uint32_t)b, fz, 0);
+    }
+}
+
+TEST(the_inline_ops_of_lifted_code_under_fz_equal_the_exact_path)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    uint64_t bad = 0, calls = 0;
+    for (int dbl = 0; dbl < 2; dbl++)
+        for (int op = 0; op < OPS; op++) {
+            uint32_t insn = op_insn_s[op] | (dbl ? 0x00400000u : 0);
+            for (uint64_t n = 0; n < 300000; n++) {
+                uint64_t a = dbl ? pick_d() : pick_s(), b = dbl ? pick_d() : pick_s(), k = dbl ? pick_d() : pick_s();
+                if ((op == OP_MUL || op == OP_DIV) && n % 2)
+                    boundary_pair(dbl, op, &a, &b);
+                if (dbl ? (nan_d(a) || nan_d(b) || nan_d(k)) : (nan_s(a) || nan_s(b) || nan_s(k)))
+                    continue;
+                c->v[0].q = c->v[1].q = c->v[2].q = c->v[3].q = 0;
+                if (dbl) {
+                    c->v[1].d[0] = a;
+                    c->v[2].d[0] = b;
+                    c->v[3].d[0] = k;
+                } else {
+                    c->v[1].s[0] = (uint32_t)a;
+                    c->v[2].s[0] = (uint32_t)b;
+                    c->v[3].s[0] = (uint32_t)k;
+                }
+                CHECK_EQ(rl_fp_slow(c, rl_mem_base(), 0x10000, insn), RL_OK);
+                uint64_t want = dbl ? c->v[0].d[0] : c->v[0].s[0];
+                uint64_t got = inline_op(op, dbl, a, b, k);
+                uint32_t csr_after = _mm_getcsr();
+                bool nan = dbl ? nan_d(got) && nan_d(want) : nan_s((uint32_t)got) && nan_s((uint32_t)want);
+                bad += (got != want && !nan) + ((csr_after & (MXCSR_FTZ | MXCSR_DAZ)) != 0);
+                calls++;
+            }
+        }
+    printf("  %llu inline operations under FZ, %llu differ from the exact path (or left the host mode changed)\n",
+           (unsigned long long)calls, (unsigned long long)bad);
+    CHECK_EQ(bad, 0u);
+}
+
 #elif defined(__aarch64__)
 #include <math.h>
 #include <stdio.h>

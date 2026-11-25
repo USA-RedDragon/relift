@@ -439,14 +439,49 @@ fn fmov_fabs_and_fneg_never_leave_the_fast_path_under_fz() {
 }
 
 #[test]
-fn arithmetic_does_leave_the_fast_path_under_fz_today() {
-    // FADD, FMUL, FMADD: the templates assume FPCR zero (the exact slow path handles FZ). This pins that down until the fast path takes FZ.
-    for word in [0x1e222820u32, 0x1e220820, 0x1f020c20] {
+fn tolerant_arithmetic_stays_on_the_fast_path_under_fz_and_leaves_for_other_modes() {
+    // FADD, FMUL, FMADD (single, double), FSQRT: exact under FZ in the emitted code (abi.h); any other mode bit leaves.
+    for word in [
+        0x1e222820u32,
+        0x1e220820,
+        0x1f020c20,
+        0x1e61c020,
+        0x1e21c020,
+    ] {
         let mut s = state();
         assert_eq!(
             trap_under_fz(word, &mut s),
-            Some(sail::SLOW_FPCR),
-            "{word:#010x}"
+            None,
+            "{word:#010x} left for a slow path under FZ"
         );
+        let mut s = state();
+        let mut m = mem();
+        s.regs[regs::FPCR.index()] = 1u128 << 23; // RMode bit
+        let b = lift(word, PC, &ALL).expect("lifts");
+        let flow = interp::run(&b, &mut s, &mut m, &mut NoIntrinsics)
+            .expect("runs")
+            .flow;
+        assert!(
+            matches!(flow, Flow::Trap(c) if c == sail::SLOW_FPCR_FZ),
+            "{word:#010x} {flow:?}"
+        );
+    }
+}
+
+#[test]
+fn arithmetic_outside_the_tolerant_set_leaves_the_fast_path_under_fz() {
+    // FCMP, FMAX, FCVT, FRINTX, FRECPE, vector FADD: their IR semantics assume FPCR zero.
+    for word in [
+        0x1e222020u32,
+        0x1e224820,
+        0x1e624020,
+        0x1e27c020,
+        0x5ea1d820,
+        0x4e22d420,
+    ] {
+        let mut s = state();
+        if let Some(code) = trap_under_fz(word, &mut s) {
+            assert_eq!(code, sail::SLOW_FPCR, "{word:#010x}");
+        }
     }
 }

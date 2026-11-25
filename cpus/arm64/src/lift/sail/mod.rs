@@ -37,6 +37,21 @@ pub const SLOW_ALIGN: u32 = 0x414c_4e47;
 /// The slow-path code of a block that needs a non-default FPCR.
 pub const SLOW_FPCR: u32 = 0x4650_4352;
 
+/// The slow-path code of a block whose floating-point semantics hold for FPCR zero or FPCR with only FZ set: scalar single and
+/// double FADD, FSUB, FMUL, FDIV, FNMUL, FSQRT and the fused multiply-adds. The emitted operations take FZ into account
+/// (abi.h, `rl_fp_fast`), as the differential tests of `runtime/cpus/arm64/tests/test_fp_fz_host.c` show.
+pub const SLOW_FPCR_FZ: u32 = 0x4650_465a;
+
+/// Whether the instruction `word` is one whose emitted code is exact under FPCR.FZ: scalar single or double FADD, FSUB, FMUL,
+/// FDIV, FNMUL, FSQRT, FMADD, FMSUB, FNMADD and FNMSUB.
+pub fn fz_tolerant(word: u32) -> bool {
+    let ftype_sd = (word >> 22) & 3 < 2;
+    let arith = word & 0xFF20_0C00 == 0x1E20_0800 && matches!((word >> 12) & 15, 0 | 1 | 2 | 3 | 8);
+    let sqrt = word & 0xFF3F_FC00 == 0x1E21_C000;
+    let fused = word & 0xFF00_0000 == 0x1F00_0000;
+    ftype_sd && (arith || sqrt || fused)
+}
+
 /// The slow-path code of a block whose FPSR flags the host cannot give, in a
 /// program that produces them (`regs::FP_FLAGS` is 1).
 pub const SLOW_FLAGS: u32 = 0x4650_5352;
@@ -56,8 +71,15 @@ pub fn lift_insn(insn: Insn, pc: u64, cpu: &Cpu) -> Result<Block, LiftError> {
         if guard {
             let fpcr = b.get(regs::FPCR);
             let zero = b.konst(b.width(fpcr), 0);
-            let ne = b.cmp(CmpOp::Ne, fpcr, zero);
-            b.guard(ne, SLOW_FPCR);
+            if fz_tolerant(insn.word) {
+                let rest = b.konst(b.width(fpcr), u128::from(!(1u32 << 24)));
+                let masked = b.and(fpcr, rest);
+                let ne = b.cmp(CmpOp::Ne, masked, zero);
+                b.guard(ne, SLOW_FPCR_FZ);
+            } else {
+                let ne = b.cmp(CmpOp::Ne, fpcr, zero);
+                b.guard(ne, SLOW_FPCR);
+            }
         }
         if flags {
             let on = b.get(regs::FP_FLAGS);

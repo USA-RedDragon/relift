@@ -20,7 +20,7 @@ use std::path::Path;
 
 use relift_cpu_arm64::cpu::{Cpu, Va};
 use relift_cpu_arm64::decode::{Features, decode_for};
-use relift_cpu_arm64::lift::sail::{SLOW_FLAGS, SLOW_FPCR};
+use relift_cpu_arm64::lift::sail::{SLOW_FLAGS, SLOW_FPCR, SLOW_FPCR_FZ};
 use relift_cpu_arm64::lift::{lift, system};
 use relift_cpu_arm64::regs::{self, CHECK_PAC_KEYS, PacKey};
 use relift_ir::interp::{self, Fault, FlatMemory, GuestMemory, Intrinsics, State};
@@ -153,7 +153,7 @@ fn replay(c: &Case, cpu: &Cpu) -> Run {
         match interp::run(b, &mut st, &mut mem, &mut intr) {
             Ok(o) => {
                 if let Flow::Trap(code) = o.flow {
-                    if code == SLOW_FPCR || code == SLOW_FLAGS {
+                    if code == SLOW_FPCR || code == SLOW_FPCR_FZ || code == SLOW_FLAGS {
                         return Run::NotHere;
                     }
                     return Run::Result(Answer::Fault(0));

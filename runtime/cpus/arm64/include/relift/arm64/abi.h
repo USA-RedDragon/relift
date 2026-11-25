@@ -52,6 +52,17 @@
 #define RL_FPCR_RMODE (3u << 22)
 /** @brief FPCR bits that change arithmetic results. */
 #define RL_FPCR_MODE (RL_FPCR_AHP | RL_FPCR_DN | RL_FPCR_FZ | RL_FPCR_RMODE)
+
+/**
+ * @brief 1 where lifted scalar arithmetic runs on the host's own flush-to-zero when the guest's FPCR.FZ is set: x86-64
+ * programs that do not produce FPSR flags (the host raises no IDC for a flushed input). Elsewhere FZ takes the exact slow path.
+ */
+#if defined(__x86_64__) && !defined(RL_FP_FLAGS)
+#define RL_FP_FZ_HOST 1
+#else
+#define RL_FP_FZ_HOST 0
+#endif
+
 /**
  * @brief Exact-flags mode: a bit of c->fpcr that is RES0 in the architecture
  * and never reaches the guest or the host FPCR. While it is set, every
@@ -783,6 +794,16 @@ RL_RUNTIME_API RL_FP_COLD uint64_t rl_fp64_div_cold(uint64_t a, uint64_t b);
 RL_RUNTIME_API RL_FP_COLD uint32_t rl_fp32_muladd_cold(uint32_t addend, uint32_t a, uint32_t b);
 /** @brief rl_fp64_muladd, as rl_fp32_add_cold. */
 RL_RUNTIME_API RL_FP_COLD uint64_t rl_fp64_muladd_cold(uint64_t addend, uint64_t a, uint64_t b);
+#if RL_FP_FZ_HOST
+/**
+ * @brief FMADD/FMLA single (addend + a * b, one rounding) under FPCR.FZ and no flags: the host's fused multiply-add in its
+ * own flush-to-zero mode, with the exact path for a NaN, an operand or result at the smallest normal boundary, or a host
+ * without FMA.
+ */
+RL_RUNTIME_API uint32_t rl_fp32_muladd_fz(uint32_t addend, uint32_t a, uint32_t b);
+/** @brief rl_fp32_muladd_fz for double precision. */
+RL_RUNTIME_API uint64_t rl_fp64_muladd_fz(uint64_t addend, uint64_t a, uint64_t b);
+#endif
 /** @brief rl_fp32_sqrt, as rl_fp32_add_cold. */
 RL_RUNTIME_API RL_FP_COLD uint32_t rl_fp32_sqrt_cold(uint32_t a);
 /** @brief rl_fp64_sqrt, as rl_fp32_add_cold. */
@@ -907,6 +928,36 @@ static inline int rl_fp_fast(uint32_t fpcr, const uint32_t *fpsr)
 }
 
 /**
+ * @brief rl_fp_fast for the operations whose emitted code is exact under FPCR.FZ (the set of `fz_tolerant` in the lifter):
+ * FZ alone is allowed where RL_FP_FZ_HOST is 1, every other mode bit takes the slow path as in rl_fp_fast.
+ */
+static inline int rl_fp_fastz(uint32_t fpcr, const uint32_t *fpsr)
+{
+#if defined(__aarch64__)
+    (void)fpcr;
+    return fpsr == 0;
+#else
+    return fpsr == 0 && (fpcr & (RL_FPCR_MODE & ~(RL_FP_FZ_HOST ? RL_FPCR_FZ : 0u))) == 0;
+#endif
+}
+
+#if RL_FP_FZ_HOST
+/** @brief Reads the host's MXCSR. */
+static inline uint32_t rl_csr_get(void)
+{
+    uint32_t v;
+    __asm__ volatile("stmxcsr %0" : "=m"(v));
+    return v;
+}
+
+/** @brief Writes the host's MXCSR. */
+static inline void rl_csr_put(uint32_t v) { __asm__ volatile("ldmxcsr %0" : : "m"(v) : "memory"); }
+
+/** @brief MXCSR.FTZ and DAZ: the host flush that A64's FPCR.FZ matches (rl_fp_fz_host tests). */
+#define RL_CSR_FZ 0x8040u
+#endif
+
+/**
  * @brief True when a NaN result of the inline fast path must come from the
  * slow path instead. On x86-64 the host NaN rules differ from Arm's; on
  * arm64 the host gives Arm's, but the compiler may fold an operation whose
@@ -960,11 +1011,36 @@ static inline int rl_fp_flags_fixup(uint64_t u, unsigned bits, int tiny)
 #define RL_FP_NEEDS_SLOW_(U, u, r, tiny) (rl_fp_nan_fixup() && RL_UNLIKELY((r) != (r)))
 #endif
 
+#if RL_FP_FZ_HOST
+/* Host flush-to-zero around one operation: operands tied after the mode is set, the result before it is restored. */
+#define RL_FZ_BEGIN(fpcr, x, y)                                                        \
+    uint32_t csr_ = 0;                                                                 \
+    int fz_ = ((fpcr) & RL_FPCR_FZ) != 0;                                              \
+    if (fz_) {                                                                         \
+        csr_ = rl_csr_get();                                                           \
+        rl_csr_put(csr_ | RL_CSR_FZ);                                                  \
+        __asm__ volatile("" : "+x"(x), "+x"(y));                                       \
+    }
+#define RL_FZ_END(r)                                                                   \
+    if (fz_) {                                                                         \
+        __asm__ volatile("" : "+x"(r));                                                \
+        rl_csr_put(csr_);                                                              \
+    }
+/* A result of the smallest normal magnitude may be a tiny result the host rounded up (A64 flushes it): exact path. */
+#define RL_FZ_TINY(U, u, tiny)                                                         \
+    (fz_ && (tiny) && ((sizeof(U) == 4 ? (uint64_t)(u) & 0x7FFFFFFFu : (uint64_t)(u) & 0x7FFFFFFFFFFFFFFFull) ==   \
+                       (sizeof(U) == 4 ? 0x00800000u : 0x0010000000000000ull)))
+#else
+#define RL_FZ_BEGIN(fpcr, x, y) const int fz_ = 0
+#define RL_FZ_END(r) (void)fz_
+#define RL_FZ_TINY(U, u, tiny) 0
+#endif
+
 #define RL_FP_RESULT_(slow, U, r, tiny)                                                \
     do {                                                                               \
         U u_;                                                                          \
         memcpy(&u_, &r, sizeof u_);                                                    \
-        if (RL_FP_NEEDS_SLOW_(U, u_, r, tiny))                                         \
+        if (RL_FP_NEEDS_SLOW_(U, u_, r, tiny) || RL_FZ_TINY(U, u_, tiny))              \
             u_ = fpcr == 0 && fpsr == 0 ? slow##_cold(a, b) : slow(a, b, fpcr, fpsr);  \
         RL_FP_OPAQUE(u_);                                                              \
         return u_;                                                                     \
@@ -973,12 +1049,14 @@ static inline int rl_fp_flags_fixup(uint64_t u, unsigned bits, int tiny)
 #define RL_FP_BINOP(name, slow, T, U, expr, tiny)                                       \
     static inline U name(U a, U b, uint32_t fpcr, uint32_t *fpsr)                      \
     {                                                                                  \
-        if (!rl_fp_fast(fpcr, fpsr))                                                   \
+        if (!rl_fp_fastz(fpcr, fpsr))                                                  \
             return slow(a, b, fpcr, fpsr);                                             \
         T x, y, r;                                                                     \
         memcpy(&x, &a, sizeof x);                                                      \
         memcpy(&y, &b, sizeof y);                                                      \
+        RL_FZ_BEGIN(fpcr, x, y);                                                       \
         r = (expr);                                                                    \
+        RL_FZ_END(r);                                                                  \
         RL_FP_RESULT_(slow, U, r, tiny);                                               \
     }
 
@@ -1009,8 +1087,12 @@ RL_FP_BINOP(rl_fdiv64, rl_fp64_div, double, uint64_t, x / y, 1)
  */
 static inline uint32_t rl_fmuladd32(uint32_t addend, uint32_t a, uint32_t b, uint32_t fpcr, uint32_t *fpsr)
 {
-    if (!rl_fp_fast(fpcr, fpsr))
+    if (!rl_fp_fastz(fpcr, fpsr))
         return rl_fp32_muladd(addend, a, b, fpcr, fpsr);
+#if RL_FP_FZ_HOST
+    if (fpcr & RL_FPCR_FZ)
+        return rl_fp32_muladd_fz(addend, a, b);
+#endif
     float z, x, y, r;
     uint32_t u;
     memcpy(&z, &addend, 4);
@@ -1027,8 +1109,12 @@ static inline uint32_t rl_fmuladd32(uint32_t addend, uint32_t a, uint32_t b, uin
 /** @brief FMADD/FMLA double, scalar or one lane, inline fast path, as rl_fmuladd32. */
 static inline uint64_t rl_fmuladd64(uint64_t addend, uint64_t a, uint64_t b, uint32_t fpcr, uint32_t *fpsr)
 {
-    if (!rl_fp_fast(fpcr, fpsr))
+    if (!rl_fp_fastz(fpcr, fpsr))
         return rl_fp64_muladd(addend, a, b, fpcr, fpsr);
+#if RL_FP_FZ_HOST
+    if (fpcr & RL_FPCR_FZ)
+        return rl_fp64_muladd_fz(addend, a, b);
+#endif
     double z, x, y, r;
     uint64_t u;
     memcpy(&z, &addend, 8);
@@ -1048,12 +1134,14 @@ static inline uint64_t rl_fmuladd64(uint64_t addend, uint64_t a, uint64_t b, uin
  */
 static inline uint32_t rl_fsqrt32(uint32_t a, uint32_t fpcr, uint32_t *fpsr)
 {
-    if (!rl_fp_fast(fpcr, fpsr))
+    if (!rl_fp_fastz(fpcr, fpsr))
         return rl_fp32_sqrt(a, fpcr, fpsr);
     float x, r;
     uint32_t u;
     memcpy(&x, &a, 4);
+    RL_FZ_BEGIN(fpcr, x, x);
     r = __builtin_sqrtf(x);
+    RL_FZ_END(r);
     memcpy(&u, &r, 4);
     if (RL_FP_NEEDS_SLOW_(uint32_t, u, r, 0))
         u = fpcr == 0 && fpsr == 0 ? rl_fp32_sqrt_cold(a) : rl_fp32_sqrt(a, fpcr, fpsr);
@@ -1064,12 +1152,14 @@ static inline uint32_t rl_fsqrt32(uint32_t a, uint32_t fpcr, uint32_t *fpsr)
 /** @brief FSQRT double, scalar or one lane, inline fast path, as rl_fsqrt32. */
 static inline uint64_t rl_fsqrt64(uint64_t a, uint32_t fpcr, uint32_t *fpsr)
 {
-    if (!rl_fp_fast(fpcr, fpsr))
+    if (!rl_fp_fastz(fpcr, fpsr))
         return rl_fp64_sqrt(a, fpcr, fpsr);
     double x, r;
     uint64_t u;
     memcpy(&x, &a, 8);
+    RL_FZ_BEGIN(fpcr, x, x);
     r = __builtin_sqrt(x);
+    RL_FZ_END(r);
     memcpy(&u, &r, 8);
     if (RL_FP_NEEDS_SLOW_(uint64_t, u, r, 0))
         u = fpcr == 0 && fpsr == 0 ? rl_fp64_sqrt_cold(a) : rl_fp64_sqrt(a, fpcr, fpsr);

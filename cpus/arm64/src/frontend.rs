@@ -251,7 +251,7 @@ impl Frontend for Arm64 {
 
     fn guard_slow(&self, code: u32, pc: u64, insn: u64) -> Option<String> {
         match code {
-            sail::SLOW_FPCR | sail::SLOW_FLAGS => {
+            sail::SLOW_FPCR | sail::SLOW_FPCR_FZ | sail::SLOW_FLAGS => {
                 Some(format!("rl_fp_slow(c, mem, UINT64_C({pc:#x}), {insn:#x}u)"))
             }
             sail::SLOW_ALIGN => Some(format!(
