@@ -680,7 +680,8 @@ server's numbering; the N64's RSP does:
 * kseg0 and kseg1 directly, the rest through the TLB; a 32-bit address is sign-extended, as gdb in a 32-bit ABI sends
 * it). RDRAM reads as the CPU sees it, its data cache's dirty lines
 * included, with no side effect; writes are the CPU's stores. Other physical addresses (registers, cartridge) are not
-* read yet: their reads catch the RSP up.
+* the SP, DP, MI, VI, AI, PI, RI and SI registers read by rl_n64_peek, as the devices last ran (no RSP catch-up, so a
+* value can lag the CPU); the cartridge ROM reads from its image; the PIF bus is refused. Register writes are refused.
 ```
 <!-- /docgen:code -->
 

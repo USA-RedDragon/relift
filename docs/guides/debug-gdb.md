@@ -130,7 +130,7 @@ $1 = 0x99
 0x80002004:	0x12345678
 ```
 
-Thread 1 is the VR4300. Memory is by its virtual address, translated as its loads are (kseg0 and kseg1 directly, the rest through the TLB); gdb's default 32-bit ABI sends `0x80002004`, which the server reads as the CPU's `0xffffffff80002004`. RDRAM reads as the CPU sees it, its data cache included, and writes are the CPU's stores. Other physical addresses (the hardware registers, the cartridge) cannot be read yet, because their reads catch the RSP up.
+Thread 1 is the VR4300. Memory is by its virtual address, translated as its loads are (kseg0 and kseg1 directly, the rest through the TLB); gdb's default 32-bit ABI sends `0x80002004`, which the server reads as the CPU's `0xffffffff80002004`. RDRAM reads as the CPU sees it, its data cache included, and writes are the CPU's stores. The hardware registers (SP, DP, MI, VI, AI, PI, RI, SI) read as the devices last ran, with no RSP catch-up, so a value can lag the CPU and two reads while stopped agree. The cartridge ROM reads from relift's own copy of the image, with no change to the PI latch. The PIF bus is refused, and register writes are refused.
 
 Where the program runs RSP microcode, thread 2 is the RSP, in the same register layout: `r0` to `r31` and `pc`, the IMEM address `0x04001000 + SP_PC`. Its registers are read-only, and its memory is the SP window, DMEM at `0x04000000` and IMEM at `0x04001000`. The RSP runs in slices between the CPU's instructions, so while the CPU is stopped the RSP is too. The test `gdb_server_stops_an_n64_run_at_a_sync_point_and_keeps_its_timing` checks both threads and that a stopped run ends on the same cycle as one never stopped.
 
