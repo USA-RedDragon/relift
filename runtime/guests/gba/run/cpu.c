@@ -395,14 +395,16 @@ static uint32_t gdb_threads(rl_gdb_thread *out, uint32_t max)
 
 /**
  * docgen:region gdb-memory
- * @brief Guest memory for the GDB server by bus address: reads are peeks (rl_gba_peek, no wait states, no side effect
- * of an I/O read), writes go through the bus as the CPU's stores do (rl_gba_write).
+ * @brief Guest memory for the GDB server by bus address: reads are peeks (rl_gba_peek, no wait states, no side
+ * effect), writes go through the bus as the CPU's stores do (rl_gba_write). The I/O registers (0x04000000 to
+ * 0x04FFFFFF) are not readable: a device answers a read only after catching up to the CPU's cycle, which a debugger
+ * must not cause, so a read there answers an error.
  * docgen:end
  */
 static size_t gdb_read(uint64_t a, uint8_t *dst, size_t n)
 {
     size_t i = 0;
-    for (; i < n && a + i <= UINT32_MAX && g_run; i++)
+    for (; i < n && a + i <= UINT32_MAX && (a + i) >> 24 != 0x4 && g_run; i++)
         dst[i] = (uint8_t)rl_gba_peek(g_run->g, (uint32_t)(a + i), 1);
     return i;
 }

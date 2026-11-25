@@ -5,7 +5,8 @@
 # threads, walks the guest backtrace of three nested calls (monitor bt and
 # bt with relift_guest.py), names $pc and x30 - 4 with monitor sym, reads x0 and
 # guest memory, writes x2, stops at a breakpoint and a write watchpoint
-# (x86-64 hosts), writes a word, and detaches.
+# (x86-64 hosts), writes a word, and detaches; then the same for a GBA run
+# (gba_run_tests gdb_serve_a_gba_run_for_a_debugger) with gdb's arm target.
 #
 #   sh tools/gdb/stub-test.sh [build dir]    (from runtime/, after make)
 #
@@ -95,4 +96,26 @@ if [ "$(uname -m)" = x86_64 ]; then
 fi
 [ $rc -eq 0 ] || { echo "stub-test: the test guest failed ($rc), $gdb_bin did not finish its session"; cat "$out/serve.log"; fail=1; }
 [ $fail -eq 0 ] || { cat "$out/gdb.log"; exit 1; }
+
+# The GBA: gdb's arm target, one thread stopped at a sync point, registers, the bus by peek, I/O refused. The run counts until gdb
+# writes 1 to the word at 0x03000000.
+gba=$build/gba_run_tests
+if [ -x "$gba" ] && "$gdb_bin" -batch -nx -ex "set architecture arm" >/dev/null 2>&1; then
+    RELIFT_VIDEO=headless RELIFT_GDB_TEST_PORT=$((port + 1)) "$gba" gdb_serve_a_gba_run_for_a_debugger >"$out/gba-serve.log" 2>&1 &
+    gpid=$!
+    for _ in $(seq 1 200); do
+        grep -q 'gdb-serve: gba' "$out/gba-serve.log" && break
+        sleep 0.05
+    done
+    "$gdb_bin" -batch -nx -iex "set debuginfod enabled off" -ex "set architecture arm" \
+        -ex "target remote 127.0.0.1:$((port + 1))" -ex 'info threads' -ex 'p/x $r5' -ex 'p/x $pc' -ex 'p/x $cpsr' \
+        -ex 'x/2hx 0x04000200' -ex 'set {int}0x03000000 = 1' -ex detach >"$out/gba-gdb.log" 2>&1 || true
+    grc=0
+    wait $gpid || grc=$?
+    for want in 'Thread 1 ' '= 0x55' '= 0x8000204' '= 0x1f' 'Cannot access memory at address 0x4000200'; do
+        grep -q "$want" "$out/gba-gdb.log" || { echo "stub-test: the GBA session lacks: $want"; fail=1; }
+    done
+    [ $grc -eq 0 ] || { echo "stub-test: the GBA run failed ($grc)"; cat "$out/gba-serve.log"; fail=1; }
+    [ $fail -eq 0 ] || { cat "$out/gba-gdb.log"; exit 1; }
+fi
 echo "stub-test: ok"

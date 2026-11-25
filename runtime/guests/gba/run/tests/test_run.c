@@ -418,12 +418,45 @@ static void *gclient_run(void *arg)
     snprintf(s->pc, sizeof s->pc, "%s", r);
     s->ok = s->ok && gask(fd, "m4000202,2", r, sizeof r);
     snprintf(s->if1, sizeof s->if1, "%s", r);
-    s->ok = s->ok && gask(fd, "m4000202,2", r, sizeof r);
+    s->ok = s->ok && gask(fd, "m3007f00,2", r, sizeof r);
     snprintf(s->if2, sizeof s->if2, "%s", r);
     s->ok = s->ok && gask(fd, "D", r, sizeof r);
     snprintf(s->cont, sizeof s->cont, "%s", r);
     close(fd);
     return NULL;
+}
+
+/** @brief Counts r0 with a sync point per instruction until the word at 0x03000000 is 1 (a debugger writes it). */
+static uint64_t wait_main(rl_ctx *c, uint8_t *mem)
+{
+    c->r[0] = 0;
+    c->r[5] = 0x55u;
+    while (rl_gba_peek(rl_gba_run_current()->g, 0x03000000u, 4) != 1) {
+        c->r[0]++;
+        rl_gba_cpu_fetch(c, 0x08000200u, 0);
+        if (c->time.budget <= 0) {
+            int rc = rl_sync(c, mem, 0x08000204u);
+            if (rc)
+                return RL_PENDING;
+        }
+    }
+    return rl_pend_exit_process(c, 0);
+}
+
+/**
+ * @brief For tools/gdb/stub-test.sh: with RELIFT_GDB_TEST_PORT set, serves a GBA run that counts until the debugger
+ * writes 1 to the word at 0x03000000; without it, passes at once.
+ */
+TEST(gdb_serve_a_gba_run_for_a_debugger)
+{
+    const char *port = getenv("RELIFT_GDB_TEST_PORT");
+    if (!port)
+        return;
+    rl_settings_declare_runtime();
+    CHECK_EQ(rl_settings_set("debug.gdb", port), RL_SETTING_OK);
+    CHECK(boot(wait_main) == 0);
+    fprintf(stderr, "gdb-serve: gba\n");
+    CHECK_EQ(rl_gba_run_start(&run), RL_PENDING);
 }
 
 TEST(gdb_server_stops_a_gba_run_at_a_sync_point_and_keeps_its_timing)
@@ -457,7 +490,9 @@ TEST(gdb_server_stops_a_gba_run_at_a_sync_point_and_keeps_its_timing)
     uint32_t r0v = (uint32_t)((r0 >> 24) | ((r0 >> 8) & 0xff00u) | ((r0 << 8) & 0xff0000u) | (r0 << 24));
     CHECK(r0v > 0 && r0v < COUNT_N);
     CHECK(strcmp(s.pc, "04020008") == 0);
-    CHECK(strcmp(s.if1, s.if2) == 0);
+    /* No read of an I/O register (it would catch a device up); work RAM reads by peek. */
+    CHECK(strcmp(s.if1, "E14") == 0);
+    CHECK(strcmp(s.if2, "0000") == 0);
     CHECK(strcmp(s.cont, "OK") == 0);
     /* Stopping did not move the guest's clock. */
     CHECK_EQ(cnt.r0, COUNT_N);
