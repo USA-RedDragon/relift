@@ -38,6 +38,19 @@ typedef struct packed_buf {
 
 #define PACKED_MAX 256u
 
+/** @brief One slab of device memory the packed uploads of one batch are cut from by a bump pointer, reused once the batch has run. */
+typedef struct packed_arena {
+    VkBuffer buf;
+    VkDeviceMemory mem;
+    uint64_t addr, used;
+} packed_arena;
+
+/** @brief The size of a slab, 32 MiB: an upload up to this size is cut from one; a larger one gets a buffer of its own. */
+#define ARENA_BYTES (32ull << 20)
+/** @brief How many slabs one batch holds at most, and how many idle ones are kept for the next batches (256 MiB). */
+#define ARENAS_PER_SLOT 8u
+#define ARENAS_KEPT 8u
+
 static struct {
     bool tried, failed;
     VkDescriptorSetLayout dsl;
@@ -51,6 +64,11 @@ static struct {
     uint32_t ndead[NVN_SLOTS];
     packed_buf dead_bufs[NVN_SLOTS][PACKED_MAX];
     uint32_t ndead_bufs[NVN_SLOTS];
+    packed_arena arenas[NVN_SLOTS][ARENAS_PER_SLOT];
+    uint32_t narenas[NVN_SLOTS];
+    packed_arena idle[ARENAS_KEPT];
+    uint32_t nidle;
+    uint64_t arena_made, arena_cut;
     uint32_t cur;
     uint64_t moves;
 } U;
@@ -124,12 +142,29 @@ void nvn_untile_release(uint32_t slot)
         VK(vkFreeMemory)(g.dev, U.dead_bufs[U.cur][i].mem, NULL);
     }
     U.ndead_bufs[U.cur] = 0;
+    for (uint32_t i = 0; i < U.narenas[U.cur]; i++) {
+        packed_arena a = U.arenas[U.cur][i];
+        a.used = 0;
+        if (U.nidle < ARENAS_KEPT) {
+            U.idle[U.nidle++] = a;
+        } else {
+            VK(vkDestroyBuffer)(g.dev, a.buf, NULL);
+            VK(vkFreeMemory)(g.dev, a.mem, NULL);
+        }
+    }
+    U.narenas[U.cur] = 0;
     U.cur = cur;
 }
 
 void nvn_untile_slot(uint32_t slot) { U.cur = slot; }
 
 uint64_t nvn_untile_moves(void) { return U.moves; }
+
+void nvn_untile_arena_stats(uint64_t *made, uint64_t *cut)
+{
+    *made = U.arena_made;
+    *cut = U.arena_cut;
+}
 
 /**
  * @brief The device address of guest bytes [guest, guest + size) through an imported pool; 0 when none holds them or
@@ -280,7 +315,7 @@ bool nvn_untile_keep_buffer(VkBuffer buf, VkDeviceMemory mem)
 }
 
 /** @brief A device-local buffer of size bytes with a device address, kept in U.dead_bufs until the batch has run; 0 when none. */
-static uint64_t packed_new(uint64_t size, VkBuffer *out)
+static uint64_t packed_dedicated(uint64_t size, VkBuffer *out)
 {
     packed_buf b = { 0 };
     VkBufferCreateInfo bci = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -307,6 +342,76 @@ static uint64_t packed_new(uint64_t size, VkBuffer *out)
     U.dead_bufs[U.cur][U.ndead_bufs[U.cur]++] = b;
     *out = b.buf;
     return a;
+}
+
+/** @brief A new slab of ARENA_BYTES of device memory with a device address; false when none. */
+static bool arena_make(packed_arena *a)
+{
+    VkBuffer buf;
+    VkBufferCreateInfo bci = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                               .size = ARENA_BYTES,
+                               .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT };
+    if (VK(vkCreateBuffer)(g.dev, &bci, NULL, &buf) != VK_SUCCESS)
+        return false;
+    VkMemoryRequirements req;
+    VK(vkGetBufferMemoryRequirements)(g.dev, buf, &req);
+    int32_t t = nvn_vk_mem_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VkMemoryAllocateFlagsInfo fl = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
+                                     .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT };
+    VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                                 .pNext = &fl,
+                                 .allocationSize = req.size,
+                                 .memoryTypeIndex = (uint32_t)t };
+    VkDeviceMemory mem;
+    if (t < 0 || VK(vkAllocateMemory)(g.dev, &mai, NULL, &mem) != VK_SUCCESS) {
+        VK(vkDestroyBuffer)(g.dev, buf, NULL);
+        return false;
+    }
+    VkBufferDeviceAddressInfo ai = { .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = buf };
+    uint64_t addr = VK(vkBindBufferMemory)(g.dev, buf, mem, 0) == VK_SUCCESS ? VK(vkGetBufferDeviceAddress)(g.dev, &ai) : 0;
+    if (!addr) {
+        VK(vkDestroyBuffer)(g.dev, buf, NULL);
+        VK(vkFreeMemory)(g.dev, mem, NULL);
+        return false;
+    }
+    *a = (packed_arena){ .buf = buf, .mem = mem, .addr = addr };
+    U.arena_made++;
+    return true;
+}
+
+/**
+ * @brief A device-local range of size bytes with a device address, for a packed upload: cut from a slab the recording batch
+ * holds (a bump pointer, 256-byte aligned), with the buffer it lies in and its offset there; a slab is made only when the
+ * batch has none with room and no idle one is kept, so the common upload costs no vkAllocateMemory. 0 when none.
+ */
+static uint64_t packed_new(uint64_t size, VkBuffer *out, uint64_t *offset)
+{
+    uint64_t need = (size + 255) & ~255ull;
+    if (need > ARENA_BYTES) {
+        *offset = 0;
+        return packed_dedicated(size, out);
+    }
+    packed_arena *a = NULL;
+    uint32_t n = U.narenas[U.cur];
+    if (n && U.arenas[U.cur][n - 1].used + need <= ARENA_BYTES)
+        a = &U.arenas[U.cur][n - 1];
+    if (!a) {
+        if (n == ARENAS_PER_SLOT) {
+            *offset = 0;
+            return packed_dedicated(size, out);
+        }
+        if (U.nidle)
+            U.arenas[U.cur][n] = U.idle[--U.nidle];
+        else if (!arena_make(&U.arenas[U.cur][n]))
+            return 0;
+        a = &U.arenas[U.cur][U.narenas[U.cur]++];
+    }
+    *offset = a->used;
+    a->used += need;
+    U.arena_cut++;
+    *out = a->buf;
+    return a->addr + *offset;
 }
 
 /** @brief Whether nvn_untile_upload_packed can take v: one aspect, 4, 8 or 16 bytes a texel or block, aligned layout. */
@@ -348,7 +453,8 @@ static bool packed_at(replay *r, vimg *v, uint64_t addr)
     if (U.ndead_bufs[U.cur] == PACKED_MAX && !nvn_vk_flush(r))
         return false;
     VkBuffer buf;
-    uint64_t dst = packed_new(total, &buf);
+    uint64_t boff;
+    uint64_t dst = packed_new(total, &buf, &boff);
     if (!dst)
         return false;
     nvn_vk_begin(r);
@@ -381,7 +487,7 @@ static bool packed_at(replay *r, vimg *v, uint64_t addr)
             VK(vkCmdPushConstants)(g.cb, U.pl, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, &pc);
             VK(vkCmdDispatch)(g.cb, (wb + 7) / 8, (hb + 7) / 8, dl);
         }
-        bic[l] = (VkBufferImageCopy){ .bufferOffset = at,
+        bic[l] = (VkBufferImageCopy){ .bufferOffset = boff + at,
                                       .imageSubresource = { .aspectMask = v->aspect, .mipLevel = l, .layerCount = layers },
                                       .imageExtent = { w, h, dl } };
         at += layer_bytes * layers;

@@ -465,6 +465,8 @@ bool nvn_vk_denorm_stress(uint32_t rows, uint32_t seed, nvn_denorm_class *out);
  * failing case's number (from 1, 100 for the fallback) otherwise, -1 with no device.
  */
 int nvn_untile_check(uint32_t seed);
+/** @brief How many packed-upload slabs were made, and how many uploads were cut from slabs, since start. */
+void nvn_untile_arena_stats(uint64_t *made, uint64_t *cut);
 
 /** @brief Checks the outputs (after the rows inputs in w) of the denormal probe; the result is 1 when both operations follow the flushing model, 2 the IEEE one, else 0. */
 uint32_t nvn_probe_denorm_check(const uint32_t *w, uint32_t rows, nvn_denorm_class *out);

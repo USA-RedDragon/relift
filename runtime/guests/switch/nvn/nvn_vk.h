@@ -959,6 +959,7 @@ void nvn_untile_release(uint32_t slot);
 void nvn_untile_slot(uint32_t slot);
 /** @brief Moves recorded so far, for the stats. */
 uint64_t nvn_untile_moves(void);
+
 /**
  * @brief Submits the batch when it holds a GPU write of guest uniform data, so a host copy of guest memory taken
  * next shows it.

@@ -1814,6 +1814,11 @@ TEST(nvn_gpu_texel_moves_match_the_cpu_layout_both_ways)
     }
     for (uint32_t seed = 1; seed <= 2; seed++)
         CHECK_EQ(nvn_untile_check(seed), 0);
+    /* the packed uploads were cut from slabs that later batches reused: far fewer slabs than uploads, none a device allocation each */
+    uint64_t made, cut;
+    nvn_untile_arena_stats(&made, &cut);
+    CHECK(cut >= 8);
+    CHECK(made * 2 <= cut);
 }
 
 #define OBJ_ADDRS 8u
