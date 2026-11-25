@@ -668,6 +668,19 @@ uint64_t rl_sched_read(rl_sched_cpu *c, uint64_t addr, uint32_t size)
     return r->owner->read(r->owner, addr, size, at);
 }
 
+bool rl_sched_peek(rl_sched_cpu *c, uint64_t addr, uint32_t size, uint64_t *out)
+{
+    uint64_t v = 0;
+    for (uint32_t i = 0; i < size; i++) {
+        const sched_range *r = find_range(c->sched, addr + i);
+        if (!r || !r->owner->peek)
+            return false;
+        v |= (r->owner->peek(r->owner, addr + i, 1, r->owner->now) & 0xff) << (8 * i);
+    }
+    *out = v;
+    return true;
+}
+
 void rl_sched_write(rl_sched_cpu *c, uint64_t addr, uint32_t size, uint64_t value)
 {
     uint64_t at = rl_sched_now(c);

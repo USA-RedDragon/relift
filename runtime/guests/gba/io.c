@@ -67,6 +67,22 @@ uint32_t gba_io_read(rl_gba *g, uint32_t addr, unsigned size)
     return (uint32_t)rl_sched_read(g->cpu, a, size);
 }
 
+bool rl_gba_io_peek(rl_gba *g, uint32_t addr, unsigned size, uint32_t *out)
+{
+    uint32_t v = 0;
+    for (unsigned i = 0; i < size; i++) {
+        uint32_t a = io_addr(addr + i), off = a - 0x04000000u;
+        uint64_t b = 0;
+        if (!g->cpu || off >= 0x804u || !mapped(off))
+            b = (g->mdr >> (8 * ((addr + i) & 3))) & 0xFFu;
+        else if (!rl_sched_peek(g->cpu, a, 1, &b))
+            return false;
+        v |= (uint32_t)(b & 0xFFu) << (8 * i);
+    }
+    *out = v;
+    return true;
+}
+
 void gba_io_write(rl_gba *g, uint32_t addr, unsigned size, uint32_t value)
 {
     uint32_t a = io_addr(addr);
@@ -338,6 +354,25 @@ void gba_sys_write(rl_gba *g, uint32_t addr, uint8_t v, uint64_t now)
 
 static const char *const slot_names[RL_GBA_SLOTS] = {"gba ppu", "gba apu", "gba serial", "gba keypad"};
 
+/**
+ * docgen:region io-peek
+ * @brief A peek of the keypad registers: the keys as last sampled and KEYCNT. Its read samples the host's input first,
+ * which can raise the keypad interrupt, so a debugger's read must not. Every other GBA I/O reader is a function of the
+ * device's state and the tick alone, so it is its own peek.
+ * docgen:end
+ */
+static uint64_t pad_peek(rl_device *d, uint64_t addr, uint32_t size, uint64_t now)
+{
+    (void)now;
+    const gba_keypad *k = &gba_of(d)->pad;
+    uint32_t regs = (uint32_t)(uint16_t)~k->keys & 0x3FFu;
+    regs |= (uint32_t)(k->cnt & 0xC3FFu) << 16;
+    uint64_t v = 0;
+    for (uint32_t i = 0; i < size; i++)
+        v |= (uint64_t)(uint8_t)(regs >> (8 * ((addr + i) & 3u))) << (8 * i);
+    return v;
+}
+
 static int add_dev(rl_gba *g, gba_dev *d, const char *name, rl_device_read *rd, rl_device_write *wr)
 {
     d->g = g;
@@ -345,6 +380,7 @@ static int add_dev(rl_gba *g, gba_dev *d, const char *name, rl_device_read *rd, 
     d->dev.opaque = d;
     d->dev.line = RL_LINE_NONE;
     d->dev.read = rd;
+    d->dev.peek = rd == pad_read ? pad_peek : rd;
     d->dev.write = wr;
     return rl_sched_add_device(g->sched, &d->dev);
 }
@@ -378,6 +414,7 @@ int rl_gba_attach(rl_gba *g, rl_sched *s, rl_sched_cpu *cpu, rl_device *const de
             d->line = RL_LINE_NONE;
             d->read = i == RL_GBA_SLOT_SERIAL ? serial_read : i == RL_GBA_SLOT_APU ? apu_read : stub_read;
             d->write = i == RL_GBA_SLOT_SERIAL ? serial_write : i == RL_GBA_SLOT_APU ? apu_write : stub_write;
+            d->peek = d->read;
         }
         if (rl_sched_add_device(s, d) != 0)
             return -1;

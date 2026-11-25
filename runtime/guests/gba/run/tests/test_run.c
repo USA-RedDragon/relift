@@ -368,7 +368,8 @@ static uint64_t count_main(rl_ctx *c, uint8_t *mem)
 /** @brief What the client saw. */
 typedef struct gclient {
     int port;
-    char xml[64], r0[16], pc[16], if1[8], if2[8], cont[8];
+    char xml[64], r0[16], pc[16], if1[8], if2[8], cont[8], io1[40], io2[40], tm1[16], tm2[16], sys1[24], sys2[24],
+        pad[16];
     bool ok;
 } gclient;
 
@@ -418,6 +419,20 @@ static void *gclient_run(void *arg)
     snprintf(s->pc, sizeof s->pc, "%s", r);
     s->ok = s->ok && gask(fd, "m4000202,2", r, sizeof r);
     snprintf(s->if1, sizeof s->if1, "%s", r);
+    s->ok = s->ok && gask(fd, "m4000000,10", r, sizeof r);
+    snprintf(s->io1, sizeof s->io1, "%s", r);
+    s->ok = s->ok && gask(fd, "m4000100,4", r, sizeof r);
+    snprintf(s->tm1, sizeof s->tm1, "%s", r);
+    s->ok = s->ok && gask(fd, "m4000200,a", r, sizeof r);
+    snprintf(s->sys1, sizeof s->sys1, "%s", r);
+    s->ok = s->ok && gask(fd, "m4000200,a", r, sizeof r);
+    snprintf(s->sys2, sizeof s->sys2, "%s", r);
+    s->ok = s->ok && gask(fd, "m4000100,4", r, sizeof r);
+    snprintf(s->tm2, sizeof s->tm2, "%s", r);
+    s->ok = s->ok && gask(fd, "m4000000,10", r, sizeof r);
+    snprintf(s->io2, sizeof s->io2, "%s", r);
+    s->ok = s->ok && gask(fd, "m4000130,4", r, sizeof r);
+    snprintf(s->pad, sizeof s->pad, "%s", r);
     s->ok = s->ok && gask(fd, "m3007f00,2", r, sizeof r);
     snprintf(s->if2, sizeof s->if2, "%s", r);
     s->ok = s->ok && gask(fd, "D", r, sizeof r);
@@ -490,8 +505,14 @@ TEST(gdb_server_stops_a_gba_run_at_a_sync_point_and_keeps_its_timing)
     uint32_t r0v = (uint32_t)((r0 >> 24) | ((r0 >> 8) & 0xff00u) | ((r0 << 8) & 0xff0000u) | (r0 << 24));
     CHECK(r0v > 0 && r0v < COUNT_N);
     CHECK(strcmp(s.pc, "04020008") == 0);
-    /* No read of an I/O register (it would catch a device up); work RAM reads by peek. */
-    CHECK(strcmp(s.if1, "E14") == 0);
+    /* I/O reads are peeks: twice the same while stopped (LCD, timer 0, IE/IF/WAITCNT/IME, keypad), work RAM too. */
+    CHECK_EQ(strlen(s.if1), 4u);
+    CHECK_EQ(strlen(s.io1), 32u);
+    CHECK(strcmp(s.io1, s.io2) == 0);
+    CHECK(strcmp(s.tm1, s.tm2) == 0);
+    CHECK_EQ(strlen(s.sys1), 20u);
+    CHECK(strcmp(s.sys1, s.sys2) == 0);
+    CHECK(strcmp(s.pad, "ff030000") == 0);
     CHECK(strcmp(s.if2, "0000") == 0);
     CHECK(strcmp(s.cont, "OK") == 0);
     /* Stopping did not move the guest's clock. */

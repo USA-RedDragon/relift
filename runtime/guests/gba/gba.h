@@ -231,6 +231,11 @@ uint32_t rl_gba_read(rl_gba *g, uint32_t addr, unsigned size);
 void rl_gba_write(rl_gba *g, uint32_t addr, unsigned size, uint32_t value);
 /** @brief A read of memory only (no I/O: it reads as open bus), without any side effect. */
 uint32_t rl_gba_peek(const rl_gba *g, uint32_t addr, unsigned size);
+/**
+ * @brief Reads I/O registers at addr for a debugger, as the CPU would read them now but with no side effect: no device
+ * catches up and none changes (rl_sched_peek). False when a register has no such read.
+ */
+bool rl_gba_io_peek(rl_gba *g, uint32_t addr, unsigned size, uint32_t *out);
 
 /** @brief Cycles of one access to each region for lifted code: c[addr >> 24][log2 size][seq]. */
 typedef struct rl_gba_waits {

@@ -97,7 +97,7 @@ fi
 [ $rc -eq 0 ] || { echo "stub-test: the test guest failed ($rc), $gdb_bin did not finish its session"; cat "$out/serve.log"; fail=1; }
 [ $fail -eq 0 ] || { cat "$out/gdb.log"; exit 1; }
 
-# The GBA: gdb's arm target, one thread stopped at a sync point, registers, the bus by peek, I/O refused. The run counts until gdb
+# The GBA: gdb's arm target, one thread stopped at a sync point, registers, the bus and the I/O registers by peek. The run counts until gdb
 # writes 1 to the word at 0x03000000.
 gba=$build/gba_run_tests
 if [ -x "$gba" ] && "$gdb_bin" -batch -nx -ex "set architecture arm" >/dev/null 2>&1; then
@@ -112,7 +112,7 @@ if [ -x "$gba" ] && "$gdb_bin" -batch -nx -ex "set architecture arm" >/dev/null 
         -ex 'x/2hx 0x04000200' -ex 'set {int}0x03000000 = 1' -ex detach >"$out/gba-gdb.log" 2>&1 || true
     grc=0
     wait $gpid || grc=$?
-    for want in 'Thread 1 ' '= 0x55' '= 0x8000204' '= 0x1f' 'Cannot access memory at address 0x4000200'; do
+    for want in 'Thread 1 ' '= 0x55' '= 0x8000204' '= 0x1f' '0x4000200:	0x0000	0x0000'; do
         grep -q "$want" "$out/gba-gdb.log" || { echo "stub-test: the GBA session lacks: $want"; fail=1; }
     done
     [ $grc -eq 0 ] || { echo "stub-test: the GBA run failed ($grc)"; cat "$out/gba-serve.log"; fail=1; }
