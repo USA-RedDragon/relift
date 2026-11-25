@@ -81,6 +81,13 @@ static struct {
     /** @brief The image each texture id's elements hold, the guest texture and view bytes registered then, and the views made for a texture view. */
     vimg **tex_img;
     uint64_t *tex_guest;
+    /** @brief For each slot, the nvn_vk_flush_epoch when a draw last bound it; and when a program last read handles from memory. */
+    uint64_t *tex_epoch, bindless_epoch;
+    /** @brief Slots bound since the last nvn_texset_uses_recorded (their epoch reads as busy until then), and whether a program that reads handles from memory ran since. */
+    uint32_t *bound, nbound;
+    bool bindless_busy;
+    /** @brief The slot rebinds that waited for the device, and those that did not because no unfinished work used the slot. */
+    uint64_t rebind_flushed, rebind_free;
     /** @brief The kind of each texture id's bound view (its format's sampled type). */
     uint32_t *tex_kind;
     uint8_t (*tex_view)[17];
@@ -279,6 +286,8 @@ static bool make(void)
     VK(vkUpdateDescriptorSets)(g.dev, 1, &w, 0, NULL);
     t.tex_img = calloc(t.ntex, sizeof *t.tex_img);
     t.tex_guest = calloc(t.ntex, sizeof *t.tex_guest);
+    t.tex_epoch = calloc(t.ntex, sizeof *t.tex_epoch);
+    t.bound = calloc(t.ntex, sizeof *t.bound);
     t.tex_kind = calloc(t.ntex, sizeof *t.tex_kind);
     t.tex_view = calloc(t.ntex, sizeof *t.tex_view);
     t.tex_views = calloc(t.ntex, sizeof *t.tex_views);
@@ -295,7 +304,7 @@ static bool make(void)
     t.sampler_bytes = calloc(SAMPLERS, sizeof *t.sampler_bytes);
     t.sampler_info = calloc(SAMPLERS, sizeof *t.sampler_info);
     bool filled = fill_samplers();
-    t.ok = filled && t.tex_img && t.tex_guest && t.tex_kind && t.tex_view && t.tex_views && t.img_views && t.tex_level && t.tex_target && t.tex_layer && t.tex_layers && t.img_done && t.img_surface && t.is_synced && slots_ok && t.samplers && t.sampler_bytes;
+    t.ok = filled && t.tex_img && t.tex_guest && t.tex_epoch && t.bound && t.tex_kind && t.tex_view && t.tex_views && t.img_views && t.tex_level && t.tex_target && t.tex_layer && t.tex_layers && t.img_done && t.img_surface && t.is_synced && slots_ok && t.samplers && t.sampler_bytes;
     return t.ok;
 }
 
@@ -664,6 +673,53 @@ static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t l
  * @brief The slot of texture id: its own number below the pinned ids, else the one it holds, or a free one, or the
  * next in turn after the work that may use it has run. A texture registered as an image needs one below nimg.
  */
+/**
+ * @brief Waits for the device when work not yet known to be finished may read slot sl's descriptors (a draw that bound it, or
+ * a program that reads handles from memory, since the last full flush); false when the device failed. A slot no unfinished
+ * work used is rewritten at once.
+ */
+static bool slot_settle(replay *r, uint32_t sl)
+{
+    uint64_t epoch = nvn_vk_flush_epoch();
+    if (t.tex_epoch[sl] < epoch && !t.bindless_busy && t.bindless_epoch < epoch) {
+        t.rebind_free++;
+        return true;
+    }
+    t.rebind_flushed++;
+    return nvn_vk_flush(r);
+}
+
+/** @brief A slot a draw is about to read counts as busy until nvn_texset_uses_recorded says the draw is in its batch. */
+#define SLOT_BUSY UINT64_MAX
+
+static void slot_busy(uint32_t sl)
+{
+    if (t.tex_epoch[sl] != SLOT_BUSY)
+        t.bound[t.nbound++] = sl;
+    t.tex_epoch[sl] = SLOT_BUSY;
+}
+
+void nvn_texset_uses_recorded(void)
+{
+    if (!t.ok)
+        return;
+    uint64_t epoch = nvn_vk_flush_epoch();
+    for (uint32_t i = 0; i < t.nbound; i++)
+        if (t.tex_epoch[t.bound[i]] == SLOT_BUSY)
+            t.tex_epoch[t.bound[i]] = epoch;
+    t.nbound = 0;
+    if (t.bindless_busy) {
+        t.bindless_epoch = epoch;
+        t.bindless_busy = false;
+    }
+}
+
+void nvn_texset_rebinds(uint64_t *flushed, uint64_t *free_of_wait)
+{
+    *flushed = t.rebind_flushed;
+    *free_of_wait = t.rebind_free;
+}
+
 static int slot_for(replay *r, uint32_t id, bool image, uint32_t *slot)
 {
     uint32_t evicted;
@@ -674,7 +730,7 @@ static int slot_for(replay *r, uint32_t id, bool image, uint32_t *slot)
         return nvn_vk_stop(r, "texture id %u is registered as an image but the host holds %u images", id, t.nimg);
     if (!evicted)
         return RL_OK;
-    if (!nvn_vk_flush(r))
+    if (!slot_settle(r, *slot))
         return nvn_vk_stop(r, "the host device failed a submit");
     t.tex_img[*slot] = NULL;
     t.tex_guest[*slot] = 0;
@@ -837,6 +893,7 @@ static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_
     if (src != RL_OK)
         return src;
     uint32_t sl = *slot;
+    uint64_t was_used = t.tex_epoch[sl];
     view[16] = has_view;
     vimg *v = nvn_vk_image(r, tex);
     if (!v)
@@ -847,6 +904,7 @@ static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_
     if (image)
         nvn_vk_written(v);
     if (t.tex_img[sl] == v && t.tex_guest[sl] == tex && !memcmp(t.tex_view[sl], view, sizeof view)) {
+        slot_busy(sl);
         nvn_vk_dispatch_image(v, t.tex_level[sl], image, t.tex_layer[sl], t.tex_layers[sl], image);
         *kind = t.tex_kind[sl];
         memcpy(dim, t.dims.map + 4ull * sl, 4);
@@ -874,8 +932,10 @@ static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_
     if ((*dim == DIM_2D_MS || *dim == DIM_2D_MS_ARRAY) != (nvn_vk_sample_bits(&v->d) != VK_SAMPLE_COUNT_1_BIT))
         return nvn_vk_stop(r, "texture id %u of %u samples is registered as a view of target %u", id, v->d.samples,
                            has_view && nv.has_target ? nv.target : v->d.target);
-    if (t.tex_img[sl] && !nvn_vk_flush(r))
+    t.tex_epoch[sl] = was_used;
+    if (t.tex_img[sl] && !slot_settle(r, sl))
         return nvn_vk_stop(r, "the host device failed a submit");
+    slot_busy(sl);
     for (uint32_t d = 0; d < DIMS; d++)
         if (t.tex_views[sl][d]) {
             VK(vkDestroyImageView)(g.dev, t.tex_views[sl][d], NULL);
@@ -1047,6 +1107,7 @@ static int refresh_synced(replay *r, uint32_t id)
 
 int nvn_texset_sync_registered(replay *r)
 {
+    t.bindless_busy = true;
     if (!make_whole())
         return nvn_vk_stop(r, "cannot make the texture set");
     uint32_t ids[256], n;

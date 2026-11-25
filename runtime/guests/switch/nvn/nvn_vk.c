@@ -2905,12 +2905,19 @@ bool(nvn_vk_submit)(replay *r)
 }
 
 /** @brief Submits what is recorded, by any replay, and waits for it and every batch before it, then brings the bytes the device wrote to pool mirrors into guest memory. */
+static uint64_t g_flush_epoch;
+
+uint64_t nvn_vk_flush_epoch(void) { return __atomic_load_n(&g_flush_epoch, __ATOMIC_ACQUIRE); }
+
 bool(nvn_vk_flush)(replay *r)
 {
     bool recorded = g_recording;
     bool ok = flush_once(r);
     while (ok && recorded && nvn_mirror_readback_pending())
         ok = nvn_vk_begin(r) && flush_once(r);
+    /* Everything recorded before this call has been submitted and waited for. */
+    if (ok && !g_recording)
+        __atomic_add_fetch(&g_flush_epoch, 1, __ATOMIC_ACQ_REL);
     return ok;
 }
 
@@ -7050,6 +7057,10 @@ static void present_rate(uint64_t total)
         struct mallinfo2 mi = mallinfo2();
         uint32_t libs, gfx, comp;
         nvn_pipe_held(&libs, &gfx, &comp);
+        uint64_t rb_flushed, rb_free;
+        nvn_texset_rebinds(&rb_flushed, &rb_free);
+        rl_log(RL_LOG_INFO, "nvn", "texture slot rewrites: %llu waited for the device, %llu did not (no unfinished work used the slot)",
+               (unsigned long long)rb_flushed, (unsigned long long)rb_free);
         uint64_t sets_live, sets_bytes, sets_made, sets_reused;
         nvn_cmdset_stats(&sets_live, &sets_bytes, &sets_made, &sets_reused);
         rl_log(RL_LOG_INFO, "nvn", "command sets: %llu alive (%.1f MiB), %llu made, %llu ended as a later recording wrote over their bytes",

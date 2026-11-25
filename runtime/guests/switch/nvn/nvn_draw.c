@@ -2069,6 +2069,7 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
         VK(vkCmdDraw)(g.cb, count, st->inst_count, first, st->inst_base);
     }
     nvn_vk_pass_drew(mods[0] ? mods[0]->key : NULL, mods[1] ? mods[1]->key : NULL, count);
+    nvn_texset_uses_recorded();
     nvn_xfb_draw_end(g.cb, &xd);
     nvn_counters_end(counted);
     if (traced) {
@@ -3113,6 +3114,7 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
         VK(vkCmdDispatch)(g.cb, x, y, z);
     }
     nvn_vk_dispatched();
+    nvn_texset_uses_recorded();
     nvn_diff_dispatch_end(r);
     if (m->trace_words) {
         if (!nvn_vk_flush(r))
@@ -3218,6 +3220,7 @@ int nvn_cuda_dispatch(replay *r, const char *key, const uint8_t *params, uint32_
     VK(vkCmdPushConstants)(g.cb, d.clayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof fp, &fp);
     VK(vkCmdDispatch)(g.cb, grid[0], grid[1], grid[2]);
     nvn_vk_dispatched();
+    nvn_texset_uses_recorded();
     return RL_OK;
 }
 

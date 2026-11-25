@@ -525,6 +525,73 @@ TEST(nvn_texset_an_image_handle_binds_the_texture_registered_under_its_id)
     CHECK(nvn_vk_flush(&r));
 }
 
+TEST(nvn_texset_a_slot_no_unfinished_work_used_is_rewritten_without_waiting)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes))
+        return;
+    CHECK(nvn_texset_layout());
+    if (!hos.vm.host_page) {
+        hos.vm.host_page = 4096;
+        hos.vm.size = 0x10000;
+    }
+    static rl_ctx c;
+    static uint8_t mem[0x10000];
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    static replay r;
+    memset(&r, 0, sizeof r);
+    r.c = &c;
+    r.mem = mem;
+    r.st = &st;
+    const uint64_t pool = 0x100, texa = 0x200, texb = 0x300;
+    CHECK(nvn_pool_make(pool, 0, 0x10000, 0x2a1));
+    nvn_tex_desc da = { .target = 1, .format = 37, .width = 4, .height = 4, .depth = 1, .levels = 1, .flags = 1u << 4,
+                        .stride = 32, .pool = pool, .offset = 0x4000 };
+    nvn_tex_desc db = da;
+    db.offset = 0x6000;
+    CHECK(nvn_tex_layout(&da));
+    CHECK(nvn_tex_layout(&db));
+    CHECK(nvn_texture_record(texa, &da, NULL));
+    CHECK(nvn_texture_record(texb, &db, NULL));
+    uint64_t fl0, free0, fl, fr;
+    uint32_t slot, kind, dim;
+    c.x[1] = 31;
+    c.x[3] = 0;
+    /* a texture under id 31, drawn with and in a batch that is then flushed */
+    c.x[2] = texa;
+    nvnh_nvnTexturePoolRegisterTexture(&c, mem);
+    CHECK_EQ(nvn_texset_bind(&r, 31u, &kind, &dim, &slot), RL_OK);
+    nvn_texset_uses_recorded();
+    CHECK(nvn_vk_flush(&r));
+    nvn_texset_rebinds(&fl0, &free0);
+    /* the game registers another texture under the id: the slot's last user finished, so no wait */
+    c.x[2] = texb;
+    c.x[1] = 31;
+    nvnh_nvnTexturePoolRegisterTexture(&c, mem);
+    CHECK_EQ(nvn_texset_bind(&r, 31u, &kind, &dim, &slot), RL_OK);
+    nvn_texset_rebinds(&fl, &fr);
+    CHECK_EQ(fl, fl0);
+    CHECK_EQ(fr, free0 + 1);
+    /* the draw using it is in the batch; another texture under the id while that batch is unfinished waits */
+    nvn_texset_uses_recorded();
+    c.x[2] = texa;
+    c.x[1] = 31;
+    nvnh_nvnTexturePoolRegisterTexture(&c, mem);
+    CHECK_EQ(nvn_texset_bind(&r, 31u, &kind, &dim, &slot), RL_OK);
+    nvn_texset_rebinds(&fl, &fr);
+    CHECK_EQ(fl, fl0 + 1);
+    CHECK_EQ(fr, free0 + 1);
+    /* a bind no draw noted yet counts as in use: the slot waits as well */
+    c.x[2] = texb;
+    c.x[1] = 31;
+    nvnh_nvnTexturePoolRegisterTexture(&c, mem);
+    CHECK_EQ(nvn_texset_bind(&r, 31u, &kind, &dim, &slot), RL_OK);
+    nvn_texset_rebinds(&fl, &fr);
+    CHECK_EQ(fl, fl0 + 2);
+    CHECK(nvn_vk_flush(&r));
+}
+
 TEST(nvn_texset_a_texture_whose_pool_is_gone_reads_zeros)
 {
     nvn_probes probes;

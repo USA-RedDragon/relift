@@ -874,6 +874,11 @@ void nvn_expand_integer(const uint8_t *src, uint64_t stride, VkFormat f, uint64_
  * before recording (that counts as a submit for nvn_vk_stage).
  */
 bool nvn_vk_flush(replay *r);
+/**
+ * @brief How many times nvn_vk_flush finished with nothing recorded. A thing noted at epoch e that is looked at again at
+ * a later epoch was last used by work that has since been submitted and run to its end.
+ */
+uint64_t nvn_vk_flush_epoch(void);
 /** @brief The meaning of a VkDeviceFaultAddressTypeEXT value, for the fault report and stops. */
 const char *nvn_vk_fault_type(int type);
 /**
@@ -1490,6 +1495,13 @@ uint32_t nvn_vk_retired_count(void);
  * slots' descriptors made null. Called under the NVN lock once no batch that may use them is in flight.
  */
 void nvn_texset_image_gone(const vimg *v);
+/**
+ * @brief The draw or dispatch that bound texture slots is now in its batch: they were last used at the current flush epoch.
+ * Until then (and for a use no site notes) a slot counts as busy, and rewriting it waits for the device.
+ */
+void nvn_texset_uses_recorded(void);
+/** @brief How many slot rewrites waited for the device and how many did not because no unfinished work used the slot. */
+void nvn_texset_rebinds(uint64_t *flushed, uint64_t *free_of_wait);
 /** @brief Forgets image v in the trace's capture cache before v is freed. */
 void nvn_trace_image_gone(const vimg *v);
 
