@@ -6360,6 +6360,7 @@ int nvn_vk_run(rl_ctx *c, uint8_t *mem, uint64_t queue, const nvn_cmdset *s)
 {
     if (!up(c))
         return RL_PENDING;
+    nvn_pace_settle();
     nvn_sched_item *items;
     uint32_t n;
     uint64_t bad;
@@ -6791,6 +6792,9 @@ static struct {
     uint32_t interval[PACE_RING];
     int64_t last;
     uint64_t n;
+    /** @brief A lazy acquire's wait not yet taken (nvn_pace_settle), and the present it waits for. */
+    bool deferred;
+    uint64_t deferred_k;
 } pace;
 
 /** @brief The reaper: a thread that waits for each guest timeline value in turn and notes when it was reached. */
@@ -6913,6 +6917,17 @@ static void pace_present(uint32_t interval)
     pace.n++;
 }
 
+/** @brief RELIFT_NVN_ACQUIRE_LAZY=1: the window acquire does not block the game's thread; the wait is taken at the first submit or present after it. */
+static bool pace_lazy_acquire(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("RELIFT_NVN_ACQUIRE_LAZY");
+        on = e && *e == '1';
+    }
+    return on != 0;
+}
+
 void nvn_pace_acquire(uint32_t textures)
 {
     if (pace_mode() != 1 || !pace.n)
@@ -6922,9 +6937,30 @@ void nvn_pace_acquire(uint32_t textures)
     uint64_t keep = textures > 2 ? textures - 2 : 0;
     if (keep >= pace.n)
         return;
+    if (pace_lazy_acquire()) {
+        /* The console's acquire hands the game a texture and a sync it waits on with the queue (the game does exactly
+         * that, QueueWaitSync right after), so the game goes on recording its frame; the wait for the texture is taken
+         * where the frame's work first reaches the replay (nvn_pace_settle). */
+        pace.deferred = true;
+        pace.deferred_k = pace.n - 1 - keep;
+        return;
+    }
     int64_t t0 = now_ns();
     nvn_core_leave();
     int64_t at = pace_shown(pace.n - 1 - keep);
+    sleep_until(at);
+    nvn_core_return();
+    nvn_gpuprof_span(SPAN_PACE, t0, now_ns());
+}
+
+void nvn_pace_settle(void)
+{
+    if (!pace.deferred)
+        return;
+    pace.deferred = false;
+    int64_t t0 = now_ns();
+    nvn_core_leave();
+    int64_t at = pace_shown(pace.deferred_k);
     sleep_until(at);
     nvn_core_return();
     nvn_gpuprof_span(SPAN_PACE, t0, now_ns());
@@ -7355,6 +7391,7 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const
     int64_t pres_t0 = now_ns();
     if (!up(c))
         return RL_PENDING;
+    nvn_pace_settle();
     nvn_lock();
     nvn_gfx none = { 0 };
     replay r = { .c = c, .mem = mem, .st = &none };

@@ -88,7 +88,9 @@ uint64_t nvnh_nvnWindowAcquireTexture(rl_ctx *c, uint8_t *mem)
     nvn_window *w = win_of(c, c->x[0], "nvnWindowAcquireTexture");
     if (!w)
         return RL_PENDING;
+    nvn_evlog("AcquireTexture", c->x[1]);
     nvn_pace_acquire(w->active);
+    nvn_evlog("AcquireTexture returned", c->x[1]);
     nvn_sync_signal(c->x[1]);
     rl_st32(mem, c->x[2], w->next);
     w->next = (w->next + 1) % w->active;
@@ -246,6 +248,7 @@ uint64_t nvnh_nvnQueuePresentTexture(rl_ctx *c, uint8_t *mem)
     uint32_t idx = (uint32_t)c->x[2];
     if (idx >= w->n)
         return (uint64_t)rl_guest_fatal(c, "nvn", "nvnQueuePresentTexture of texture %u of %u", idx, w->n);
+    nvn_evlog("PresentTexture", c->x[2]);
     int rc = nvn_present(c, mem, c->x[0], w->textures[idx], w->crop, w->interval);
     if (rc != RL_OK)
         return (uint64_t)rc;

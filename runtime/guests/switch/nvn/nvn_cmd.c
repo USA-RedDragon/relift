@@ -569,8 +569,10 @@ uint64_t nvnh_nvnCommandBufferBeginRecording(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
+bool nvn_set_log_on(void);
+
 /** @brief RELIFT_NVN_SET_LOG=1: a log line when a command set ends recording and when it is submitted, to read how long a set waits between. */
-static bool set_log_on(void)
+bool nvn_set_log_on(void)
 {
     static int on = -1;
     if (on < 0) {
@@ -656,7 +658,7 @@ uint64_t nvnh_nvnCommandBufferEndRecording(rl_ctx *c, uint8_t *mem)
     for (uint32_t i = 0; i < ngone; i++)
         nvn_cmdset_release(gone[i]);
     free(gone);
-    if (set_log_on())
+    if (nvn_set_log_on())
         rl_log(RL_LOG_INFO, "nvn", "set %u ended at %.3f ms (%u commands)", idx, (double)rl_clock_ns() / 1e6, s->n);
     c->x[0] = HANDLE_TAG | idx;
     return nvn_ret(c);
@@ -799,12 +801,18 @@ int nvn_cmd_submit(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t handle)
                    (unsigned long long)s->cmds[i].x[1], (unsigned long long)s->cmds[i].x[2],
                    (unsigned long long)s->cmds[i].x[3], (unsigned long long)s->cmds[i].x[4],
                    (unsigned long long)s->cmds[i].x[5]);
-    if (set_log_on())
+    if (nvn_set_log_on())
         rl_log(RL_LOG_INFO, "nvn", "set %u submitted at %.3f ms", (unsigned)(handle & 0xffffffffu), (double)rl_clock_ns() / 1e6);
     int64_t t0 = rl_clock_ns();
     int rc = nvn_vk_run(c, mem, queue, s);
-    if (set_log_on())
+    if (nvn_set_log_on())
         rl_log(RL_LOG_INFO, "nvn", "set %u replayed in %.3f ms", (unsigned)(handle & 0xffffffffu), (double)(rl_clock_ns() - t0) / 1e6);
     nvn_cmdset_release(s);
     return rc;
+}
+
+void nvn_evlog(const char *what, uint64_t a)
+{
+    if (nvn_set_log_on())
+        rl_log(RL_LOG_INFO, "nvn", "event %s 0x%llx at %.3f ms", what, (unsigned long long)a, (double)rl_clock_ns() / 1e6);
 }

@@ -784,6 +784,7 @@ uint64_t nvnh_nvnQueueSubmitCommands(rl_ctx *c, uint8_t *mem)
 /** @brief nvnQueueFenceSync(NVNqueue *, NVNsync *, NVNsyncCondition, int flags): signaled once the work submitted so far finished. */
 uint64_t nvnh_nvnQueueFenceSync(rl_ctx *c, uint8_t *mem)
 {
+    nvn_evlog("QueueFenceSync", c->x[1]);
     nvn_sync *s = (nvn_sync *)nvn_obj_get(c->x[1], NVN_SYNC);
     if (!s)
         return (uint64_t)rl_guest_fatal(c, "nvn", "nvnQueueFenceSync with 0x%llx, not a sync",
@@ -801,6 +802,7 @@ uint64_t nvnh_nvnQueueFenceSync(rl_ctx *c, uint8_t *mem)
  */
 uint64_t nvnh_nvnQueueWaitSync(rl_ctx *c, uint8_t *mem)
 {
+    nvn_evlog("QueueWaitSync", c->x[1]);
     nvn_trace_order("queue", "nvnQueueWaitSync", c->x[0], 0, 0, &c->x[1], 1, 0, true);
     int rc = nvn_vk_queue_sync(c, mem, c->x[0], c->x[1], true);
     if (rc != RL_OK)
@@ -1487,6 +1489,7 @@ enum { SYNC_ALREADY_SIGNALED = 0, SYNC_CONDITION_SATISFIED = 1, SYNC_TIMEOUT_EXP
  */
 uint64_t nvnh_nvnSyncWait(rl_ctx *c, uint8_t *mem)
 {
+    nvn_evlog("SyncWait", c->x[0]);
     (void)mem;
     nvn_sync *s = (nvn_sync *)nvn_obj_get(c->x[0], NVN_SYNC);
     uint64_t rc = SYNC_FAILED;

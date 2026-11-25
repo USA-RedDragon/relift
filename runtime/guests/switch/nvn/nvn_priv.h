@@ -1442,6 +1442,8 @@ int64_t nvn_vsync_after(int64_t t);
  * window's textures is free (one is on screen, and at most textures - 2 presents wait to be shown).
  */
 void nvn_pace_acquire(uint32_t textures);
+/** @brief Takes the wait a lazy window acquire (RELIFT_NVN_ACQUIRE_LAZY=1) put off, if there is one. */
+void nvn_pace_settle(void);
 /**
  * @brief Checks the window queue pacing, with the present's GPU work held by a host-set event (no timing): a present
  * returns without waiting for its GPU work, a texture of three is handed out with that present queued, and one of two
@@ -1603,6 +1605,9 @@ static inline const char *nvn_str(uint8_t *mem, uint64_t a, size_t max)
     const char *s = (const char *)(mem + a);
     return memchr(s, 0, max) ? s : NULL;
 }
+
+/** @brief With RELIFT_NVN_SET_LOG=1, logs a named call and its first argument with the time (the order of a game's queue and sync calls). */
+void nvn_evlog(const char *what, uint64_t a);
 
 #define NVN_DECLARE(name) uint64_t nvnh_##name(rl_ctx *c, uint8_t *mem);
 #define NVN_DECLARE_RECORDED(op, name) NVN_DECLARE(name)
