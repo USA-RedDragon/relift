@@ -14,6 +14,7 @@
 #include <relift/arm64/fp_slow.h>
 
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -718,26 +719,32 @@ static _Atomic int g_stat_on = -1;
 
 static void stat_report(void)
 {
-    for (int round = 0; round < 30; round++) {
+    static _Atomic int printing;
+    if (atomic_exchange(&printing, 1))
+        return;
+    bool used[STAT_SLOTS] = { false };
+    uint64_t total = 0;
+    for (uint32_t i = 0; i < STAT_SLOTS; i++)
+        total += atomic_load(&g_stat[i].calls);
+    fprintf(stderr, "[relift fp-slow] %llu calls so far\n", (unsigned long long)total);
+    for (int round = 0; round < 16; round++) {
         uint32_t best = STAT_SLOTS;
-        uint64_t most = 0, total = 0;
+        uint64_t most = 0;
         for (uint32_t i = 0; i < STAT_SLOTS; i++) {
             uint64_t n = atomic_load(&g_stat[i].calls);
-            total += round == 0 ? n : 0;
-            if (n > most) {
+            if (!used[i] && n > most) {
                 most = n;
                 best = i;
             }
         }
-        if (round == 0)
-            fprintf(stderr, "[relift fp-slow] %llu calls in all\n", (unsigned long long)total);
         if (best == STAT_SLOTS)
             break;
+        used[best] = true;
         uint64_t k = atomic_load(&g_stat[best].insn_fpcr);
         fprintf(stderr, "[relift fp-slow] %12llu  insn 0x%08x  fpcr 0x%08x\n", (unsigned long long)most, (unsigned)(k >> 32),
                 (unsigned)k);
-        atomic_store(&g_stat[best].calls, 0);
     }
+    atomic_store(&printing, 0);
 }
 
 static void stat_count(uint32_t insn, uint32_t fpcr)
@@ -759,7 +766,8 @@ static void stat_count(uint32_t insn, uint32_t fpcr)
         if (have == 0 && atomic_compare_exchange_strong(&g_stat[j].insn_fpcr, &have, key | 0))
             have = key;
         if (have == key) {
-            atomic_fetch_add_explicit(&g_stat[j].calls, 1, memory_order_relaxed);
+            if ((atomic_fetch_add_explicit(&g_stat[j].calls, 1, memory_order_relaxed) & 0xFFFFFFu) == 0xFFFFFFu)
+                stat_report();
             return;
         }
     }
