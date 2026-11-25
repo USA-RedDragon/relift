@@ -159,7 +159,7 @@ static void serve(void)
                 uint32_t sz = G.cpu->reg_size(r);
                 ok = strlen(q) >= 2 * sz && from_hex(buf, q, sz);
                 if (ok)
-                    G.cpu->reg_write(t->ctx, r, buf);
+                    cpu_for(t->ctx)->reg_write(t->ctx, r, buf);
                 q += 2 * sz;
             }
             reply(ok ? "OK" : "E01");
@@ -182,7 +182,7 @@ static void serve(void)
                 !from_hex(buf, q + 1, G.cpu->reg_size((uint32_t)r))) {
                 reply("E01");
             } else {
-                G.cpu->reg_write(t->ctx, (uint32_t)r, buf);
+                cpu_for(t->ctx)->reg_write(t->ctx, (uint32_t)r, buf);
                 reply("OK");
             }
         } else if (p[0] == 'm') {
@@ -408,6 +408,11 @@ typedef struct rl_gdb_thread {
      */
     bool has_pc, pc_exact;
     uint64_t pc;
+    /**
+     * @brief The register layer of this thread's CPU, or NULL for the server's. It numbers registers as the server's
+     * target description does; ctx is then whatever that layer reads (a coprocessor's own state).
+     */
+    const struct rl_gdb_cpu *cpu;
 } rl_gdb_thread;
 ```
 <!-- /docgen:code -->
@@ -421,14 +426,16 @@ typedef struct rl_gdb_cpu {
     uint32_t nregs;
     /** @brief Bytes of register n. */
     uint32_t (*reg_size)(uint32_t n);
-    /** @brief Writes register n of c to out, little-endian, reg_size(n) bytes. */
+    /** @brief Writes register n of c to out, reg_size(n) bytes in the target's byte order (big_endian). */
     void (*reg_read)(const rl_ctx *c, uint32_t n, uint8_t *out);
-    /** @brief Sets register n of c from in, little-endian, reg_size(n) bytes. */
+    /** @brief Sets register n of c from in, reg_size(n) bytes in the target's byte order. */
     void (*reg_write)(rl_ctx *c, uint32_t n, const uint8_t *in);
     /** @brief The guest pc of a stopped context, for stop replies and thread names. */
     uint64_t (*pc)(const rl_ctx *c);
     /** @brief The number of the pc register (8 bytes), which a breakpoint stop reports as the function's address. */
     uint32_t pc_reg;
+    /** @brief Registers go over the wire big-endian (a big-endian guest), else little-endian. */
+    bool big_endian;
     /**
      * @brief Fills out with the guest call frames of a stopped context whose pc is pc, innermost first, at most max,
      * reading guest memory with read; returns how many. NULL where the CPU keeps no frame chain.
@@ -587,6 +594,45 @@ sync point (`rl_sched_sync_pc`).
 * (16), 32 bits each, the current mode's bank. pc is the guest address the
 * thread resumes at where it parked at a sync point. Writing cpsr changes mode
 * as an MSR would (rl_arm32_set_cpsr).
+```
+<!-- /docgen:code -->
+
+### VR4300
+
+<!-- docgen:code file=runtime/cpus/mips/gdb.c region=registers -->
+```c
+* @brief The VR4300 registers for the GDB server (core/gdbstub.h), in the
+* order of gdb's 64-bit mips target: r0 to r31 (0 to 31), status (32), lo
+* (33), hi (34), badvaddr (35), cause (36), pc (37), f0 to f31 (38 to 69),
+* fcsr (70) and fir (71), 64 bits each, in the guest's big-endian order (gdb
+* needs `set endian big`). pc is the guest address the thread resumes at
+* where it parked at a sync point. fir reads as the VR4300's (0xB00) and
+* ignores writes.
+```
+<!-- /docgen:code -->
+
+### RSP
+
+A thread can bring its own register layer (`rl_gdb_thread.cpu`) in the
+server's numbering; the N64's RSP does:
+
+<!-- docgen:code file=runtime/guests/n64/run/cpu.c region=rsp -->
+```c
+* @brief The RSP as the GDB server's thread 2, in the same mips register numbering: r0 to r31 sign-extended from 32
+* bits, pc the IMEM address SP_PC names in the CPU's map (0x04001000 + SP_PC), the rest zero. It runs in slices inside
+* the CPU's device catch-up, so while the CPU is stopped it is between slices. Its registers are read-only here.
+* Thread 2 reads the SP memory window (0x04000000 to 0x04001FFF, DMEM then IMEM, also by its kseg0 and kseg1
+* addresses), where the RSP's code and data are.
+```
+<!-- /docgen:code -->
+
+<!-- docgen:code file=runtime/guests/n64/run/cpu.c region=gdb-memory -->
+```c
+* @brief Memory for the GDB server by the VR4300's virtual address, translated as its loads are (rl_mips_translate,
+* kseg0 and kseg1 directly, the rest through the TLB; a 32-bit address is sign-extended, as gdb in a 32-bit ABI sends
+* it). RDRAM reads as the CPU sees it, its data cache's dirty lines
+* included, with no side effect; writes are the CPU's stores. Other physical addresses (registers, cartridge) are not
+* read yet: their reads catch the RSP up.
 ```
 <!-- /docgen:code -->
 

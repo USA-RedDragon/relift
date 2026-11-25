@@ -8,10 +8,10 @@ The output below is real. It comes from a dev build of a hand-assembled Switch t
 
 | Tool | Sees | Stops | Works on |
 |---|---|---|---|
-| The GDB server (`debug.gdb`) | guest threads, guest registers (A64, or ARM on the Game Boy Advance and Nintendo DS), guest memory by guest address, lifted functions by guest address | the guest, at a safe point | Switch, Switch 2, Game Boy Advance and Nintendo DS programs; every host but Windows and iOS |
+| The GDB server (`debug.gdb`) | guest threads, guest registers (A64; ARM on the Game Boy Advance and Nintendo DS; MIPS on the Nintendo 64), guest memory by guest address, lifted functions by guest address | the guest, at a safe point | Switch, Switch 2, Game Boy Advance, Nintendo DS and Nintendo 64 programs; every host but Windows and iOS |
 | gdb on the host process | the lifted C (`-gline-tables-only`), the runtime, host threads and their stacks | everything, including the server | every guest and host gdb runs on |
 
-The server is in the runtime of dev builds (`relift run`, `relift build --dev`), of desktop builds with `package.appimage = "never"`, and of APKs signed with the debug key. It is never in a player package: an AppImage, a signed macOS app, an iOS app, or an APK signed with the project's own key (`package.android-keystore`) is built with `RL_NO_DEBUG_STUB`. It listens only when `debug.gdb` names a port. Game Boy and Nintendo 64 programs do not start the server today: `rl_gdb_start` is called by the Switch layer (`guests/switch/kthread.c`), the Game Boy Advance run (`guests/gba/run/cpu.c`) and the Nintendo DS run (`guests/nds/run/cpu.c`) only. For those guests use gdb on the host process (below).
+The server is in the runtime of dev builds (`relift run`, `relift build --dev`), of desktop builds with `package.appimage = "never"`, and of APKs signed with the debug key. It is never in a player package: an AppImage, a signed macOS app, an iOS app, or an APK signed with the project's own key (`package.android-keystore`) is built with `RL_NO_DEBUG_STUB`. It listens only when `debug.gdb` names a port. Game Boy programs do not start the server today: `rl_gdb_start` is called by the Switch layer (`guests/switch/kthread.c`) and the Game Boy Advance, Nintendo DS and Nintendo 64 runs (`guests/<guest>/run/cpu.c`) only. For those guests use gdb on the host process (below).
 
 ## Start a game with the server
 
@@ -95,6 +95,26 @@ The server speaks gdb's `arm` target for a Nintendo DS program too, with two thr
 `info threads` lists both, and `thread 2` then `x/wx 0x02380000` reads the ARM7's map.
 
 Memory reads and writes go through the selected thread's CPU map, which differ between the ARM9 and the ARM7. I/O registers read as on the Game Boy Advance, without side effects: the geometry engine and the sound unit answer as they last ran, the cartridge data port shows its last word, and the IPC receive FIFO shows its front word without taking it. The test `gdb_server_stops_both_nds_cpus_and_keeps_their_timing` stops both CPUs halfway, reads registers, memory and I/O twice, and checks that each CPU ends on the same cycle as in a run never stopped.
+
+## A Nintendo 64 program
+
+The server speaks gdb's 64-bit `mips` target (`mips:4300`) for a Nintendo 64 program. The guest is big-endian, so tell gdb before connecting. This is the runtime's N64 test, counting in a loop with a value in `$t1`:
+
+```text
+$ gdb -ex 'set endian big' -ex 'target remote :2345'
+0x80001004 in ?? ()
+(gdb) info threads
+  Id   Target Id                                     Frame 
+* 1    Thread 1 "1" (stopped; pc 0xffffffff80001004) 0x80001004 in ?? ()
+(gdb) p/x $t1
+$1 = 0x99
+(gdb) x/wx 0x80002004
+0x80002004:	0x12345678
+```
+
+Thread 1 is the VR4300. Memory is by its virtual address, translated as its loads are (kseg0 and kseg1 directly, the rest through the TLB); gdb's default 32-bit ABI sends `0x80002004`, which the server reads as the CPU's `0xffffffff80002004`. RDRAM reads as the CPU sees it, its data cache included, and writes are the CPU's stores. Other physical addresses (the hardware registers, the cartridge) cannot be read yet, because their reads catch the RSP up.
+
+Where the program runs RSP microcode, thread 2 is the RSP, in the same register layout: `r0` to `r31` and `pc`, the IMEM address `0x04001000 + SP_PC`. Its registers are read-only, and its memory is the SP window, DMEM at `0x04000000` and IMEM at `0x04001000`. The RSP runs in slices between the CPU's instructions, so while the CPU is stopped the RSP is too. The test `gdb_server_stops_an_n64_run_at_a_sync_point_and_keeps_its_timing` checks both threads and that a stopped run ends on the same cycle as one never stopped.
 
 ## Breakpoints
 
@@ -239,6 +259,6 @@ The packets the server answers, its limits, the monitor commands and the registe
 
 ## Not available
 
-- No server for Game Boy and Nintendo 64 programs, as above.
+- No server for Game Boy programs, and no reads of the Nintendo 64's hardware registers, as above.
 - Breakpoints and write watchpoints are x86-64 Linux only. On other hosts the server answers registers, memory and threads, and gdb reports the breakpoint as unsupported.
 - No breakpoint at a guest address that is not a function entry, and none at a function clang inlined.
