@@ -1154,8 +1154,10 @@ static uint32_t gdb_threads(rl_gdb_thread *out, uint32_t max)
 /**
  * docgen:region gdb-memory
  * @brief Memory for the GDB server: the CPU's 16-bit bus through the device library's peek (rlgbd_peek, no timing
- * effect; the runtime reads opcodes with it mid-run), so 0x4000 to 0x7FFF shows the ROM bank mapped now. Writes are
- * refused: a bus write is timed.
+ * effect; the runtime reads opcodes with it mid-run), so 0x4000 to 0x7FFF shows the ROM bank mapped now. Writes go
+ * through rlgbd_poke, which charges no dots: video RAM, cartridge RAM, work RAM, OAM and high RAM take them; ROM and
+ * mapper registers, I/O registers and IE are refused, since the guest's own write there acts at a cycle. The
+ * registers are written in the stopped context (the SM83 layer).
  * docgen:end
  */
 static size_t gdb_read(uint64_t tid, uint64_t a, uint8_t *dst, size_t n)
@@ -1170,10 +1172,12 @@ static size_t gdb_read(uint64_t tid, uint64_t a, uint8_t *dst, size_t n)
 static bool gdb_write(uint64_t tid, uint64_t a, const uint8_t *src, size_t n)
 {
     (void)tid;
-    (void)a;
-    (void)src;
-    (void)n;
-    return false;
+    if (!G.h || a + n > 0x10000u)
+        return false;
+    for (size_t i = 0; i < n; i++)
+        if (!rlgbd_poke(G.h, (uint16_t)(a + i), src[i]))
+            return false;
+    return true;
 }
 
 static const rl_gdb_guest g_gdb_guest = {

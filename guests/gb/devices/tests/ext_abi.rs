@@ -28,6 +28,39 @@ fn run(m: &mut Rlgbd, steps: u32) {
 
 const SPIN: [u8; 2] = [0x18, 0xFE];
 
+/// A poke writes video RAM, work RAM, OAM and high RAM without moving the clock, the next
+/// instruction reads it, and ROM, I/O and IE are refused with nothing written.
+#[test]
+fn a_poke_writes_memory_without_time_and_refuses_the_rest() {
+    // loop: ld a,[$C000]; ld [$FF80],a; jr loop
+    let rom = image(
+        0,
+        0,
+        0,
+        0,
+        &[0xFA, 0x00, 0xC0, 0xEA, 0x80, 0xFF, 0x18, 0xF8],
+    );
+    let mut m = Rlgbd::new(0, &rom).unwrap();
+    run(&mut m, 4);
+    let t = m.now();
+    for (a, v) in [
+        (0xC000u16, 0x5A),
+        (0xFF90, 0x11),
+        (0x8800, 0x22),
+        (0xFE10, 0x33),
+    ] {
+        assert!(m.poke(a, v));
+        assert_eq!(m.peek(a), v);
+    }
+    assert_eq!(m.now(), t);
+    for a in [0x0000u16, 0x4000, 0xFF40, 0xFF46, 0xFFFF] {
+        assert!(!m.poke(a, 0x77));
+    }
+    assert_eq!(m.now(), t);
+    run(&mut m, 8);
+    assert_eq!(m.peek(0xFF80), 0x5A);
+}
+
 #[test]
 fn every_hardware_code_builds_a_machine_of_its_own() {
     let rom = image(0, 0, 0, 0x80, &SPIN);

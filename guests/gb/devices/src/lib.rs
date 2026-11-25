@@ -339,6 +339,20 @@ impl Rlgbd {
         self.gb.read_memory(addr)
     }
 
+    /// A write for a debugger that charges no dots: the untimed bus write, after the lazy devices are
+    /// brought up to date. Only the memory areas (video RAM, cartridge RAM, work RAM and its echo, OAM,
+    /// high RAM) are written; ROM and mapper registers (0x0000 to 0x7FFF), the I/O registers
+    /// (0xFF00 to 0xFF7F) and IE (0xFFFF) have effects a stopped program has no cycle to take, and
+    /// return false with nothing written.
+    pub fn poke(&mut self, addr: u16, value: u8) -> bool {
+        if addr < 0x8000 || (0xFF00..=0xFF7F).contains(&addr) || addr == 0xFFFF {
+            return false;
+        }
+        self.gb.sync_lazy_peripherals();
+        self.gb.write_memory(addr, value);
+        true
+    }
+
     /// FNV-1a of the last taken frame (zeros before the first).
     pub fn frame_hash(&self) -> u64 {
         fnv(0xcbf2_9ce4_8422_2325, self.frame.iter().copied())
@@ -813,6 +827,16 @@ pub unsafe extern "C" fn rlgbd_set_regs(h: *mut Rlgbd, inp: *const RlgbdRegs) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rlgbd_peek(h: *mut Rlgbd, addr: u16) -> u8 {
     me(h).peek(addr)
+}
+
+/// A write for a debugger: no timing effect, and false with nothing written for ROM and mapper
+/// registers, I/O registers and IE (see [`Rlgbd::poke`]).
+///
+/// # Safety
+/// `h` is a live handle between instructions.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rlgbd_poke(h: *mut Rlgbd, addr: u16, value: u8) -> bool {
+    me(h).poke(addr, value)
 }
 
 /// FNV-1a of the last frame taken by `rlgbd_frame_poll` or a case (the bytes

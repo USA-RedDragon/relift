@@ -7,6 +7,7 @@
 #ifndef RELIFT_GBDEV_ABI_H
 #define RELIFT_GBDEV_ABI_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -83,6 +84,11 @@ uint64_t rlgbd_now(rlgbd *h);
 void rlgbd_get_regs(rlgbd *h, rlgbd_regs *out);
 void rlgbd_set_regs(rlgbd *h, const rlgbd_regs *in);
 uint8_t rlgbd_peek(rlgbd *h, uint16_t addr);
+/**
+ * @brief A write for a debugger that charges no dots. Writes video RAM, cartridge RAM, work RAM, OAM and high RAM;
+ * returns false, with nothing written, for ROM and mapper registers, the I/O registers and IE.
+ */
+bool rlgbd_poke(rlgbd *h, uint16_t addr, uint8_t value);
 /** @brief FNV-1a of the last taken frame (the bytes of rlgbd_frame_rgb); consumes nothing. */
 uint64_t rlgbd_frame_hash(rlgbd *h);
 /**
