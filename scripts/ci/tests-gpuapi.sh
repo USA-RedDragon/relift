@@ -10,8 +10,16 @@
 work="$CI_WORK/gpuapi"
 rm -rf "$work"
 mkdir -p "$work"
-lib32=${LIB32:-/usr/lib32}
-[ -d "$lib32" ] || lib32=/usr/lib/i386-linux-gnu
+lib32=${LIB32:-}
+if [ -z "$lib32" ]; then
+  lib32=/usr/lib32
+  for dir in /usr/lib32 /usr/lib/i386-linux-gnu; do
+    if [ -e "$dir/libEGL.so.1" ]; then
+      lib32=$dir
+      break
+    fi
+  done
+fi
 export LIB32=$lib32
 
 have() {
