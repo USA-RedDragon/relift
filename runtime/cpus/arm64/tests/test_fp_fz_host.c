@@ -279,4 +279,174 @@ TEST(host_flush_to_zero_differs_from_a64_fz_only_where_a_tiny_result_rounds_up_t
     CHECK(plain > 0);
     CHECK_EQ(fixed_total, 0u);
 }
+
+/** @brief Flushes a denormal single to a zero of its sign (A64 FZ on an input). */
+__attribute__((noinline)) static uint32_t host_cvt(uint64_t d, uint32_t csr)
+{
+    uint32_t save = _mm_getcsr();
+    _mm_setcsr(csr);
+    uint32_t r = u32(_mm_cvtss_f32(_mm_cvtsd_ss(_mm_setzero_ps(), _mm_set_sd(f64(d)))));
+    _mm_setcsr(save);
+    return r;
+}
+
+static uint32_t flush_s(uint32_t b) { return (b & 0x7F800000u) == 0 ? b & 0x80000000u : b; }
+
+TEST(fz_on_fcvt_double_to_single_is_the_host_flush_with_the_same_fixup)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    uint64_t bad_plain = 0, bad_fixed = 0;
+    uint32_t csr = _mm_getcsr();
+    for (uint64_t n = 0; n < 400000; n++) {
+        /* a double whose single rounding lies at the smallest normal single: 2^-126 (1 - eps) for eps around 2^-25 */
+        uint64_t d;
+        if (n % 2) {
+            uint64_t m = rnd() & 0xFFFFFFFFFFFFFull;
+            d = (uint64_t)(1023 - 127) << 52 | (m | 0xFFFFFFE000000ull) /* mantissa near all ones */;
+            d |= (rnd() & 1) << 63;
+            d ^= rnd() % 8;
+        } else {
+            d = pick_d();
+            if (nan_d(d))
+                continue;
+        }
+        c->v[1].q = 0;
+        c->v[0].q = 0;
+        c->v[1].d[0] = d;
+        if (rl_fp_slow(c, rl_mem_base(), 0x10000, 0x1E624020u) != RL_OK) /* fcvt s0, d1 */
+            return;
+        uint32_t want = c->v[0].s[0];
+        for (int fix = 0; fix < 2; fix++) {
+            uint32_t got = host_cvt(d, csr | MXCSR_FTZ | MXCSR_DAZ);
+            if (fix && (got & 0x7FFFFFFFu) == 0x00800000u) {
+                uint32_t rz = host_cvt(d, (csr & ~0x6000u) | 0x6000u | MXCSR_FTZ | MXCSR_DAZ);
+                if ((rz & 0x7FFFFFFFu) < 0x00800000u)
+                    got = rz;
+            }
+            if (getenv("RELIFT_FZ_TEST_VERBOSE") && got != want && !nan_s(got) && bad_plain + bad_fixed < 4)
+                printf("    fcvt d=0x%llx: exact path 0x%x, host 0x%x (fix %d)\n", (unsigned long long)d, want, got, fix);
+            if (got != want && !nan_s(got))
+                {
+                if (fix)
+                    bad_fixed++;
+                else
+                    bad_plain++;
+            }
+        }
+    }
+    printf("  fcvt d->s: %llu differ with the host's own flush, %llu with the fix-up\n", (unsigned long long)bad_plain,
+           (unsigned long long)bad_fixed);
+    CHECK_EQ(bad_fixed, 0u);
+}
+
+TEST(fz_on_fmax_fmin_fcmp_is_a_flush_of_the_inputs_then_the_default_operation)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    static const uint32_t insn[] = { 0x1E224820u, 0x1E225820u, 0x1E226820u, 0x1E227820u }; /* fmax fmin fmaxnm fminnm s0, s1, s2 */
+    uint64_t bad = 0;
+    for (uint64_t n = 0; n < 200000; n++) {
+        uint32_t a = pick_s(), b = pick_s();
+        if (nan_s(a) || nan_s(b))
+            continue;
+        for (int k = 0; k < 4; k++) {
+            c->fpcr = RL_FPCR_FZ;
+            c->v[1].q = c->v[2].q = c->v[0].q = 0;
+            c->v[1].s[0] = a;
+            c->v[2].s[0] = b;
+            if (rl_fp_slow(c, rl_mem_base(), 0x10000, insn[k]) != RL_OK)
+                return;
+            uint32_t want = c->v[0].s[0];
+            c->fpcr = 0;
+            c->v[0].q = 0;
+            c->v[1].s[0] = flush_s(a);
+            c->v[2].s[0] = flush_s(b);
+            if (rl_fp_slow(c, rl_mem_base(), 0x10000, insn[k]) != RL_OK)
+                return;
+            bad += want != c->v[0].s[0];
+        }
+    }
+    CHECK_EQ(bad, 0u);
+}
+#elif defined(__aarch64__)
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
+
+/*
+ * An arm64 host has A64's own FZ: setting FPCR.FZ on the host must give what the exact slow path gives (no fix-up: the same
+ * tininess rule). Run on the Mac and the Thor to see it.
+ */
+static const rl_guest_desc test_guest = {
+    .name = "arm64-fp-fz-host-test",
+    .page_size = 0x4000,
+    .address_bits = 40,
+    .tick_hz = 1000000,
+};
+
+static uint64_t g_rng = 0x9e3779b97f4a7c15ull;
+
+static uint64_t rnd(void)
+{
+    g_rng ^= g_rng << 13;
+    g_rng ^= g_rng >> 7;
+    g_rng ^= g_rng << 17;
+    return g_rng;
+}
+
+static uint32_t pick_s(void)
+{
+    uint32_t sign = (uint32_t)(rnd() & 1) << 31, mant = rnd() % 3 == 0 ? 0x7FFFFFu - (uint32_t)(rnd() % 4) : (uint32_t)rnd() & 0x7FFFFFu;
+    uint32_t e = (uint32_t)(rnd() % 14);
+    if (rnd() % 6 == 0)
+        e = 0x7E + (uint32_t)(rnd() % 4);
+    return sign | e << 23 | mant;
+}
+
+__attribute__((noinline)) static uint32_t host_s(int op, uint32_t a, uint32_t b, uint32_t k)
+{
+    float x, y, z, r;
+    memcpy(&x, &a, 4);
+    memcpy(&y, &b, 4);
+    memcpy(&z, &k, 4);
+    uint32_t save = rl_host_get_fpcr();
+    rl_host_set_fpcr(RL_FPCR_FZ);
+    switch (op) {
+    case 0: r = x + y; break;
+    case 1: r = x - y; break;
+    case 2: r = x * y; break;
+    case 3: r = x / y; break;
+    case 4: r = sqrtf(x); break;
+    default: r = fmaf(x, y, z); break;
+    }
+    rl_host_set_fpcr(save);
+    uint32_t out;
+    memcpy(&out, &r, 4);
+    return out;
+}
+
+TEST(an_arm64_host_with_fz_set_gives_the_exact_a64_fz_results)
+{
+    if (rl_core_init(&test_guest, rl_arm64_cpu()) != 0)
+        return;
+    struct rl_thread *t = rl_thread_alloc();
+    CHECK(t != NULL);
+    rl_thread_bind(t);
+    rl_ctx *c = t->ctx;
+    static const uint32_t insn[] = { 0x1E222820u, 0x1E223820u, 0x1E220820u, 0x1E221820u, 0x1E21C020u, 0x1F020C20u };
+    uint64_t bad = 0;
+    for (int op = 0; op < 6; op++)
+        for (uint64_t n = 0; n < 300000; n++) {
+            uint32_t a = pick_s(), b = pick_s(), k = pick_s();
+            c->fpcr = RL_FPCR_FZ;
+            c->v[1].q = c->v[2].q = c->v[3].q = c->v[0].q = 0;
+            c->v[1].s[0] = a;
+            c->v[2].s[0] = b;
+            c->v[3].s[0] = k;
+            CHECK_EQ(rl_fp_slow(c, rl_mem_base(), 0x10000, insn[op]), RL_OK);
+            bad += c->v[0].s[0] != host_s(op, a, b, k);
+        }
+    CHECK_EQ(bad, 0u);
+}
 #endif
