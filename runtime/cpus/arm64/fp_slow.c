@@ -13,6 +13,9 @@
 
 #include <relift/arm64/fp_slow.h>
 
+#include <stdatomic.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int unsupported(rl_ctx *c, uint64_t pc, uint32_t insn)
@@ -702,9 +705,70 @@ static int simd_complex(rl_ctx *c, uint64_t pc, uint32_t insn, int mode)
     return RL_OK;
 }
 
+/**
+ * RELIFT_FP_SLOW_STATS=1 counts the calls of rl_fp_slow by instruction (its register fields cleared) and FPCR, and prints
+ * the busiest 30 at exit: which FP instructions leave the lifted fast path, and under which FPCR (bit 31 is the
+ * exact-flags mode, the bits 22 to 26 the arithmetic modes).
+ */
+enum { STAT_SLOTS = 4096 };
+static struct {
+    _Atomic uint64_t insn_fpcr, calls;
+} g_stat[STAT_SLOTS];
+static _Atomic int g_stat_on = -1;
+
+static void stat_report(void)
+{
+    for (int round = 0; round < 30; round++) {
+        uint32_t best = STAT_SLOTS;
+        uint64_t most = 0, total = 0;
+        for (uint32_t i = 0; i < STAT_SLOTS; i++) {
+            uint64_t n = atomic_load(&g_stat[i].calls);
+            total += round == 0 ? n : 0;
+            if (n > most) {
+                most = n;
+                best = i;
+            }
+        }
+        if (round == 0)
+            fprintf(stderr, "[relift fp-slow] %llu calls in all\n", (unsigned long long)total);
+        if (best == STAT_SLOTS)
+            break;
+        uint64_t k = atomic_load(&g_stat[best].insn_fpcr);
+        fprintf(stderr, "[relift fp-slow] %12llu  insn 0x%08x  fpcr 0x%08x\n", (unsigned long long)most, (unsigned)(k >> 32),
+                (unsigned)k);
+        atomic_store(&g_stat[best].calls, 0);
+    }
+}
+
+static void stat_count(uint32_t insn, uint32_t fpcr)
+{
+    int on = atomic_load_explicit(&g_stat_on, memory_order_relaxed);
+    if (on < 0) {
+        on = getenv("RELIFT_FP_SLOW_STATS") != NULL;
+        atomic_store(&g_stat_on, on);
+        if (on)
+            atexit(stat_report);
+    }
+    if (!on)
+        return;
+    uint64_t key = ((uint64_t)(insn & 0xFFE0FC00u) << 32) | fpcr;
+    uint32_t h = (uint32_t)((key * 0x9E3779B97F4A7C15ull) >> 52);
+    for (uint32_t i = 0; i < STAT_SLOTS; i++) {
+        uint32_t j = (h + i) % STAT_SLOTS;
+        uint64_t have = atomic_load(&g_stat[j].insn_fpcr);
+        if (have == 0 && atomic_compare_exchange_strong(&g_stat[j].insn_fpcr, &have, key | 0))
+            have = key;
+        if (have == key) {
+            atomic_fetch_add_explicit(&g_stat[j].calls, 1, memory_order_relaxed);
+            return;
+        }
+    }
+}
+
 int rl_fp_slow(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn)
 {
     (void)mem;
+    stat_count(insn, c->fpcr);
     if ((insn & 0x7F000000u) == 0x1E000000u) {
         if (!(insn & 0x00200000u))
             return scalar_int(c, pc, insn, 1);
