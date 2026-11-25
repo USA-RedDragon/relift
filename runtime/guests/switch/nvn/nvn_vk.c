@@ -2778,6 +2778,17 @@ static bool submit_recorded(replay *r)
     return ok;
 }
 
+/** @brief RELIFT_NVN_BATCH_LOG=1: a log line per batch with its submit time and device times (see wait_slot). */
+static bool batch_log_on(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("RELIFT_NVN_BATCH_LOG");
+        on = e && *e == '1';
+    }
+    return on;
+}
+
 /** @brief Waits for slot s's batch and frees what it held; true when there was none. */
 static bool wait_slot(uint32_t s)
 {
@@ -2802,6 +2813,13 @@ static bool wait_slot(uint32_t s)
         VK(vkGetQueryPoolResults)(g.dev, gpu_ts.pool, 2 * s, 2, sizeof ts, ts, sizeof ts[0], VK_QUERY_RESULT_64_BIT) ==
             VK_SUCCESS)
         tm.gpu_ns += (uint64_t)((double)(ts[1] - ts[0]) * gpu_ts.period_ns);
+    if (ok && gpu_ts.pool && batch_log_on()) {
+        /* One line per batch: when it was handed to the driver (host clock), and when the device ran it (device
+         * clock, microseconds; only differences within one present mean anything). */
+        rl_log(RL_LOG_INFO, "nvn", "batch %u: submitted at %.3f ms, device %.3f to %.3f ms (%.3f ms long)", s,
+               (double)pending[s].t1 / 1e6, (double)ts[0] * gpu_ts.period_ns / 1e6, (double)ts[1] * gpu_ts.period_ns / 1e6,
+               (double)(ts[1] - ts[0]) * gpu_ts.period_ns / 1e6);
+    }
     if (ok)
         nvn_gpuprof_done(s);
     if (!ok)
