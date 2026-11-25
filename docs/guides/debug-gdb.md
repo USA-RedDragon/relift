@@ -30,10 +30,10 @@ A built program takes the same settings as `--relift-set debug.gdb=2345`. The se
 The server speaks A64 registers, so gdb must know the aarch64 target. A distribution's plain `gdb` often does not (`gdb-multiarch` does); check with `gdb -batch -nx -ex 'set architecture aarch64'`. Then, from the relift checkout so the helper script resolves:
 
 ```text
-$ gdb -ex 'set architecture aarch64' -ex 'source runtime/tools/gdb/relift_frames.py' -ex 'target remote :2345'
+$ gdb -ex 'set architecture aarch64' -ex 'source runtime/tools/gdb/relift_guest.py' -ex 'target remote :2345'
 ```
 
-`relift_frames.py` is optional on this connection. It matters for host-side gdb (below).
+`relift_guest.py` gives `bt` the guest call chain and names each frame (see [Backtraces](#backtraces-and-the-lifted-code)). Without it the server still answers threads, registers and memory. `relift_frames.py` is the helper for host-side gdb (below).
 
 ### What gdb sees
 
@@ -55,16 +55,20 @@ Attaching, or Ctrl-C after a `continue`, stops every guest thread at its next sa
 
 ### Name a guest address
 
-`monitor sym <guest address>` names the lifted function that holds an address:
+`monitor sym` names the lifted function that holds an address. It takes a number, or a register of the current thread with or without `$`, and an optional `+` or `-` offset in hex:
 
 ```text
-(gdb) monitor sym 0x8000030
-main+0x30 _ZN5guest4main11fn_00000030E
+(gdb) monitor sym $pc
+nest+0xa00 inner
+(gdb) monitor sym x30 - 4
+nest+0x900 mid
 (gdb) monitor sym 0x1234
 no lifted function holds 0x1234
 ```
 
-`main` is the module, `+0x30` the function's offset from the module's base, and the last word the function's host name. Unnamed functions are `fn_<hex offset>`; a function with a symbol in the guest binary carries it as an Itanium name in the `guest` namespace (`_ZN5guest4main3fooEv` is `guest::main::foo()`, [the ABI](../abi.md) section 11). Load `relift_frames.py` in a gdb that talks to the host process to see those names demangled; the server's answers show the raw name.
+`nest` is the module, `+0xa00` the function's offset from the module's base, and the last word the function's host name. Unnamed functions are `fn_<hex offset>`; a function with a symbol in the guest binary carries it as an Itanium name in the `guest` namespace (`_ZN5guest4main3fooEv` is `guest::main::foo()`, [the ABI](../abi.md) section 11). Load `relift_frames.py` in a gdb that talks to the host process to see those names demangled; the server's answers show the raw name.
+
+gdb sends the text after `monitor` as typed and does not evaluate it, so the server reads registers by the names in its target description itself. A gdb expression such as `$x30 & ~0xf` or a convenience variable is not understood; print it with `p/x` and pass the number.
 
 ## Breakpoints
 
@@ -111,10 +115,31 @@ Stores the runtime makes for the guest (system calls, the GPU mirror's readback)
 
 ## Backtraces and the lifted code
 
-The server gives gdb no unwind information for guest code, so `bt` on a guest thread shows only the frame at pc. Two things answer "how did I get here":
+With `relift_guest.py` loaded, `bt` on a guest thread lists its guest calls, innermost first, named as `monitor sym` names them. This is the runtime's test guest, stopped in the innermost of three nested calls:
 
-- At a stop, `p/x $x30` is the return address of the current function; pass it to `monitor sym 0x<value>` to name the caller. `monitor` takes the number as text, not a gdb expression, so `monitor sym $x30` looks up address 0. When the game builds with frame pointers, `x/2gx $x29` reads the saved frame pointer and the saved return address, and the chain goes on from there.
-- gdb on the host process shows the real chain, lifted callers and runtime together (next section).
+```text
+(gdb) bt
+#0  0x0000000198000a08 in nest+0xa00 inner ()
+#1  0x0000000198000914 in nest+0x900 mid ()
+#2  0x0000000198000814 in nest+0x800 outer ()
+```
+
+`monitor bt` prints the same walk with any client, lldb included:
+
+```text
+(gdb) monitor bt
+#0 0x198000a08 nest+0xa00 inner
+#1 0x198000914 nest+0x900 mid
+#2 0x198000814 nest+0x800 outer
+```
+
+The server walks the guest's frame records in guest memory, the chain A64 code keeps through x29 and x30, and the helper hands that walk to gdb (the packet is `qRelift.frames`, [reference](../reference/gdb-stub.md#guest-backtrace)). gdb cannot do it alone: without symbols its aarch64 unwinder reads the frame record 16 bytes past x29 and stops after the first frame. The walk has three limits:
+
+- Code built without frame pointers leaves gaps: a function that keeps no record is missing from the chain past the innermost frame.
+- At a preemption check the registers are those of the thread's last call boundary, so the walk starts there.
+- `frame N` and `info frame` show pc, sp and x29 for each frame; other registers of outer frames are those of frame 0.
+
+gdb on the host process shows the real chain too, lifted callers and runtime together (next section).
 
 ## gdb on the host process
 
@@ -191,4 +216,3 @@ The packets the server answers, its limits, the monitor commands and the registe
 - No server for the cartridge guests, as above.
 - Breakpoints and write watchpoints are x86-64 Linux only. On other hosts the server answers registers, memory and threads, and gdb reports the breakpoint as unsupported.
 - No breakpoint at a guest address that is not a function entry, and none at a function clang inlined.
-- No guest backtrace from the server.

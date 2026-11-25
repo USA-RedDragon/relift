@@ -33,6 +33,7 @@ Every excerpt on this page is read from the source.
 | Wait for running threads to reach a safe point | <!-- docgen:const file=runtime/core/gdbstub.c name=STOP_WAIT_NS print=value -->`2000000000`<!-- /docgen:const --> nanoseconds |
 | Most breakpoints | <!-- docgen:const file=runtime/core/gdbstub.c name=MAX_BREAKS -->`64`<!-- /docgen:const --> |
 | Most write watchpoints | <!-- docgen:const file=runtime/core/gdbstub.c name=MAX_WATCHES -->`16`<!-- /docgen:const --> |
+| Most frames of a guest backtrace | <!-- docgen:const file=runtime/core/gdbstub.c name=MAX_FRAMES -->`64`<!-- /docgen:const --> |
 
 Breakpoints and watchpoints exist on x86-64 Linux hosts only (the source
 defines `RL_GDB_TRAPS` there); on other hosts the server answers a `Z` packet
@@ -113,6 +114,22 @@ static void serve(void)
             reply("1");
         } else if ((a = after(p, "qRcmd,"))) {
             monitor(a);
+        } else if ((a = after(p, "qRelift.frames:"))) {
+            /* The guest backtrace of one thread for tools/gdb/relift_guest.py: pc,sp,fp,hex name per frame, innermost first. */
+            rl_gdb_frame f[MAX_FRAMES];
+            uint32_t n = walk(thread_by_id(parse_hex(&a)), f, MAX_FRAMES);
+            size_t o = 0;
+            G.out[0] = 0;
+            for (uint32_t i = 0; i < n && o + 400 < sizeof G.out; i++) {
+                char nm[180] = "";
+                size_t w = name_at(nm, sizeof nm, f[i].pc);
+                o += (size_t)snprintf(G.out + o, sizeof G.out - o, "%s%llx,%llx,%llx,", i ? ";" : "",
+                                      (unsigned long long)f[i].pc, (unsigned long long)f[i].sp,
+                                      (unsigned long long)f[i].fp);
+                to_hex(G.out + o, (const uint8_t *)nm, w);
+                o += 2 * w;
+            }
+            reply(n ? G.out : "E01");
         } else if (strcmp(p, "?") == 0) {
             stop_reply(5);
         } else if (p[0] == 'H' && (p[1] == 'g' || p[1] == 'c')) {
@@ -218,7 +235,8 @@ static void serve(void)
 <!-- /docgen:code -->
 
 `qSupported` announces `qXfer:features:read`, `qXfer:threads:read`,
-`QStartNoAckMode` and `vContSupported`. A step (`s`, `S`, `vCont;s`) runs the
+`QStartNoAckMode` and `vContSupported`. `qRelift.frames:<thread>` is
+relift's own: the [guest backtrace](#guest-backtrace) of one thread. A step (`s`, `S`, `vCont;s`) runs the
 thread to its next safe point or breakpoint, because lifted code has no single
 guest instruction to stop after.
 
@@ -281,16 +299,28 @@ static void monitor(const char *hex)
     cmd[n] = 0;
     char text[1024];
     if (strncmp(cmd, "sym ", 4) == 0) {
-        const char *p = cmd + 4;
-        if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X'))
-            p += 2;
-        uint64_t a = parse_hex(&p);
+        uint64_t a = 0;
         char nm[512] = "";
-        if (!name_at(nm, sizeof nm, a))
+        if (!monitor_addr(cmd + 4, &a))
+            snprintf(nm, sizeof nm, "not an address or a register: %s", cmd + 4);
+        else if (!name_at(nm, sizeof nm, a))
             snprintf(nm, sizeof nm, "no lifted function holds 0x%llx", (unsigned long long)a);
         snprintf(text, sizeof text, "%s\n", nm);
+    } else if (strcmp(cmd, "bt") == 0) {
+        rl_gdb_frame f[MAX_FRAMES];
+        uint32_t nf = walk(thread_by_id(G.cur), f, MAX_FRAMES);
+        size_t o = 0;
+        text[0] = 0;
+        if (!nf)
+            snprintf(text, sizeof text, "no guest frames for this thread\n");
+        for (uint32_t i = 0; i < nf && o + 80 < sizeof text; i++) {
+            char nm[200] = "";
+            name_at(nm, sizeof nm, f[i].pc);
+            o += (size_t)snprintf(text + o, sizeof text - o, "#%u 0x%llx %s\n", i, (unsigned long long)f[i].pc,
+                                  nm[0] ? nm : "(no lifted function)");
+        }
     } else {
-        snprintf(text, sizeof text, "relift monitor commands: sym <guest address>\n");
+        snprintf(text, sizeof text, "relift monitor commands: sym <address, $register or $register+offset>, bt\n");
     }
     G.out[0] = 'O';
     to_hex(G.out + 1, (const uint8_t *)text, strlen(text));
@@ -301,8 +331,19 @@ static void monitor(const char *hex)
 <!-- /docgen:code -->
 
 `sym` names the lifted function that holds a guest address, as
-`<module>+0x<offset> <name>` through this function. The argument is text, not
-a gdb expression, so give it a number, not `$pc`:
+`<module>+0x<offset> <name>` through `name_at` below. `bt` prints the
+[guest backtrace](#guest-backtrace) of the current thread, one named frame a
+line. gdb sends the text after `monitor` as typed, so the server reads the
+address itself:
+
+<!-- docgen:code file=runtime/core/gdbstub.c region=monitor-args -->
+```c
+* @brief The address argument of a monitor command. gdb sends the text after `monitor` as typed, without evaluating
+* it, so the server reads it here: a hex number (0x optional), or a register of the current thread by its name in the
+* target description, with or without `$` (`$pc`, `x30`), either one optionally followed by `+` or `-` and a hex
+* number. False when the text is none of these.
+```
+<!-- /docgen:code -->
 
 <!-- docgen:code file=runtime/core/gdbstub.c symbol=name_at -->
 ```c
@@ -318,6 +359,32 @@ static size_t name_at(char *dst, size_t n, uint64_t a)
 }
 ```
 <!-- /docgen:code -->
+
+## Guest backtrace
+
+The CPU layer walks a stopped thread's guest frames (`rl_gdb_cpu.frames`).
+The A64 layer follows the frame records in guest memory:
+
+<!-- docgen:code file=runtime/cpus/arm64/gdb.c region=frames -->
+```c
+* @brief The guest backtrace: the AAPCS64 frame-record chain in guest memory. Each function that keeps a record
+* stores its caller's x29 and its return address as a pair at x29, so [x29] is the caller's record and [x29 + 8]
+* where the caller resumes. The first step is the one guess: a thread stopped at a function's entry, or in a leaf
+* that keeps no record, still has its return address in x30, and x30 then lies outside the function that holds pc
+* (a function that already called something holds a return address into itself there). So the caller is x30 when
+* x30 is in another lifted function and the record at x29 does not already name it, else [x29 + 8]. The walk ends
+* at a zero or unreadable record, a record that is not above the last one, or a zero return address.
+```
+<!-- /docgen:code -->
+
+`monitor bt` prints the walk. `qRelift.frames:<thread id in hex>` answers it
+as `pc,sp,fp,name` per frame, innermost first, separated by `;`, with the
+numbers in hex and the lifted function's name hex-encoded (empty where no
+lifted function holds pc); a thread with no walk answers `E01`.
+`runtime/tools/gdb/relift_guest.py` reads that packet at each stop and hands
+gdb the frames through a Python unwinder, so `bt` shows them; it sends the
+packet outside the unwinder, because gdb 18 crashes when an unwinder sends a
+packet.
 
 ## Threads
 
@@ -356,6 +423,11 @@ typedef struct rl_gdb_cpu {
     uint64_t (*pc)(const rl_ctx *c);
     /** @brief The number of the pc register (8 bytes), which a breakpoint stop reports as the function's address. */
     uint32_t pc_reg;
+    /**
+     * @brief Fills out with the guest call frames of a stopped context whose pc is pc, innermost first, at most max,
+     * reading guest memory with read; returns how many. NULL where the CPU keeps no frame chain.
+     */
+    uint32_t (*frames)(const rl_ctx *c, uint64_t pc, rl_gdb_frame *out, uint32_t max, rl_gdb_read_fn read);
 } rl_gdb_cpu;
 ```
 <!-- /docgen:code -->
@@ -403,5 +475,7 @@ static uint32_t gdb_threads(rl_gdb_thread *out, uint32_t max)
 ## Tests
 
 `make -C runtime gdb-test` runs the frame filter test and the server test
-(`runtime/tools/gdb/stub-test.sh`) with a real gdb. The server's own tests are
+(`runtime/tools/gdb/stub-test.sh`) with a real gdb; the server test also
+checks `bt` with `relift_guest.py`, `monitor bt` and `monitor sym` with
+registers. The server's own tests are
 in `runtime/guests/switch/tests/test_gdb.c`.
