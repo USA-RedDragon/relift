@@ -826,8 +826,26 @@ static uint64_t fp_from_fixed(fpenv *v, const fmt *to, uint64_t a, unsigned from
     return round_pack(v, to, sign, x, -(int)fbits, rm_arg(v, rmode));
 }
 
+#if defined(__x86_64__)
+static _Thread_local uint32_t t_idc;
+
+uint32_t rl_fp_idc_get(void) { return t_idc; }
+
+void rl_fp_idc_raise(void) { t_idc = 0x80u; }
+
+void rl_fp_idc_clear(void) { t_idc = 0; }
+#endif
+
 void rl_fp_host_raise_any(uint32_t f)
 {
+#if defined(__x86_64__)
+    if (f & 0x80u) {
+        t_idc = 0x80u;
+        f &= ~0x80u;
+        if (!f)
+            return;
+    }
+#endif
 #if defined(__x86_64__) || defined(__aarch64__)
     if ((f & 0x80u) || ((f & 0x0Cu) && !(f & 0x10u))) {
 #if defined(__x86_64__)

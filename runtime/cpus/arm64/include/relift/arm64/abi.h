@@ -62,6 +62,16 @@
 #else
 #define RL_FP_FZ_HOST 0
 #endif
+/**
+ * @brief 1 where, in programs that produce FPSR flags on x86-64, FZ runs on the host's default mode: the host result and flags
+ * equal A64's whenever no operand and no result is denormal, nothing tiny underflowed to zero and the result is not the
+ * smallest normal (rl_fz_slow); those cases take the exact path. No MXCSR write is needed and the sticky flags stay the host's.
+ */
+#if defined(__x86_64__) && defined(RL_FP_FLAGS)
+#define RL_FP_FZ_CHECK 1
+#else
+#define RL_FP_FZ_CHECK 0
+#endif
 
 /**
  * @brief Exact-flags mode: a bit of c->fpcr that is RES0 in the architecture
@@ -824,12 +834,22 @@ RL_RUNTIME_API RL_FP_COLD uint64_t rl_fp64_sqrt_cold(uint64_t a);
 #define RL_FP_FLAGS_ON 0
 #endif
 
-/** @brief The host's sticky FP flags as FPSR bits IOC, DZC, OFC, UFC, IXC (and IDC on arm64). */
+/**
+ * @brief x86-64 only: the thread's sticky FPSR.IDC (0x80), which MXCSR cannot hold (its DE flag is set by every denormal
+ * operand, FZ or not). Raised by the exact path when FZ flushes an input; read by MRS FPSR and cleared by MSR FPSR.
+ */
+RL_RUNTIME_API uint32_t rl_fp_idc_get(void);
+/** @brief Sets the thread's sticky IDC (x86-64). */
+RL_RUNTIME_API void rl_fp_idc_raise(void);
+/** @brief Clears the thread's sticky IDC (x86-64). */
+RL_RUNTIME_API void rl_fp_idc_clear(void);
+
+/** @brief The host's sticky FP flags as FPSR bits IOC, DZC, OFC, UFC, IXC (and IDC). */
 static inline uint32_t rl_fp_host_flags(void)
 {
 #if defined(__x86_64__)
     unsigned m = _mm_getcsr();
-    return (m & 1u) | ((m >> 1) & 0x1Eu);
+    return (m & 1u) | ((m >> 1) & 0x1Eu) | rl_fp_idc_get();
 #elif defined(__aarch64__)
     uint64_t v;
     __asm__ volatile("mrs %0, fpsr" : "=r"(v));
@@ -844,6 +864,7 @@ static inline void rl_fp_host_clear(void)
 {
 #if defined(__x86_64__)
     _mm_setcsr(_mm_getcsr() & ~0x3Fu);
+    rl_fp_idc_clear();
 #elif defined(__aarch64__)
     __asm__ volatile("msr fpsr, xzr" ::: "memory");
 #endif
@@ -937,7 +958,7 @@ static inline int rl_fp_fastz(uint32_t fpcr, const uint32_t *fpsr)
     (void)fpcr;
     return fpsr == 0;
 #else
-    return fpsr == 0 && (fpcr & (RL_FPCR_MODE & ~(RL_FP_FZ_HOST ? RL_FPCR_FZ : 0u))) == 0;
+    return fpsr == 0 && (fpcr & (RL_FPCR_MODE & ~((RL_FP_FZ_HOST || RL_FP_FZ_CHECK) ? RL_FPCR_FZ : 0u))) == 0;
 #endif
 }
 
@@ -1011,6 +1032,46 @@ static inline int rl_fp_flags_fixup(uint64_t u, unsigned bits, int tiny)
 #define RL_FP_NEEDS_SLOW_(U, u, r, tiny) (rl_fp_nan_fixup() && RL_UNLIKELY((r) != (r)))
 #endif
 
+/** @brief The host's sticky flags before an operation whose flags may have to be undone (x86-64 CHECK mode), else 0. */
+static inline uint32_t rl_fz_save(void)
+{
+#if RL_FP_FZ_CHECK
+    return _mm_getcsr();
+#else
+    return 0;
+#endif
+}
+
+/** @brief Puts the sticky flags back as rl_fz_save read them: the exact path then raises its own. */
+static inline void rl_fz_restore(uint32_t csr)
+{
+#if RL_FP_FZ_CHECK
+    _mm_setcsr((_mm_getcsr() & ~0x3Fu) | (csr & 0x3Fu));
+#else
+    (void)csr;
+#endif
+}
+
+/** @brief Whether the bits v of a binary32 or binary64 (bits wide) are a nonzero denormal. */
+static inline int rl_fz_denorm(unsigned bits, uint64_t v)
+{
+    uint64_t mag = bits == 32 ? (v & 0x7FFFFFFFu) : (v & 0x7FFFFFFFFFFFFFFFull);
+    uint64_t one = bits == 32 ? 0x00800000u : 0x0010000000000000ull;
+    return mag != 0 && mag < one;
+}
+
+/**
+ * @brief Under FZ, whether the host's result u of a, b (a * b + c for a fused operation passes c as b's partner by the
+ * caller) needs the exact path: an operand or the result is denormal, or (tiny) a result of zero from two nonzero
+ * operands (a multiplication or division that underflowed). The sticky flags then are the host's own for the cases left.
+ */
+static inline int rl_fz_slow(unsigned bits, int tiny, uint64_t a, uint64_t b, uint64_t u)
+{
+    uint64_t m = bits == 32 ? 0x7FFFFFFFu : 0x7FFFFFFFFFFFFFFFull;
+    return rl_fz_denorm(bits, a) || rl_fz_denorm(bits, b) || rl_fz_denorm(bits, u) ||
+           (tiny && (((u & m) == 0 && (a & m) != 0 && (b & m) != 0) || (u & m) == (bits == 32 ? 0x00800000u : 0x0010000000000000ull)));
+}
+
 #if RL_FP_FZ_HOST
 /* Host flush-to-zero around one operation: operands tied after the mode is set, the result before it is restored. */
 #define RL_FZ_BEGIN(fpcr, x, y)                                                        \
@@ -1031,16 +1092,27 @@ static inline int rl_fp_flags_fixup(uint64_t u, unsigned bits, int tiny)
     (fz_ && (tiny) && ((sizeof(U) == 4 ? (uint64_t)(u) & 0x7FFFFFFFu : (uint64_t)(u) & 0x7FFFFFFFFFFFFFFFull) ==   \
                        (sizeof(U) == 4 ? 0x00800000u : 0x0010000000000000ull)))
 #else
-#define RL_FZ_BEGIN(fpcr, x, y) const int fz_ = 0
+#if RL_FP_FZ_CHECK
+#define RL_FZ_BEGIN(fpcr, x, y) \
+    const int fz_ = ((fpcr) & RL_FPCR_FZ) != 0; \
+    const uint32_t csr_ = fz_ ? rl_fz_save() : 0
 #define RL_FZ_END(r) (void)fz_
+#define RL_FZ_TINY(U, u, tiny) \
+    (fz_ && rl_fz_slow(sizeof(U) * 8, (tiny), (uint64_t)a, (uint64_t)b, (uint64_t)(u)) && (rl_fz_restore(csr_), 1))
+#else
+#define RL_FZ_BEGIN(fpcr, x, y) \
+    const int fz_ = 0;          \
+    const uint32_t csr_ = 0
+#define RL_FZ_END(r) ((void)fz_, (void)csr_)
 #define RL_FZ_TINY(U, u, tiny) 0
+#endif
 #endif
 
 #define RL_FP_RESULT_(slow, U, r, tiny)                                                \
     do {                                                                               \
         U u_;                                                                          \
         memcpy(&u_, &r, sizeof u_);                                                    \
-        if (RL_FP_NEEDS_SLOW_(U, u_, r, tiny) || RL_FZ_TINY(U, u_, tiny))              \
+        if (RL_FZ_TINY(U, u_, tiny) || RL_FP_NEEDS_SLOW_(U, u_, r, tiny))              \
             u_ = fpcr == 0 && fpsr == 0 ? slow##_cold(a, b) : slow(a, b, fpcr, fpsr);  \
         RL_FP_OPAQUE(u_);                                                              \
         return u_;                                                                     \
@@ -1098,9 +1170,12 @@ static inline uint32_t rl_fmuladd32(uint32_t addend, uint32_t a, uint32_t b, uin
     memcpy(&z, &addend, 4);
     memcpy(&x, &a, 4);
     memcpy(&y, &b, 4);
+    const uint32_t csr_ = (RL_FP_FZ_CHECK && (fpcr & RL_FPCR_FZ)) ? rl_fz_save() : 0;
     r = __builtin_fmaf(x, y, z);
     memcpy(&u, &r, 4);
-    if (RL_FP_NEEDS_SLOW_(uint32_t, u, r, 1))
+    if ((RL_FP_FZ_CHECK && (fpcr & RL_FPCR_FZ) &&
+         (rl_fz_slow(32, 1, a, b, u) || rl_fz_denorm(32, addend)) && (rl_fz_restore(csr_), 1)) ||
+        RL_FP_NEEDS_SLOW_(uint32_t, u, r, 1))
         u = fpcr == 0 && fpsr == 0 ? rl_fp32_muladd_cold(addend, a, b) : rl_fp32_muladd(addend, a, b, fpcr, fpsr);
     RL_FP_OPAQUE(u);
     return u;
@@ -1120,9 +1195,12 @@ static inline uint64_t rl_fmuladd64(uint64_t addend, uint64_t a, uint64_t b, uin
     memcpy(&z, &addend, 8);
     memcpy(&x, &a, 8);
     memcpy(&y, &b, 8);
+    const uint32_t csr_ = (RL_FP_FZ_CHECK && (fpcr & RL_FPCR_FZ)) ? rl_fz_save() : 0;
     r = __builtin_fma(x, y, z);
     memcpy(&u, &r, 8);
-    if (RL_FP_NEEDS_SLOW_(uint64_t, u, r, 1))
+    if ((RL_FP_FZ_CHECK && (fpcr & RL_FPCR_FZ) &&
+         (rl_fz_slow(64, 1, a, b, u) || rl_fz_denorm(64, addend)) && (rl_fz_restore(csr_), 1)) ||
+        RL_FP_NEEDS_SLOW_(uint64_t, u, r, 1))
         u = fpcr == 0 && fpsr == 0 ? rl_fp64_muladd_cold(addend, a, b) : rl_fp64_muladd(addend, a, b, fpcr, fpsr);
     RL_FP_OPAQUE(u);
     return u;
@@ -1143,7 +1221,7 @@ static inline uint32_t rl_fsqrt32(uint32_t a, uint32_t fpcr, uint32_t *fpsr)
     r = __builtin_sqrtf(x);
     RL_FZ_END(r);
     memcpy(&u, &r, 4);
-    if (RL_FP_NEEDS_SLOW_(uint32_t, u, r, 0))
+    if ((RL_FP_FZ_CHECK && fz_ && rl_fz_denorm(32, a) && (rl_fz_restore(csr_), 1)) || RL_FP_NEEDS_SLOW_(uint32_t, u, r, 0))
         u = fpcr == 0 && fpsr == 0 ? rl_fp32_sqrt_cold(a) : rl_fp32_sqrt(a, fpcr, fpsr);
     RL_FP_OPAQUE(u);
     return u;
@@ -1161,7 +1239,7 @@ static inline uint64_t rl_fsqrt64(uint64_t a, uint32_t fpcr, uint32_t *fpsr)
     r = __builtin_sqrt(x);
     RL_FZ_END(r);
     memcpy(&u, &r, 8);
-    if (RL_FP_NEEDS_SLOW_(uint64_t, u, r, 0))
+    if ((RL_FP_FZ_CHECK && fz_ && rl_fz_denorm(64, a) && (rl_fz_restore(csr_), 1)) || RL_FP_NEEDS_SLOW_(uint64_t, u, r, 0))
         u = fpcr == 0 && fpsr == 0 ? rl_fp64_sqrt_cold(a) : rl_fp64_sqrt(a, fpcr, fpsr);
     RL_FP_OPAQUE(u);
     return u;
