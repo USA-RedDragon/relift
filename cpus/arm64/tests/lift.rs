@@ -401,3 +401,52 @@ fn an_mrs_of_an_id_register_reads_the_features_where_the_os_answers_it() {
         "no OS answers it"
     );
 }
+
+/// Runs `word` with FPCR = FZ (the mode games run in) and returns how it ended: Some(trap code) when a guard sent it to a slow path.
+fn trap_under_fz(word: u32, s: &mut State) -> Option<u32> {
+    let mut m = mem();
+    s.regs[regs::FPCR.index()] = 1u128 << 24;
+    let b = lift(word, PC, &ALL).expect("lifts");
+    match interp::run(&b, s, &mut m, &mut NoIntrinsics)
+        .expect("runs")
+        .flow
+    {
+        Flow::Trap(code) => Some(code),
+        _ => None,
+    }
+}
+
+#[test]
+fn fmov_fabs_and_fneg_never_leave_the_fast_path_under_fz() {
+    // FMOV, FABS, FNEG of a register: scalar single and double, and the vector FABS and FNEG: no FPCR bit changes their result.
+    for word in [
+        0x1e204041u32, // fmov s1, s2
+        0x1e20c041,    // fabs s1, s2
+        0x1e214041,    // fneg s1, s2
+        0x1e604041,    // fmov d1, d2
+        0x1e60c041,    // fabs d1, d2
+        0x1e614041,    // fneg d1, d2
+        0x4ea0f841,    // fabs v1.4s, v2.4s
+        0x6ea0f841,    // fneg v1.4s, v2.4s
+    ] {
+        let mut s = state();
+        assert_eq!(
+            trap_under_fz(word, &mut s),
+            None,
+            "{word:#010x} left for a slow path"
+        );
+    }
+}
+
+#[test]
+fn arithmetic_does_leave_the_fast_path_under_fz_today() {
+    // FADD, FMUL, FMADD: the templates assume FPCR zero (the exact slow path handles FZ). This pins that down until the fast path takes FZ.
+    for word in [0x1e222820u32, 0x1e220820, 0x1f020c20] {
+        let mut s = state();
+        assert_eq!(
+            trap_under_fz(word, &mut s),
+            Some(sail::SLOW_FPCR),
+            "{word:#010x}"
+        );
+    }
+}

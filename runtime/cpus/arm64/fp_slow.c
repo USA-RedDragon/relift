@@ -758,7 +758,9 @@ static void stat_count(uint32_t insn, uint32_t fpcr)
     }
     if (!on)
         return;
-    uint64_t key = ((uint64_t)(insn & 0xFFE0FC00u) << 32) | fpcr;
+    /* The register fields are cleared (rd, rn, and rm or ra where they are registers); a one-source form keeps bits 20:15 (its opcode). */
+    uint32_t form = (insn & 0x00007C00u) == 0x00004000u ? insn & ~0x3FFu : insn & ~0x1F3FFu & ~0x7C00u;
+    uint64_t key = ((uint64_t)form << 32) | fpcr;
     uint32_t h = (uint32_t)((key * 0x9E3779B97F4A7C15ull) >> 52);
     for (uint32_t i = 0; i < STAT_SLOTS; i++) {
         uint32_t j = (h + i) % STAT_SLOTS;
