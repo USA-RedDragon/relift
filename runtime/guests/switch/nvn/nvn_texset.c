@@ -92,6 +92,18 @@ static struct {
     uint64_t why_texture, why_view, why_image;
     uint8_t *rewritten;
     uint64_t distinct;
+    /**
+     * @brief The slot ring for handles a program reads from a bank (their slot is host-chosen: the bank copy holds it, not
+     * the id): slots ring_lo to ring_lo + ring_n, each free once the batch that last used it has finished (slot_seq: the
+     * serial of that batch, UINT64_MAX while a draw bound to it is not yet in a batch). dyn_of maps an id below the pinned
+     * ones to its ring slot plus one, ring_owner a ring slot to its id plus one.
+     */
+    uint32_t ring_lo, ring_n, ring_cur;
+    uint64_t *slot_seq;
+    uint32_t *dyn_of, *ring_owner;
+    uint64_t ring_taken, ring_exhausted;
+    /** @brief The bind now being made reads its handle from a bank (nvn_texset_bind, nvn_texset_separate_texture): it may take a ring slot. */
+    bool dynamic;
     /** @brief The kind of each texture id's bound view (its format's sampled type). */
     uint32_t *tex_kind;
     uint8_t (*tex_view)[17];
@@ -301,7 +313,13 @@ static bool make(void)
     t.tex_target = calloc(t.ntex, sizeof *t.tex_target);
     t.tex_layer = calloc(t.ntex, sizeof *t.tex_layer);
     t.tex_layers = calloc(t.ntex, sizeof *t.tex_layers);
-    bool slots_ok = nvn_slots_init(&t.slots, t.ntex, 1u << 20, t.ntex - t.ntex / 16);
+    uint32_t pinned = t.ntex - t.ntex / 16, dyn = t.ntex - pinned;
+    t.ring_n = dyn / 2;
+    t.ring_lo = t.ntex - t.ring_n;
+    t.slot_seq = calloc(t.ntex, sizeof *t.slot_seq);
+    t.dyn_of = calloc(pinned ? pinned : 1, sizeof *t.dyn_of);
+    t.ring_owner = calloc(t.ntex, sizeof *t.ring_owner);
+    bool slots_ok = nvn_slots_init(&t.slots, t.ntex - t.ring_n, 1u << 20, pinned) && t.slot_seq && t.dyn_of && t.ring_owner;
     t.is_synced = calloc(t.ntex, sizeof *t.is_synced);
     t.img_done = calloc(t.ntex, sizeof *t.img_done);
     t.img_surface = calloc(t.ntex, sizeof *t.img_surface);
@@ -678,6 +696,9 @@ static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t l
  * @brief The slot of texture id: its own number below the pinned ids, else the one it holds, or a free one, or the
  * next in turn after the work that may use it has run. A texture registered as an image needs one below nimg.
  */
+/** @brief Whether a ring slot may be rewritten while earlier batches run: the set's descriptors take updates while pending. */
+static bool g_ring_ok(void) { return g.unused_while_pending; }
+
 /**
  * @brief Waits for the device when work not yet known to be finished may read slot sl's descriptors (a draw that bound it, or
  * a program that reads handles from memory, since the last full flush); false when the device failed. A slot no unfinished
@@ -705,6 +726,7 @@ static void slot_busy(uint32_t sl)
     if (t.tex_epoch[sl] != SLOT_BUSY)
         t.bound[t.nbound++] = sl;
     t.tex_epoch[sl] = SLOT_BUSY;
+    t.slot_seq[sl] = UINT64_MAX;
 }
 
 void nvn_texset_uses_recorded(void)
@@ -712,9 +734,12 @@ void nvn_texset_uses_recorded(void)
     if (!t.ok)
         return;
     uint64_t epoch = nvn_vk_flush_epoch();
+    uint64_t batch = nvn_vk_submitted() + 1;
     for (uint32_t i = 0; i < t.nbound; i++)
-        if (t.tex_epoch[t.bound[i]] == SLOT_BUSY)
+        if (t.tex_epoch[t.bound[i]] == SLOT_BUSY) {
             t.tex_epoch[t.bound[i]] = epoch;
+            t.slot_seq[t.bound[i]] = batch;
+        }
     t.nbound = 0;
     if (t.bindless_busy) {
         t.bindless_epoch = epoch;
@@ -739,8 +764,48 @@ void nvn_texset_rebinds(uint64_t *flushed, uint64_t *free_of_wait)
     *free_of_wait = t.rebind_free;
 }
 
+/**
+ * @brief A ring slot no unfinished batch uses; its old owner loses it. When every slot is in use by work not yet finished the
+ * device is waited for (counted as exhausted). UINT32_MAX when the device failed.
+ */
+static uint32_t ring_take(replay *r)
+{
+    for (int pass = 0; pass < 2; pass++) {
+        uint64_t finished = nvn_vk_finished();
+        for (uint32_t i = 0; i < t.ring_n; i++) {
+            uint32_t sl = t.ring_lo + t.ring_cur;
+            t.ring_cur = (t.ring_cur + 1) % t.ring_n;
+            if (t.slot_seq[sl] > finished)
+                continue;
+            if (t.ring_owner[sl])
+                t.dyn_of[t.ring_owner[sl] - 1] = 0;
+            t.ring_owner[sl] = 0;
+            t.ring_taken++;
+            return sl;
+        }
+        if (pass == 0) {
+            t.ring_exhausted++;
+            if (!nvn_vk_flush(r))
+                return UINT32_MAX;
+        }
+    }
+    return UINT32_MAX;
+}
+
+vimg *nvn_texset_slot_image(uint32_t slot) { return t.ok && slot < t.ntex ? t.tex_img[slot] : NULL; }
+
+void nvn_texset_ring_stats(uint64_t *taken, uint64_t *exhausted)
+{
+    *taken = t.ring_taken;
+    *exhausted = t.ring_exhausted;
+}
+
 static int slot_for(replay *r, uint32_t id, bool image, uint32_t *slot)
 {
+    if (t.dynamic && !image && id < t.slots.pinned && t.ring_n && g_ring_ok()) {
+        *slot = t.dyn_of[id] ? t.dyn_of[id] - 1 : UINT32_MAX;
+        return RL_OK;
+    }
     uint32_t evicted;
     *slot = nvn_slots_take(&t.slots, id, &evicted);
     if (*slot == UINT32_MAX)
@@ -793,6 +858,10 @@ void nvn_texset_texture_gone(uint64_t tex)
         if (t.tex_guest[ts] == tex) {
             t.tex_guest[ts] = 0;
             t.img_done[ts] = false;
+            if (t.ring_owner[ts]) {
+                t.dyn_of[t.ring_owner[ts] - 1] = 0;
+                t.ring_owner[ts] = 0;
+            }
             nvn_slots_free(&t.slots, ts);
         }
     nvn_unlock();
@@ -832,6 +901,7 @@ static int bind_unwritten(replay *r, uint32_t id, uint32_t sid, uint32_t *kind, 
                           "a sampled handle names texture id %u, which no texture was registered under: it reads zeros",
                           id))
         return nvn_vk_stop(r, "texture id %u is not registered", id);
+    t.dynamic = false;
     int src = slot_for(r, id, false, slot);
     if (src != RL_OK)
         return src;
@@ -912,7 +982,8 @@ static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_
     if (src != RL_OK)
         return src;
     uint32_t sl = *slot;
-    uint64_t was_used = t.tex_epoch[sl];
+    bool ring = sl == UINT32_MAX || (sl >= t.ring_lo && t.ring_n && sl < t.ring_lo + t.ring_n && t.ring_owner[sl] == id + 1);
+    uint64_t was_used = sl == UINT32_MAX ? 0 : t.tex_epoch[sl];
     view[16] = has_view;
     vimg *v = nvn_vk_image(r, tex);
     if (!v)
@@ -922,7 +993,7 @@ static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_
         return nvn_vk_stop(r, "cannot refill texture id %u from its storage", id);
     if (image)
         nvn_vk_written(v);
-    if (t.tex_img[sl] == v && t.tex_guest[sl] == tex && !memcmp(t.tex_view[sl], view, sizeof view)) {
+    if (sl != UINT32_MAX && t.tex_img[sl] == v && t.tex_guest[sl] == tex && !memcmp(t.tex_view[sl], view, sizeof view)) {
         slot_busy(sl);
         nvn_vk_dispatch_image(v, t.tex_level[sl], image, t.tex_layer[sl], t.tex_layers[sl], image);
         *kind = t.tex_kind[sl];
@@ -951,8 +1022,23 @@ static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_
     if ((*dim == DIM_2D_MS || *dim == DIM_2D_MS_ARRAY) != (nvn_vk_sample_bits(&v->d) != VK_SAMPLE_COUNT_1_BIT))
         return nvn_vk_stop(r, "texture id %u of %u samples is registered as a view of target %u", id, v->d.samples,
                            has_view && nv.has_target ? nv.target : v->d.target);
+    if (ring) {
+        /* the id's new descriptor goes into a slot nothing unfinished reads; the old slot keeps what the batches in flight use */
+        sl = ring_take(r);
+        if (sl == UINT32_MAX)
+            return nvn_vk_stop(r, "the host device failed a submit");
+        *slot = sl;
+        t.dyn_of[id] = sl + 1;
+        t.ring_owner[sl] = id + 1;
+        if (t.tex_img[sl])
+            t.why_texture++;
+        t.tex_img[sl] = NULL;
+        t.tex_guest[sl] = 0;
+        t.img_done[sl] = false;
+        was_used = 0;
+    }
     t.tex_epoch[sl] = was_used;
-    if (t.tex_img[sl]) {
+    if (!ring && t.tex_img[sl]) {
         if (t.tex_guest[sl] != tex)
             t.why_texture++;
         else if (t.tex_img[sl] != v)
@@ -964,7 +1050,7 @@ static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_
             t.distinct++;
         }
     }
-    if (t.tex_img[sl] && !slot_settle(r, sl))
+    if (!ring && t.tex_img[sl] && !slot_settle(r, sl))
         return nvn_vk_stop(r, "the host device failed a submit");
     slot_busy(sl);
     for (uint32_t d = 0; d < DIMS; d++)
@@ -1035,7 +1121,10 @@ static int bind_texture(replay *r, uint32_t handle, uint32_t *kind, uint32_t *di
 
 int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, uint32_t *slot)
 {
-    return bind_texture(r, handle, kind, dim, slot, true, false);
+    t.dynamic = true;
+    int rc = bind_texture(r, handle, kind, dim, slot, true, false);
+    t.dynamic = false;
+    return rc;
 }
 
 int nvn_texset_separate_texture(replay *r, uint32_t handle, uint32_t *slot)
@@ -1047,7 +1136,10 @@ int nvn_texset_separate_texture(replay *r, uint32_t handle, uint32_t *slot)
         return RL_OK;
     }
     uint32_t kind, dim;
-    return bind_texture(r, handle, &kind, &dim, slot, false, false);
+    t.dynamic = true;
+    int rc = bind_texture(r, handle, &kind, &dim, slot, false, false);
+    t.dynamic = false;
+    return rc;
 }
 
 bool nvn_texset_view_fits(const vimg *v, const nvn_view *nv)

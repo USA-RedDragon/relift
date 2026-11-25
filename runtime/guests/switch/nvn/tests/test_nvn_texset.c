@@ -558,10 +558,10 @@ TEST(nvn_texset_a_slot_no_unfinished_work_used_is_rewritten_without_waiting)
     uint32_t slot, kind, dim;
     c.x[1] = 31;
     c.x[3] = 0;
-    /* a texture under id 31, drawn with and in a batch that is then flushed */
+    /* a texture under id 31 bound as an image (an id-slotted bind: handles a program reads from memory and images keep slot == id), in a batch that is then flushed */
     c.x[2] = texa;
     nvnh_nvnTexturePoolRegisterTexture(&c, mem);
-    CHECK_EQ(nvn_texset_bind(&r, 31u, &kind, &dim, &slot), RL_OK);
+    CHECK_EQ(nvn_texset_image(&r, 31u, &slot, &kind, &dim), RL_OK);
     nvn_texset_uses_recorded();
     CHECK(nvn_vk_flush(&r));
     nvn_texset_rebinds(&fl0, &free0);
@@ -569,7 +569,7 @@ TEST(nvn_texset_a_slot_no_unfinished_work_used_is_rewritten_without_waiting)
     c.x[2] = texb;
     c.x[1] = 31;
     nvnh_nvnTexturePoolRegisterTexture(&c, mem);
-    CHECK_EQ(nvn_texset_bind(&r, 31u, &kind, &dim, &slot), RL_OK);
+    CHECK_EQ(nvn_texset_image(&r, 31u, &slot, &kind, &dim), RL_OK);
     nvn_texset_rebinds(&fl, &fr);
     CHECK_EQ(fl, fl0);
     CHECK_EQ(fr, free0 + 1);
@@ -578,7 +578,7 @@ TEST(nvn_texset_a_slot_no_unfinished_work_used_is_rewritten_without_waiting)
     c.x[2] = texa;
     c.x[1] = 31;
     nvnh_nvnTexturePoolRegisterTexture(&c, mem);
-    CHECK_EQ(nvn_texset_bind(&r, 31u, &kind, &dim, &slot), RL_OK);
+    CHECK_EQ(nvn_texset_image(&r, 31u, &slot, &kind, &dim), RL_OK);
     nvn_texset_rebinds(&fl, &fr);
     CHECK_EQ(fl, fl0 + 1);
     CHECK_EQ(fr, free0 + 1);
@@ -586,9 +586,81 @@ TEST(nvn_texset_a_slot_no_unfinished_work_used_is_rewritten_without_waiting)
     c.x[2] = texb;
     c.x[1] = 31;
     nvnh_nvnTexturePoolRegisterTexture(&c, mem);
-    CHECK_EQ(nvn_texset_bind(&r, 31u, &kind, &dim, &slot), RL_OK);
+    CHECK_EQ(nvn_texset_image(&r, 31u, &slot, &kind, &dim), RL_OK);
     nvn_texset_rebinds(&fl, &fr);
     CHECK_EQ(fl, fl0 + 2);
+    CHECK(nvn_vk_flush(&r));
+}
+
+TEST(nvn_texset_a_bank_handle_rebound_while_an_earlier_batch_uses_it_gets_a_new_slot_and_leaves_the_old_one)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes))
+        return;
+    CHECK(nvn_texset_layout());
+    if (!hos.vm.host_page) {
+        hos.vm.host_page = 4096;
+        hos.vm.size = 0x10000;
+    }
+    static rl_ctx c;
+    static uint8_t mem[0x10000];
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    static replay r;
+    memset(&r, 0, sizeof r);
+    r.c = &c;
+    r.mem = mem;
+    r.st = &st;
+    const uint64_t pool = 0x100, texa = 0x200, texb = 0x300;
+    CHECK(nvn_pool_make(pool, 0, 0x10000, 0x2a1));
+    nvn_tex_desc da = { .target = 1, .format = 37, .width = 4, .height = 4, .depth = 1, .levels = 1, .flags = 1u << 4,
+                        .stride = 32, .pool = pool, .offset = 0x4000 };
+    nvn_tex_desc db = da;
+    db.offset = 0x6000;
+    CHECK(nvn_tex_layout(&da));
+    CHECK(nvn_tex_layout(&db));
+    CHECK(nvn_texture_record(texa, &da, NULL));
+    CHECK(nvn_texture_record(texb, &db, NULL));
+    if (!g.unused_while_pending) {
+        printf("  skipped: the host device cannot rewrite descriptors while batches are pending\n");
+        return;
+    }
+    uint64_t fl0, free0, fl, fr, taken0, exh0, taken, exh;
+    uint32_t s1, s2, s3, kind, dim;
+    c.x[1] = 31;
+    c.x[3] = 0;
+    c.x[2] = texa;
+    nvnh_nvnTexturePoolRegisterTexture(&c, mem);
+    CHECK_EQ(nvn_texset_bind(&r, 31u, &kind, &dim, &s1), RL_OK);
+    nvn_texset_uses_recorded();
+    nvn_texset_rebinds(&fl0, &free0);
+    nvn_texset_ring_stats(&taken0, &exh0);
+    vimg *ia = nvn_texset_slot_image(s1);
+    CHECK(ia != NULL);
+    /* another texture under the same id while the batch that bound the first is not finished: a new slot, no wait */
+    c.x[1] = 31;
+    c.x[2] = texb;
+    nvnh_nvnTexturePoolRegisterTexture(&c, mem);
+    CHECK_EQ(nvn_texset_bind(&r, 31u, &kind, &dim, &s2), RL_OK);
+    nvn_texset_uses_recorded();
+    CHECK(s2 != s1);
+    nvn_texset_rebinds(&fl, &fr);
+    CHECK_EQ(fl, fl0);
+    nvn_texset_ring_stats(&taken, &exh);
+    CHECK_EQ(taken, taken0 + 1);
+    CHECK_EQ(exh, exh0);
+    /* what the first batch reads is untouched: slot s1 still holds the first image */
+    CHECK(nvn_texset_slot_image(s1) == ia);
+    CHECK(nvn_texset_slot_image(s2) != NULL && nvn_texset_slot_image(s2) != ia);
+    /* back to the first texture: again a slot of its own, never one an unfinished batch reads */
+    c.x[1] = 31;
+    c.x[2] = texa;
+    nvnh_nvnTexturePoolRegisterTexture(&c, mem);
+    CHECK_EQ(nvn_texset_bind(&r, 31u, &kind, &dim, &s3), RL_OK);
+    nvn_texset_uses_recorded();
+    CHECK(s3 != s1 && s3 != s2);
+    nvn_texset_rebinds(&fl, &fr);
+    CHECK_EQ(fl, fl0);
     CHECK(nvn_vk_flush(&r));
 }
 
