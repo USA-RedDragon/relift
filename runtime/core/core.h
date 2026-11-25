@@ -725,6 +725,13 @@ RL_RUNTIME_API void rl_report_set_guest(const rl_report_guest *g);
  * build <id>`). A key may repeat. Copies both; up to 64 lines.
  */
 RL_RUNTIME_API void rl_report_info(const char *key, const char *value);
+/** @brief Calls fn for each header line rl_report_info kept (the build stamp: version, game, mods, build digest, modules). */
+RL_RUNTIME_API void rl_report_info_each(void (*fn)(void *user, const char *key, const char *value), void *user);
+/**
+ * @brief Copies the last `lines` log lines (at most 512 are kept, each cut to 319 characters; development builds
+ * with the debug stub only) as text into out, oldest first, and returns the bytes written. Whole lines only.
+ */
+RL_RUNTIME_API size_t rl_log_tail(char *out, size_t size, size_t lines);
 /** @brief Adds a module header line and the module range used for `name+0xoff` of any guest address. */
 RL_RUNTIME_API void rl_report_module(const char *name, uint64_t base, uint64_t size, const char *build_id);
 /** @brief Forgets the header lines and modules (tests). */

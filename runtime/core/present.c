@@ -25,6 +25,7 @@
 
 #include <errno.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <sys/stat.h>
 #ifdef _WIN32
 #include <direct.h>
@@ -1607,6 +1608,16 @@ static void *thread_main(void *arg)
     return NULL;
 }
 
+/** @brief The newest open presenter, for rl_present_last_picture; cleared by rl_present_close. */
+static _Atomic(rl_present *) g_last_open;
+
+uint8_t *rl_present_last_picture(uint32_t timeout_ms, uint32_t *width, uint32_t *height)
+{
+    rl_present *p = atomic_load(&g_last_open);
+    *width = *height = 0;
+    return p ? rl_present_snapshot(p, timeout_ms, width, height) : NULL;
+}
+
 rl_present *rl_present_open(rl_window *w)
 {
     const rlvk_dev *d = rl_vkdev();
@@ -1630,6 +1641,7 @@ rl_present *rl_present_open(rl_window *w)
         rl_present_close(p);
         return NULL;
     }
+    atomic_store(&g_last_open, p);
     return p;
 }
 
@@ -1667,6 +1679,8 @@ static void free_objects(rl_present *p)
 
 void rl_present_close(rl_present *p)
 {
+    rl_present *self = p;
+    atomic_compare_exchange_strong(&g_last_open, &self, NULL);
     if (!p)
         return;
     if (p->pool && p->fence && p->acquired) {

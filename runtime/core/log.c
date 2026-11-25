@@ -5,7 +5,9 @@
  * shipped assets).
  */
 #include "core.h"
+#include "gdbstub.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -58,6 +60,13 @@ static uint64_t g_once[ONCE_SLOTS];
 static bool g_once_used[ONCE_SLOTS];
 
 static bool g_level_read;
+#if defined(RL_DEBUG_STUB)
+/** @brief The last log lines, for the diagnostic snapshot (rl_log_tail); guarded by the log lock. */
+#define RING_LINES 512u
+#define RING_COLS 320
+static char g_ring[RING_LINES][RING_COLS];
+static size_t g_ring_next;
+#endif
 
 rl_config *rl_cfg(void) { return &g_cfg; }
 
@@ -108,12 +117,46 @@ void rl_vlog(int level, const char *tag, const char *fmt, va_list ap)
     if (level < g_cfg.log_level)
         return;
     log_lock();
+#if defined(RL_DEBUG_STUB)
+    /* The diagnostic snapshot (snapshot.h) keeps the last lines: formatted once, written to both places. */
+    va_list again;
+    va_copy(again, ap);
+    char *slot = g_ring[g_ring_next++ % RING_LINES];
+    int head = snprintf(slot, RING_COLS, "[relift %s %s] ", names[level & 3], tag);
+    if (head > 0 && head < RING_COLS)
+        vsnprintf(slot + head, (size_t)(RING_COLS - head), fmt, again);
+    va_end(again);
+#endif
     fprintf(stderr, "[relift %s %s] ", names[level & 3], tag);
     vfprintf(stderr, fmt, ap);
     fputc('\n', stderr);
     fflush(stderr);
     log_unlock();
 }
+
+#if defined(RL_DEBUG_STUB)
+size_t rl_log_tail(char *out, size_t size, size_t lines)
+{
+    log_lock();
+    size_t have = g_ring_next < RING_LINES ? g_ring_next : RING_LINES;
+    if (lines > have)
+        lines = have;
+    size_t o = 0;
+    for (size_t i = g_ring_next - lines; i < g_ring_next; i++) {
+        const char *l = g_ring[i % RING_LINES];
+        size_t n = strlen(l);
+        if (o + n + 2 > size)
+            break;
+        memcpy(out + o, l, n);
+        out[o + n] = '\n';
+        o += n + 1;
+    }
+    log_unlock();
+    if (o < size)
+        out[o] = 0;
+    return o;
+}
+#endif
 
 void rl_log(int level, const char *tag, const char *fmt, ...)
 {

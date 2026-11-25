@@ -18,6 +18,7 @@
 #include <relift/abi_core.h>
 
 #include <stdbool.h>
+#include <stdio.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -183,6 +184,9 @@ RL_RUNTIME_API const char *rl_setting_str(const char *key);
  * key binding and rebinds that control when set.
  */
 RL_RUNTIME_API const char *rl_setting_binding(const char *key);
+
+/** @brief Writes every declared setting's effective value to out, one `key = value (default|env|set)` line each. */
+RL_RUNTIME_API void rl_settings_dump(FILE *out);
 
 /**
  * @brief Writes the schema of every declared setting as JSON into buf: an

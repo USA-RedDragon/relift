@@ -95,6 +95,12 @@ void rl_report_info(const char *key, const char *value)
     g_info_n++;
 }
 
+void rl_report_info_each(void (*fn)(void *user, const char *key, const char *value), void *user)
+{
+    for (uint32_t i = 0; i < g_info_n; i++)
+        fn(user, g_info[i].key, g_info[i].value);
+}
+
 void rl_report_module(const char *name, uint64_t base, uint64_t size, const char *build_id)
 {
     char v[256];

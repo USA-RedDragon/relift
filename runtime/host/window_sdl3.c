@@ -31,6 +31,7 @@
 #include "core.h"
 #include "hostlib.h"
 #include "present.h"
+#include "snapshot.h"
 
 #ifdef __ANDROID__
 #define VK_USE_PLATFORM_ANDROID_KHR
@@ -90,6 +91,8 @@ static SDL_Mutex *g_lock;
 static sdl_win *g_wins;
 static SDL_Gamepad *g_pads[RL_INPUT_PADS];
 static uint64_t g_keys[4];
+/** @brief Per pad: Minus and the right stick were both down at the last publish (the snapshot chord). */
+static bool g_chord[RL_INPUT_PADS];
 
 /** @brief The text entry panel: the window it is shown in, the picture under it and the panel's pixels. */
 static struct {
@@ -739,6 +742,8 @@ static void key_event(const SDL_Event *e)
         }
         return;
     }
+    if (e->key.scancode == SDL_SCANCODE_F12 && e->key.down && !e->key.repeat)
+        rl_snapshot_request();
     unsigned sc = (unsigned)e->key.scancode;
     if (sc >= 256)
         return;
@@ -792,6 +797,11 @@ static void publish(void)
         for (size_t b = 0; b < sizeof g_buttons / sizeof g_buttons[0]; b++)
             if (SDL_GetGamepadButton(g, g_buttons[b].sdl))
                 p->buttons |= 1u << g_buttons[b].rl;
+        /* The diagnostic snapshot's chord: Minus held, then a click of the right stick. */
+        bool chord = SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_BACK) && SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_RIGHT_STICK);
+        if (chord && !g_chord[i])
+            rl_snapshot_request();
+        g_chord[i] = chord;
         if (SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 16384)
             p->buttons |= 1u << RL_BTN_LEFT_TRIGGER;
         if (SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 16384)

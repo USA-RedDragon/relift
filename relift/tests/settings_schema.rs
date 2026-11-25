@@ -179,6 +179,7 @@ fn the_game_boy_schema_in_c_equals_the_lists_in_rust() {
                 | "present.flash"
                 | "debug.gdb"
                 | "debug.gdb_wait"
+                | "debug.snapshot"
                 | "text_entry.text"
                 | "text_entry.default"
                 | "text_entry.panel"

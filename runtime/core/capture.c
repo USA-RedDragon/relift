@@ -11,6 +11,7 @@
 #include "capture.h"
 #include "core.h"
 #include "hostlib.h"
+#include "snapshot.h"
 
 #include <relift/settings.h>
 
@@ -137,7 +138,11 @@ static void edge(bool done)
 
 void rl_capture_present_begin(void) { edge(false); }
 
-void rl_capture_present_end(void) { edge(true); }
+void rl_capture_present_end(void)
+{
+    edge(true);
+    rl_snapshot_present();
+}
 
 bool rl_capture_tool(void)
 {

@@ -309,6 +309,17 @@ pub fn runtime_settings() -> Vec<Setting> {
             SettingKind::Bool,
         ),
         s(
+            "debug.snapshot",
+            "Diagnostic snapshot presents",
+            "In a development build, F12, holding Minus while clicking the right stick, or a snapshot-now file in the save folder writes a snapshot folder (memory, GPU, batches, threads, the picture and the settings) covering that many presents after the trigger. 0: no trigger works",
+            Value::from(3),
+            SettingKind::Int {
+                min: 0,
+                max: 600,
+                step: 0,
+            },
+        ),
+        s(
             "text_entry.text",
             "Typed text",
             "When set, the answer to every text the game asks for (a name, for one), given without showing the text entry panel. Empty: a run with a window and no input script shows the panel",
@@ -1239,8 +1250,8 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(switch_section(Vec::new()).runtime.len(), 44);
-        assert_eq!(section(Vec::new()).runtime.len(), 43);
+        assert_eq!(switch_section(Vec::new()).runtime.len(), 45);
+        assert_eq!(section(Vec::new()).runtime.len(), 44);
     }
 
     #[test]

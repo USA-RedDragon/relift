@@ -303,6 +303,19 @@ picture the game makes itself; no image is scaled by relift",
         .def_int = 0,
     },
     {
+        .key = "debug.snapshot",
+        .type = RL_SETTING_INT,
+        .label = "Diagnostic snapshot presents",
+        .description = "In a development build, F12, holding Minus while clicking the right stick, or a "
+                       "snapshot-now file in the save folder writes a snapshot folder (memory, GPU, batches, "
+                       "threads, the picture and the settings) covering that many presents after the trigger. "
+                       "0: no trigger works",
+        .env = "RELIFT_DEBUG_SNAPSHOT",
+        .def_int = 3,
+        .min_int = 0,
+        .max_int = 600,
+    },
+    {
         .key = "text_entry.text",
         .type = RL_SETTING_STRING,
         .label = "Typed text",
@@ -1414,6 +1427,36 @@ const char *rl_setting_binding(const char *key)
     const char *r = s ? effective(s, &d)->s : "";
     pthread_mutex_unlock(&g_lock);
     return r;
+}
+
+void rl_settings_dump(FILE *out)
+{
+    pthread_mutex_lock(&g_lock);
+    for (size_t i = 0; i < g_nslots; i++) {
+        slot *s = &g_slots[i];
+        value d;
+        const value *v = effective(s, &d);
+        const char *src = s->envval.set ? "env" : s->val.set ? "set" : "default";
+        switch (s->def->type) {
+        case RL_SETTING_BOOL:
+            fprintf(out, "%s = %s (%s)\n", s->def->key, v->i ? "true" : "false", src);
+            break;
+        case RL_SETTING_INT:
+            fprintf(out, "%s = %lld (%s)\n", s->def->key, (long long)v->i, src);
+            break;
+        case RL_SETTING_FLOAT:
+            fprintf(out, "%s = %g (%s)\n", s->def->key, v->f, src);
+            break;
+        case RL_SETTING_ENUM:
+            fprintf(out, "%s = %s (%s)\n", s->def->key,
+                    v->i >= 0 && (size_t)v->i < s->def->nchoices ? s->def->choices[v->i] : "?", src);
+            break;
+        default:
+            fprintf(out, "%s = %s (%s)\n", s->def->key, v->s ? v->s : "", src);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g_lock);
 }
 
 typedef struct sink {

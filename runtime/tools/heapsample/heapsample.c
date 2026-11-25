@@ -8,7 +8,8 @@
  * (tools/heapsample/report.py). Two dumps taken a while apart in a steady scene name what grows.
  *
  * Build: cc -O2 -shared -fPIC -o heapsample.so tools/heapsample/heapsample.c -ldl
- * Run:   LD_PRELOAD=$PWD/heapsample.so <program>; kill -USR2 <pid> to dump.
+ * Run:   LD_PRELOAD=$PWD/heapsample.so <program>; kill -USR2 <pid> to dump. The diagnostic snapshot (core/snapshot.h)
+ * finds rl_heapsample_dump(path) here and writes its heap.txt with it.
  *
  * Linux with glibc only. Allocations made while the sampler itself runs (backtrace's first call) are not sampled.
  */
@@ -19,6 +20,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -219,18 +221,12 @@ static int by_live(const void *a, const void *b)
     return x->live < y->live ? 1 : x->live > y->live ? -1 : 0;
 }
 
-static void dump(void)
+/** @brief Writes the dump to path; false when the file cannot be made. */
+static bool dump_to(const char *path)
 {
-    char path[512];
-    const char *out = getenv("RELIFT_HEAPSAMPLE_OUT");
-    int n = atomic_fetch_add(&g_dumps, 1);
-    if (out)
-        snprintf(path, sizeof path, "%s.%d", out, n);
-    else
-        snprintf(path, sizeof path, "heapsample.%d.%d", (int)getpid(), n);
     int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd < 0)
-        return;
+        return false;
     static site *order[SITES];
     pthread_mutex_lock(&g_lock);
     uint32_t m = 0;
@@ -262,6 +258,34 @@ static void dump(void)
         close(mf);
     }
     close(fd);
+    return true;
+}
+
+static void dump(void)
+{
+    char path[512];
+    const char *out = getenv("RELIFT_HEAPSAMPLE_OUT");
+    int n = atomic_fetch_add(&g_dumps, 1);
+    if (out)
+        snprintf(path, sizeof path, "%s.%d", out, n);
+    else
+        snprintf(path, sizeof path, "heapsample.%d.%d", (int)getpid(), n);
+    dump_to(path);
+}
+
+/**
+ * @brief Writes a dump to path now, on the calling thread (the diagnostic snapshot looks this symbol up with dlsym);
+ * returns 0 when written, -1 when not.
+ */
+__attribute__((visibility("default"))) int rl_heapsample_dump(const char *path)
+{
+    if (!g_ready)
+        return -1;
+    int was = t_inside;
+    t_inside = 1;
+    bool ok = dump_to(path);
+    t_inside = was;
+    return ok ? 0 : -1;
 }
 
 void *malloc(size_t n)
