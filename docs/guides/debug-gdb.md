@@ -136,7 +136,7 @@ Where the program runs RSP microcode, thread 2 is the RSP, in the same register 
 
 ## Breakpoints
 
-On x86-64 Linux hosts the server takes breakpoints and write watchpoints. A breakpoint must be at the entry of a lifted function:
+On x86-64 and arm64 Linux hosts, Android included, the server takes breakpoints and write watchpoints. A breakpoint must be at the entry of a lifted function:
 
 ```text
 (gdb) break *0x8000000
@@ -150,7 +150,7 @@ Breakpoint 1, 0x0000000008000000 in ?? ()
 $1 = 0x8000000
 ```
 
-The server writes an `int3` over the first byte of the function's host code, and a thread that reaches it stops with exact registers and pc at the function. Three limits follow from that:
+The server writes a trap over the first instruction of the function's host code (`int3` on x86-64, `BRK` on arm64), and a thread that reaches it stops with exact registers and pc at the function. To go on, the server runs the one host instruction under the trap and sets the trap again: x86-64 steps it with the trap flag, and arm64, which has no such flag for a program, plants a second trap at every instruction that can run next, a branch's targets included. Three limits follow from the trap being at the function's entry:
 
 - A call clang inlined into its caller in the same shard has no entry to stop at. In the test program above, the function at `0x8000030` is called from the one at `0x8000000`; a breakpoint at `0x8000030` never hit and the program ran to its end, while one at `0x8000000` stopped. Break at the caller, or at a function the runtime calls (an entry, a callee of an indirect call).
 - A guest address that is not a function entry is refused.
@@ -278,5 +278,5 @@ The packets the server answers, its limits, the monitor commands and the registe
 ## Not available
 
 - No reads of the Nintendo 64's hardware registers and no Game Boy memory writes, as above.
-- Breakpoints and write watchpoints are x86-64 Linux only. On other hosts the server answers registers, memory and threads, and gdb reports the breakpoint as unsupported.
+- Breakpoints and write watchpoints are x86-64 and arm64 Linux (and Android) only, and Switch programs only. On other hosts and guests the server answers registers, memory and threads, and gdb reports the breakpoint as unsupported. The arm64 path was run under qemu-aarch64 and on an arm64 Android device.
 - No breakpoint at a guest address that is not a function entry, and none at a function clang inlined.

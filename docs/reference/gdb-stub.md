@@ -35,9 +35,24 @@ Every excerpt on this page is read from the source.
 | Most write watchpoints | <!-- docgen:const file=runtime/core/gdbstub.c name=MAX_WATCHES -->`16`<!-- /docgen:const --> |
 | Most frames of a guest backtrace | <!-- docgen:const file=runtime/core/gdbstub.c name=MAX_FRAMES -->`64`<!-- /docgen:const --> |
 
-Breakpoints and watchpoints exist on x86-64 Linux hosts only (the source
-defines `RL_GDB_TRAPS` there); on other hosts the server answers a `Z` packet
-with an empty reply, which gdb reports as unsupported.
+Breakpoints and watchpoints exist on x86-64 and arm64 Linux hosts, Android
+included (the source defines `RL_GDB_TRAPS` there); on other hosts the
+server answers a `Z` packet with an empty reply, which gdb reports as
+unsupported. What is host-specific is the trap instruction (`int3`, or
+`BRK #0x7e5`), where the trapped function's `rl_ctx` is (rdi, or x0) and how
+one host instruction is stepped: the x86-64 trap flag, or on arm64, which
+has no flag a signal handler can set:
+
+<!-- docgen:code file=runtime/core/gdbstub.c region=arm64-step -->
+```c
+* arm64 has no trap flag a signal handler can set (single-step is ptrace's), so one host instruction is stepped by
+* planting a second trap at every instruction that can run after it: the next one, or for a branch its targets from
+* the saved registers (B and BL, both ways of B.cond, CBZ, CBNZ, TBZ and TBNZ, and the register of BR, BLR and RET).
+* The instruction itself runs in place, so PC-relative ones (ADR, ADRP, LDR literal) are right. When one of the
+* planted traps is hit, all of them go and the breakpoint is set again, or the watched page closed again and a hit
+* reported.
+```
+<!-- /docgen:code -->
 
 ## How a stop works
 
@@ -271,9 +286,9 @@ static int break_set(uint64_t a, bool on)
     breakpoint *b = &G.bp[free_slot];
     b->guest = a;
     b->host = (uint8_t *)(uintptr_t)h.fn->fn;
-    b->orig = *b->host;
+    b->orig = code_at(b->host);
     b->on = true;
-    poke_code(b->host, 0xcc);
+    poke_code(b->host, TRAP_INSN);
     return 0;
 }
 ```
