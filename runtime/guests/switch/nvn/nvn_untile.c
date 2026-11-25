@@ -237,7 +237,7 @@ static bool move_at(replay *r, vimg *v, uint64_t addr, bool tile)
         return false;
     nvn_vk_begin(r);
     nvn_vk_barrier(g.cb);
-    VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipe);
+    nvn_cmd_bind_pipeline(VK_PIPELINE_BIND_POINT_COMPUTE, pipe);
     for (uint32_t l = 0; l < levels; l++) {
         uint32_t w = d->width >> l ? d->width >> l : 1, h = d->height >> l ? d->height >> l : 1;
         uint32_t dl = volume ? (d->depth >> l ? d->depth >> l : 1) : 1;
@@ -281,8 +281,8 @@ static bool move_at(replay *r, vimg *v, uint64_t addr, bool tile)
                           nvn_generation() == 1,
                           0,
                           { 0, 0 } };
-            VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, U.pl, 0, 1, &set, 0, NULL);
-            VK(vkCmdPushConstants)(g.cb, U.pl, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, &pc);
+            nvn_cmd_bind_sets(VK_PIPELINE_BIND_POINT_COMPUTE, U.pl, 0, 1, &set);
+            nvn_cmd_push(U.pl, VK_SHADER_STAGE_COMPUTE_BIT, sizeof pc, &pc);
             VK(vkCmdDispatch)(g.cb, (w + 7) / 8, (h + 7) / 8, dl);
         }
     }
@@ -470,7 +470,7 @@ static bool packed_at(replay *r, vimg *v, uint64_t addr)
         return false;
     nvn_vk_begin(r);
     nvn_vk_barrier(g.cb);
-    VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipe);
+    nvn_cmd_bind_pipeline(VK_PIPELINE_BIND_POINT_COMPUTE, pipe);
     VkBufferImageCopy bic[NVN_TEX_MAX_LEVELS];
     uint64_t at = 0;
     for (uint32_t l = 0; l < levels; l++) {
@@ -495,7 +495,7 @@ static bool packed_at(replay *r, vimg *v, uint64_t addr)
                           nvn_generation() == 1,
                           0,
                           { (uint32_t)out, (uint32_t)(out >> 32) } };
-            VK(vkCmdPushConstants)(g.cb, U.pl, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, &pc);
+            nvn_cmd_push(U.pl, VK_SHADER_STAGE_COMPUTE_BIT, sizeof pc, &pc);
             VK(vkCmdDispatch)(g.cb, (wb + 7) / 8, (hb + 7) / 8, dl);
         }
         bic[l] = (VkBufferImageCopy){ .bufferOffset = boff + at,

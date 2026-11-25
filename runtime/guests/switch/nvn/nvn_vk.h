@@ -421,6 +421,19 @@ bool nvn_dyn_changed(nvn_dyn state, const void *val, size_t n);
 /** @brief Forgets every shadowed value: the next set of each state is made. */
 void nvn_dyn_reset(void);
 
+/**
+ * @brief Binds the command buffer g.cb makes only where it would change what is bound: each of these skips a bind the
+ * recording command buffer already holds (the shadow is cleared with the dynamic states, when a command buffer begins
+ * or another pipeline takes over the state). Every bind of the layer's command buffer goes through them, so the shadow
+ * never misses one.
+ */
+void nvn_cmd_bind_pipeline(VkPipelineBindPoint at, VkPipeline p);
+/** @brief Sets [first, first + n) of layout, binding only the span from the first changed set to the last. */
+void nvn_cmd_bind_sets(VkPipelineBindPoint at, VkPipelineLayout layout, uint32_t first, uint32_t n, const VkDescriptorSet *sets);
+void nvn_cmd_push(VkPipelineLayout layout, VkShaderStageFlags flags, uint32_t nbytes, const void *bytes);
+void nvn_cmd_bind_vertex(uint32_t binding, VkBuffer buf, VkDeviceSize off);
+void nvn_cmd_bind_index(VkBuffer buf, VkDeviceSize off, VkIndexType type);
+
 /** @brief The host function of cmd, counted when nvn_vk_count_on is set. */
 static inline void (*nvn_vk_fn(unsigned cmd))(void)
 {

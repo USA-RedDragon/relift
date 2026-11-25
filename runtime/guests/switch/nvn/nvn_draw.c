@@ -191,7 +191,7 @@ static void bind_pools(VkPipelineBindPoint at, VkPipelineLayout layout, VkDescri
 {
     VkDescriptorSet s = has ? nvn_pools_set(d.slot) : NULL;
     if (s)
-        VK(vkCmdBindDescriptorSets)(g.cb, at, layout, NVN_POOL_SET, 1, &s, 0, NULL);
+        nvn_cmd_bind_sets(at, layout, NVN_POOL_SET, 1, &s);
 }
 
 static bool layouts(void)
@@ -1210,28 +1210,90 @@ static bool blank_buffer(void)
     return d.blank || nvn_vk_gpu_buffer(&d.blank, &d.blank_mem, 16);
 }
 
+/** @brief Two descriptor sets found by their writes: the batch they were made in, the layouts, and every write. */
+typedef struct set_entry {
+    uint64_t flushes;
+    VkDescriptorSetLayout layout[2];
+    uint32_t n;
+    /** @brief The writes as (set, binding, element, type, buffer, offset, range), 7 words each. */
+    uint64_t *key;
+    VkDescriptorSet set[2];
+} set_entry;
+
+#define SET_CACHE 1024u
+#define KEY_WORDS 7u
+
+static set_entry set_cache[SET_CACHE];
+
 /**
- * @brief Writes the constant banks the bound modules read into new
- * descriptor sets, sets[0] and sets[1], with the texture set in sets[2].
+ * @brief The sets for the n buffer writes wr (write i is for set which[i]): the ones an earlier draw of this batch made
+ * with the same writes, else new ones.
+ */
+static int constant_sets(replay *r, const VkDescriptorSetLayout *layouts_in, VkWriteDescriptorSet *wr, const uint8_t *which,
+                         uint32_t n, VkDescriptorSet sets[3])
+{
+    uint64_t key[(USER_BINDINGS + DRIVER_BINDINGS + NVN_STORAGE_SLOTS) * NVN_STAGES * KEY_WORDS];
+    uint64_t h = 0xcbf29ce484222325ull ^ (uintptr_t)layouts_in[0] ^ ((uint64_t)(uintptr_t)layouts_in[1] << 7);
+    for (uint32_t i = 0; i < n; i++) {
+        const VkDescriptorBufferInfo *bi = wr[i].pBufferInfo;
+        uint64_t *k = key + (size_t)i * KEY_WORDS;
+        k[0] = which[i];
+        k[1] = wr[i].dstBinding;
+        k[2] = wr[i].dstArrayElement;
+        k[3] = (uint64_t)wr[i].descriptorType;
+        k[4] = (uint64_t)(uintptr_t)bi->buffer;
+        k[5] = bi->offset;
+        k[6] = bi->range;
+        for (uint32_t w = 0; w < KEY_WORDS; w++)
+            h = (h ^ k[w]) * 0x100000001b3ull;
+    }
+    set_entry *e = &set_cache[(h ^ h >> 29) % SET_CACHE];
+    if (e->flushes == g.flushes && e->n == n && e->layout[0] == layouts_in[0] && e->layout[1] == layouts_in[1] &&
+        !memcmp(e->key, key, (size_t)n * KEY_WORDS * sizeof key[0])) {
+        sets[0] = e->set[0];
+        sets[1] = e->set[1];
+        return RL_OK;
+    }
+    VkDescriptorSetAllocateInfo ai = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                                       .descriptorPool = d.pool,
+                                       .descriptorSetCount = 2,
+                                       .pSetLayouts = layouts_in };
+    if (VK(vkAllocateDescriptorSets)(g.dev, &ai, sets) != VK_SUCCESS) {
+        /* The pool is full: the batch goes, which frees the sets and the arena the writes point into, so the stage runs again. */
+        if (!nvn_vk_flush(r))
+            return nvn_vk_stop(r, "cannot allocate descriptor sets");
+        return RL_OK;
+    }
+    for (uint32_t i = 0; i < n; i++)
+        wr[i].dstSet = sets[which[i]];
+    if (n)
+        VK(vkUpdateDescriptorSets)(g.dev, n, wr, 0, NULL);
+    uint64_t *copy = realloc(e->key, (size_t)(n ? n : 1) * KEY_WORDS * sizeof key[0]);
+    if (copy) {
+        memcpy(copy, key, (size_t)n * KEY_WORDS * sizeof key[0]);
+        *e = (set_entry){ g.flushes, { layouts_in[0], layouts_in[1] }, n, copy, { sets[0], sets[1] } };
+    } else {
+        e->flushes = ~0ull;
+    }
+    return RL_OK;
+}
+
+/**
+ * @brief Writes the constant banks the bound modules read into descriptor sets,
+ * the ones an earlier draw of the batch made with the same writes or new ones, as
+ * sets[0] and sets[1], with the texture set in sets[2].
  * A bank that does not fit the upload arena submits the batch, which resets the pool and frees the sets; the sets
  * are then not written, and nvn_vk_stage runs the stage again with new ones.
  */
 static int write_constants(replay *r, module *const *mods, uint32_t first_task, const VkDescriptorSetLayout *layouts_in,
                            VkDescriptorSet sets[3])
 {
-    uint64_t flushes;
-    VkDescriptorSetAllocateInfo ai = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-                                       .descriptorPool = d.pool,
-                                       .descriptorSetCount = 2,
-                                       .pSetLayouts = layouts_in };
-    if (VK(vkAllocateDescriptorSets)(g.dev, &ai, sets) != VK_SUCCESS) {
-        if (!nvn_vk_flush(r) || VK(vkAllocateDescriptorSets)(g.dev, &ai, sets) != VK_SUCCESS)
-            return nvn_vk_stop(r, "cannot allocate descriptor sets");
-    }
-    flushes = g.flushes;
+    uint64_t flushes = g.flushes;
     sets[2] = nvn_texset();
     VkDescriptorBufferInfo bi[(USER_BINDINGS + DRIVER_BINDINGS + NVN_STORAGE_SLOTS) * NVN_STAGES];
     VkWriteDescriptorSet wr[(USER_BINDINGS + DRIVER_BINDINGS + NVN_STORAGE_SLOTS) * NVN_STAGES];
+    /* Which of the two sets each write is for: the sets are made, or found, once every write is known. */
+    uint8_t which[(USER_BINDINGS + DRIVER_BINDINGS + NVN_STORAGE_SLOTS) * NVN_STAGES];
     uint32_t n = 0;
     for (uint32_t s = 0; s < NVN_STAGES; s++) {
         if (!mods[s])
@@ -1263,12 +1325,13 @@ static int write_constants(replay *r, module *const *mods, uint32_t first_task, 
             }
             bi[n] = (VkDescriptorBufferInfo){ pb, off, size };
             wr[n] = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                                            .dstSet = sets[1],
+                                            .dstSet = NULL,
                                             .dstBinding = nvn_slot_binding(s),
                                             .dstArrayElement = k,
                                             .descriptorCount = 1,
                                             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                                             .pBufferInfo = &bi[n] };
+            which[n] = 1;
             n++;
         }
         for (uint32_t b = 0; b < DRIVER_BINDINGS; b++) {
@@ -1297,11 +1360,12 @@ static int write_constants(replay *r, module *const *mods, uint32_t first_task, 
             if (rc != RL_OK)
                 return rc;
             wr[n] = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                                            .dstSet = sets[1],
+                                            .dstSet = NULL,
                                             .dstBinding = DRIVER_BINDINGS * s + b,
                                             .descriptorCount = 1,
                                             .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                                             .pBufferInfo = &bi[n] };
+            which[n] = 1;
             n++;
         }
         for (uint32_t b = 0; b < USER_BINDINGS; b++) {
@@ -1312,11 +1376,12 @@ static int write_constants(replay *r, module *const *mods, uint32_t first_task, 
                 if (trc != RL_OK)
                     return trc;
                 wr[n] = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                                                .dstSet = sets[0],
+                                                .dstSet = NULL,
                                                 .dstBinding = USER_BINDINGS * s + b,
                                                 .descriptorCount = 1,
                                                 .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                                                 .pBufferInfo = &bi[n] };
+                which[n] = 0;
                 n++;
                 continue;
             }
@@ -1331,19 +1396,18 @@ static int write_constants(replay *r, module *const *mods, uint32_t first_task, 
             if (rc != RL_OK)
                 return rc;
             wr[n] = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                                            .dstSet = sets[0],
+                                            .dstSet = NULL,
                                             .dstBinding = USER_BINDINGS * s + b,
                                             .descriptorCount = 1,
                                             .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                                             .pBufferInfo = &bi[n] };
+            which[n] = 0;
             n++;
         }
     }
     if (g.flushes != flushes)
         return RL_OK;
-    if (n)
-        VK(vkUpdateDescriptorSets)(g.dev, n, wr, 0, NULL);
-    return RL_OK;
+    return constant_sets(r, layouts_in, wr, which, n, sets);
 }
 
 /**
@@ -2039,22 +2103,22 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
         return nvn_vk_stop(r, "draw without render targets (%u color, first %p, depth %p)", st->ncolor,
                            st->ncolor ? (void *)st->color[0].v : NULL, (void *)st->depth.v);
     uint32_t counted = nvn_counters_begin(st, mods[2] != NULL, mods[3] != NULL || mods[4] != NULL);
-    VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
+    nvn_cmd_bind_pipeline(VK_PIPELINE_BIND_POINT_GRAPHICS, p);
     nvn_pipe_set_dynamic(g.cb, &k);
     if (k.shading_rate)
         nvn_shading_rate_bind(st);
-    VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, 0, 3, dd.sets, 0, NULL);
+    nvn_cmd_bind_sets(VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, 0, 3, dd.sets);
     bind_pools(VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, d.set_layout[4]);
     if (traced)
-        VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, NVN_TRACE_SET, 1, &d.tset, 0, NULL);
-    VK(vkCmdPushConstants)(g.cb, d.layout, FIXED_STAGES, 0, sizeof fp, &fp);
+        nvn_cmd_bind_sets(VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, NVN_TRACE_SET, 1, &d.tset);
+    nvn_cmd_push(d.layout, FIXED_STAGES, sizeof fp, &fp);
     dynamic_state(r, area);
     for (uint32_t i = 0; i < dd.nb; i++)
-        VK(vkCmdBindVertexBuffers)(g.cb, dd.binding[i], 1, &dd.vbuf[i], &dd.offs[i]);
+        nvn_cmd_bind_vertex(dd.binding[i], dd.vbuf[i], dd.offs[i]);
     if (dd.has_def)
-        VK(vkCmdBindVertexBuffers)(g.cb, DEFAULT_BINDING, 1, &g.arena.buf, &dd.def_off);
+        nvn_cmd_bind_vertex(DEFAULT_BINDING, g.arena.buf, dd.def_off);
     for (uint32_t j = 0; j < k.nint; j++)
-        VK(vkCmdBindVertexBuffers)(g.cb, NVN_VERTEX_BUFFERS + j, 1, &g.arena.buf, &dd.int_off[j]);
+        nvn_cmd_bind_vertex(NVN_VERTEX_BUFFERS + j, g.arena.buf, dd.int_off[j]);
     if (nvn_label_on()) {
         const char *keys[6] = { NULL };
         for (uint32_t s = 0; s < 5; s++)
@@ -2063,7 +2127,7 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     }
     nvn_xfb_draw_begin(g.cb, &xd);
     if (indexed) {
-        VK(vkCmdBindIndexBuffer)(g.cb, dd.ibuf, dd.ioff, dd.ivk);
+        nvn_cmd_bind_index(dd.ibuf, dd.ioff, dd.ivk);
         VK(vkCmdDrawIndexed)(g.cb, count, st->inst_count, 0, base, st->inst_base);
     } else {
         VK(vkCmdDraw)(g.cb, count, st->inst_count, first, st->inst_base);
@@ -2165,11 +2229,11 @@ static int draw_mesh_native(replay *r, module *const *mods, pipe_key *k, uint32_
         return nvn_vk_stop(r, "draw without render targets (%u color, first %p, depth %p)", st->ncolor,
                            st->ncolor ? (void *)st->color[0].v : NULL, (void *)st->depth.v);
     uint32_t counted = nvn_counters_begin(st, false, false);
-    VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
+    nvn_cmd_bind_pipeline(VK_PIPELINE_BIND_POINT_GRAPHICS, p);
     nvn_pipe_set_dynamic(g.cb, k);
     if (k->shading_rate)
         nvn_shading_rate_bind(st);
-    VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, 0, 3, dd.sets, 0, NULL);
+    nvn_cmd_bind_sets(VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, 0, 3, dd.sets);
     bind_pools(VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, d.set_layout[4]);
     fixed_push fp = {
         .point_size = st->point_size,
@@ -2177,8 +2241,8 @@ static int draw_mesh_native(replay *r, module *const *mods, pipe_key *k, uint32_
         .written_pages = nvn_mirror_written_pages_address(),
     };
     if (traced)
-        VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, NVN_TRACE_SET, 1, &d.tset, 0, NULL);
-    VK(vkCmdPushConstants)(g.cb, d.layout, FIXED_STAGES, 0, sizeof fp, &fp);
+        nvn_cmd_bind_sets(VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, NVN_TRACE_SET, 1, &d.tset);
+    nvn_cmd_push(d.layout, FIXED_STAGES, sizeof fp, &fp);
     dynamic_state(r, area);
     g.draw_mesh_tasks(g.cb, count, 1, 1);
     nvn_counters_end(counted);
@@ -2307,21 +2371,21 @@ static int draw_mesh_compute(replay *r, module *const *mods, pipe_key *k, const 
     VkDescriptorSet sets[4] = { dd.sets[0], dd.sets[1], dd.sets[2], d.mset };
     VK(vkCmdUpdateBuffer)(g.cb, d.mbuf, 0, sizeof hdr, hdr);
     nvn_vk_barrier(g.cb);
-    VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, d.mlayout, 0, 4, sets, 0, NULL);
+    nvn_cmd_bind_sets(VK_PIPELINE_BIND_POINT_COMPUTE, d.mlayout, 0, 4, sets);
     bind_pools(VK_PIPELINE_BIND_POINT_COMPUTE, d.mlayout, d.mset_layout[4]);
     fixed_push cfp = { .written_pages = nvn_mirror_written_pages_address() };
-    VK(vkCmdPushConstants)(g.cb, d.mlayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof cfp, &cfp);
+    nvn_cmd_push(d.mlayout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof cfp, &cfp);
     if (task) {
         uint32_t tx, ty;
         dispatch_dims((uint32_t)n, ti->slots, &tx, &ty);
-        VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, tp);
+        nvn_cmd_bind_pipeline(VK_PIPELINE_BIND_POINT_COMPUTE, tp);
         VK(vkCmdDispatch)(g.cb, tx, ty, 1);
         nvn_vk_barrier(g.cb);
-        VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, sp);
+        nvn_cmd_bind_pipeline(VK_PIPELINE_BIND_POINT_COMPUTE, sp);
         VK(vkCmdDispatch)(g.cb, 1, 1, 1);
         nvn_vk_barrier(g.cb);
     }
-    VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, mp);
+    nvn_cmd_bind_pipeline(VK_PIPELINE_BIND_POINT_COMPUTE, mp);
     VK(vkCmdDispatchIndirect)(g.cb, d.mbuf, 4ull * MESH_H_DISPATCH);
     nvn_vk_barrier(g.cb);
     VkBufferCopy cp = { 4ull * MESH_H_MESHES, 16ull * d.mstatus_n, 12 };
@@ -2332,21 +2396,21 @@ static int draw_mesh_compute(replay *r, module *const *mods, pipe_key *k, const 
         return nvn_vk_stop(r, "draw without render targets (%u color, first %p, depth %p)", st->ncolor,
                            st->ncolor ? (void *)st->color[0].v : NULL, (void *)st->depth.v);
     uint32_t counted = nvn_counters_begin(st, false, false);
-    VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gp);
+    nvn_cmd_bind_pipeline(VK_PIPELINE_BIND_POINT_GRAPHICS, gp);
     nvn_pipe_set_dynamic(g.cb, &kg);
     if (kg.shading_rate)
         nvn_shading_rate_bind(st);
-    VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.mlayout, 0, 4, sets, 0, NULL);
+    nvn_cmd_bind_sets(VK_PIPELINE_BIND_POINT_GRAPHICS, d.mlayout, 0, 4, sets);
     bind_pools(VK_PIPELINE_BIND_POINT_GRAPHICS, d.mlayout, d.mset_layout[4]);
     fixed_push fp = {
         .point_size = st->point_size,
         .alpha_ref = st->alpha_ref,
         .written_pages = nvn_mirror_written_pages_address(),
     };
-    VK(vkCmdPushConstants)(g.cb, d.mlayout, FIXED_STAGES, 0, sizeof fp, &fp);
+    nvn_cmd_push(d.mlayout, FIXED_STAGES, sizeof fp, &fp);
     dynamic_state(r, area);
     if (mi->indexed) {
-        VK(vkCmdBindIndexBuffer)(g.cb, d.mbuf, 0, VK_INDEX_TYPE_UINT32);
+        nvn_cmd_bind_index(d.mbuf, 0, VK_INDEX_TYPE_UINT32);
         VK(vkCmdDrawIndexedIndirect)(g.cb, d.mbuf, 4ull * MESH_H_DRAW_INDEXED, 1, 20);
     } else {
         VK(vkCmdDrawIndirect)(g.cb, d.mbuf, 4ull * MESH_H_DRAW, 1, 16);
@@ -3097,13 +3161,13 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
         nvn_vk_begin(r);
     else
         nvn_vk_begin_dispatch(r);
-    VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, p);
-    VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, d.clayout, 0, 3, dd.sets, 0, NULL);
+    nvn_cmd_bind_pipeline(VK_PIPELINE_BIND_POINT_COMPUTE, p);
+    nvn_cmd_bind_sets(VK_PIPELINE_BIND_POINT_COMPUTE, d.clayout, 0, 3, dd.sets);
     bind_pools(VK_PIPELINE_BIND_POINT_COMPUTE, d.clayout, d.cset_layout[4]);
     if (m->trace_words)
-        VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, d.clayout, NVN_TRACE_SET, 1, &d.tset, 0, NULL);
+        nvn_cmd_bind_sets(VK_PIPELINE_BIND_POINT_COMPUTE, d.clayout, NVN_TRACE_SET, 1, &d.tset);
     fixed_push fp = { .written_pages = nvn_mirror_written_pages_address() };
-    VK(vkCmdPushConstants)(g.cb, d.clayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof fp, &fp);
+    nvn_cmd_push(d.clayout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof fp, &fp);
     if (nvn_label_on()) {
         const char *keys[6] = { NULL, NULL, NULL, NULL, NULL, m->key };
         nvn_label_draw(g.cb, "dispatch", keys);
@@ -3213,11 +3277,11 @@ int nvn_cuda_dispatch(replay *r, const char *key, const uint8_t *params, uint32_
     else if (m->global_store)
         nvn_mirror_written_all();
     nvn_vk_begin_dispatch(r);
-    VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, p);
-    VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, d.clayout, 0, 3, dd.sets, 0, NULL);
+    nvn_cmd_bind_pipeline(VK_PIPELINE_BIND_POINT_COMPUTE, p);
+    nvn_cmd_bind_sets(VK_PIPELINE_BIND_POINT_COMPUTE, d.clayout, 0, 3, dd.sets);
     bind_pools(VK_PIPELINE_BIND_POINT_COMPUTE, d.clayout, d.cset_layout[4]);
     fixed_push fp = { .written_pages = nvn_mirror_written_pages_address() };
-    VK(vkCmdPushConstants)(g.cb, d.clayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof fp, &fp);
+    nvn_cmd_push(d.clayout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof fp, &fp);
     VK(vkCmdDispatch)(g.cb, grid[0], grid[1], grid[2]);
     nvn_vk_dispatched();
     nvn_texset_uses_recorded();

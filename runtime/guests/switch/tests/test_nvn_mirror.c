@@ -433,6 +433,38 @@ TEST(nvn_dyn_states_are_set_only_when_their_value_changes)
     CHECK(nvn_dyn_changed(NVN_DYN_CULL_MODE, &b, sizeof b));
 }
 
+TEST(nvn_buffer_binds_are_made_only_when_what_is_bound_changes)
+{
+    rl_ctx *c = t_boot(NULL);
+    bool up = have_device();
+    CHECK(up || !getenv("RELIFT_VK_REQUIRE"));
+    if (!up)
+        return;
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.c = c;
+    r.mem = t_mem();
+    CHECK(nvn_vk_begin(&r));
+    memset(nvn_vk_calls, 0, sizeof nvn_vk_calls);
+    nvn_vk_count_on = 1;
+    nvn_cmd_bind_vertex(0, g.arena.buf, 0);
+    nvn_cmd_bind_vertex(0, g.arena.buf, 0);
+    CHECK_EQ(nvn_vk_calls[VKG_vkCmdBindVertexBuffers], 1u);
+    nvn_cmd_bind_vertex(1, g.arena.buf, 0);
+    nvn_cmd_bind_vertex(0, g.arena.buf, 256);
+    CHECK_EQ(nvn_vk_calls[VKG_vkCmdBindVertexBuffers], 3u);
+    nvn_cmd_bind_index(g.arena.buf, 0, VK_INDEX_TYPE_UINT16);
+    nvn_cmd_bind_index(g.arena.buf, 0, VK_INDEX_TYPE_UINT16);
+    nvn_cmd_bind_index(g.arena.buf, 0, VK_INDEX_TYPE_UINT32);
+    CHECK_EQ(nvn_vk_calls[VKG_vkCmdBindIndexBuffer], 2u);
+    /* A new command buffer holds nothing: the next bind is made. */
+    nvn_dyn_reset();
+    nvn_cmd_bind_vertex(0, g.arena.buf, 256);
+    CHECK_EQ(nvn_vk_calls[VKG_vkCmdBindVertexBuffers], 4u);
+    nvn_vk_count_on = 0;
+    CHECK(nvn_vk_flush(&r));
+}
+
 TEST(nvn_counter_queries_stay_open_across_draws_of_one_queue_and_close_at_a_report)
 {
     rl_ctx *c = t_boot(NULL);

@@ -398,12 +398,12 @@ static void draw_into(VkImageView target, uint32_t w, uint32_t h, VkPipeline pip
                            .colorAttachmentCount = 1, .pColorAttachments = &ca };
     VkViewport vp = { 0, 0, (float)w, (float)h, 0, 1 };
     VK(vkCmdBeginRendering)(g.cb, &ri);
-    VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+    nvn_cmd_bind_pipeline(VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
     nvn_dyn_reset();
     VK(vkCmdSetViewport)(g.cb, 0, 1, &vp);
     VK(vkCmdSetScissor)(g.cb, 0, 1, &area);
-    VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pl, 0, 1, &set, 0, NULL);
-    VK(vkCmdPushConstants)(g.cb, pl, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof *p, p);
+    nvn_cmd_bind_sets(VK_PIPELINE_BIND_POINT_GRAPHICS, pl, 0, 1, &set);
+    nvn_cmd_push(pl, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT, sizeof *p, p);
     VK(vkCmdDraw)(g.cb, 3, 1, 0, 0);
     VK(vkCmdEndRendering)(g.cb);
 }
@@ -448,9 +448,9 @@ bool nvn_msaa_write_back(replay *r, vimg *v)
     p.cells[1] = (uint32_t)(cells >> 32);
     nvn_vk_begin(r);
     nvn_vk_barrier(g.cb);
-    VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, M.gather_pipe);
-    VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, M.two_pl, 0, 1, &m->gather_set, 0, NULL);
-    VK(vkCmdPushConstants)(g.cb, M.two_pl, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof p, &p);
+    nvn_cmd_bind_pipeline(VK_PIPELINE_BIND_POINT_COMPUTE, M.gather_pipe);
+    nvn_cmd_bind_sets(VK_PIPELINE_BIND_POINT_COMPUTE, M.two_pl, 0, 1, &m->gather_set);
+    nvn_cmd_push(M.two_pl, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT, sizeof p, &p);
     VK(vkCmdDispatch)(g.cb, (v->d.width + 7) / 8, (v->d.height + 7) / 8, m->nlayers);
     nvn_vk_barrier(g.cb);
     return nvn_vk_store_plain(r, m->twin);

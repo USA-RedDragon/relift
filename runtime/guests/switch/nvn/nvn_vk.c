@@ -7003,7 +7003,106 @@ bool nvn_dyn_changed(nvn_dyn state, const void *val, size_t n)
     return true;
 }
 
-void nvn_dyn_reset(void) { memset(dyn.valid, 0, sizeof dyn.valid); }
+/** @brief What the recording command buffer has bound (nvn_cmd_*), cleared with the dynamic states. */
+static struct {
+    VkPipeline pipe[2];
+    struct {
+        VkPipelineLayout layout;
+        VkDescriptorSet set;
+    } sets[2][8];
+    struct {
+        VkPipelineLayout layout;
+        VkShaderStageFlags stages;
+        uint32_t nbytes;
+        uint8_t data[128];
+    } push;
+    struct {
+        VkBuffer buf;
+        VkDeviceSize off;
+    } vertex[NVN_VERTEX_BUFFERS + NVN_VERTEX_ATTRIBS];
+    struct {
+        VkBuffer buf;
+        VkDeviceSize off;
+        VkIndexType type;
+    } index;
+} held;
+
+void nvn_dyn_reset(void)
+{
+    memset(dyn.valid, 0, sizeof dyn.valid);
+    memset(&held, 0, sizeof held);
+}
+
+void nvn_cmd_bind_pipeline(VkPipelineBindPoint at, VkPipeline p)
+{
+    if (at <= VK_PIPELINE_BIND_POINT_COMPUTE && held.pipe[at] == p)
+        return;
+    if (at <= VK_PIPELINE_BIND_POINT_COMPUTE)
+        held.pipe[at] = p;
+    VK(vkCmdBindPipeline)(g.cb, at, p);
+}
+
+void nvn_cmd_bind_sets(VkPipelineBindPoint at, VkPipelineLayout layout, uint32_t first, uint32_t n, const VkDescriptorSet *sets)
+{
+    if (at > VK_PIPELINE_BIND_POINT_COMPUTE || first + n > 8) {
+        VK(vkCmdBindDescriptorSets)(g.cb, at, layout, first, n, sets, 0, NULL);
+        return;
+    }
+    uint32_t lo = n, hi = 0;
+    for (uint32_t i = 0; i < n; i++)
+        if (held.sets[at][first + i].layout != layout || held.sets[at][first + i].set != sets[i]) {
+            lo = lo < i ? lo : i;
+            hi = i + 1;
+        }
+    if (lo >= hi)
+        return;
+    /* A bind with another layout can disturb the sets above it that were bound with the first. */
+    for (uint32_t k = first + n; k < 8; k++)
+        if (held.sets[at][k].layout != layout)
+            memset(&held.sets[at][k], 0, sizeof held.sets[at][k]);
+    for (uint32_t i = lo; i < hi; i++) {
+        held.sets[at][first + i].layout = layout;
+        held.sets[at][first + i].set = sets[i];
+    }
+    if (held.push.layout != layout)
+        memset(&held.push, 0, sizeof held.push);
+    VK(vkCmdBindDescriptorSets)(g.cb, at, layout, first + lo, hi - lo, sets + lo, 0, NULL);
+}
+
+void nvn_cmd_push(VkPipelineLayout layout, VkShaderStageFlags flags, uint32_t nbytes, const void *bytes)
+{
+    if (nbytes <= sizeof held.push.data) {
+        if (held.push.layout == layout && held.push.stages == flags && held.push.nbytes == nbytes &&
+            !memcmp(held.push.data, bytes, nbytes))
+            return;
+        held.push.layout = layout;
+        held.push.stages = flags;
+        held.push.nbytes = nbytes;
+        memcpy(held.push.data, bytes, nbytes);
+    }
+    VK(vkCmdPushConstants)(g.cb, layout, flags, 0, nbytes, bytes);
+}
+
+void nvn_cmd_bind_vertex(uint32_t binding, VkBuffer buf, VkDeviceSize off)
+{
+    if (binding < NVN_VERTEX_BUFFERS + NVN_VERTEX_ATTRIBS) {
+        if (held.vertex[binding].buf == buf && held.vertex[binding].off == off)
+            return;
+        held.vertex[binding].buf = buf;
+        held.vertex[binding].off = off;
+    }
+    VK(vkCmdBindVertexBuffers)(g.cb, binding, 1, &buf, &off);
+}
+
+void nvn_cmd_bind_index(VkBuffer buf, VkDeviceSize off, VkIndexType type)
+{
+    if (held.index.buf == buf && held.index.off == off && held.index.type == type)
+        return;
+    held.index.buf = buf;
+    held.index.off = off;
+    held.index.type = type;
+    VK(vkCmdBindIndexBuffer)(g.cb, buf, off, type);
+}
 uint64_t nvn_vk_calls[VKG_COUNT], nvn_vk_count_cmds, nvn_vk_count_draws;
 
 /** @brief Logs the host Vulkan calls, NVN commands and draws made per present since the last line, most called first. */
