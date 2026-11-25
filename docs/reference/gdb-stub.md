@@ -499,9 +499,23 @@ Its memory comes from the guest's own callbacks:
 <!-- docgen:code file=runtime/guests/gba/run/cpu.c region=gdb-memory -->
 ```c
 * @brief Guest memory for the GDB server by bus address: reads are peeks (rl_gba_peek, no wait states, no side
-* effect), writes go through the bus as the CPU's stores do (rl_gba_write). The I/O registers (0x04000000 to
-* 0x04FFFFFF) are not readable: a device answers a read only after catching up to the CPU's cycle, which a debugger
-* must not cause, so a read there answers an error.
+* effect), and the I/O registers (0x04000000 to 0x04FFFFFF) are read with rl_gba_io_peek, each device answering
+* from its state without catching up; writes go through the bus as the CPU's stores do (rl_gba_write).
+```
+<!-- /docgen:code -->
+
+An I/O register is read through its device's `peek` (`rl_sched_peek` in
+`core/sched.c`), at the device's own tick and without catching it up. The
+value is the device's state as of its last catch-up, which can lag the CPU:
+a timer counter (`TM0CNT_L`) or `VCOUNT` read while stopped may be a few
+cycles behind what the CPU would read. That is the price of a read that
+changes nothing, not a bug.
+
+<!-- docgen:code file=runtime/guests/gba/io.c region=io-peek -->
+```c
+* @brief A peek of the keypad registers: the keys as last sampled and KEYCNT. Its read samples the host's input first,
+* which can raise the keypad interrupt, so a debugger's read must not. Every other GBA I/O reader is a function of the
+* device's state and the tick alone, so it is its own peek.
 ```
 <!-- /docgen:code -->
 

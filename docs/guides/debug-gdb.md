@@ -83,10 +83,10 @@ $ gdb -ex 'set architecture arm' -ex 'target remote :2345'
 (gdb) p/x $r5
 $1 = 0x55
 (gdb) x/2hx 0x04000200
-0x4000200:	Cannot access memory at address 0x4000200
+0x4000200:	0x0000	0x0000
 ```
 
-Registers are the current mode's `r0` to `r12`, `sp`, `lr`, `pc` and `cpsr`. Memory is the bus by address, read without wait states or side effects; a write goes through the bus as the CPU's store would. The I/O registers at `0x04000000` cannot be read from gdb, because a device answers a read only after catching up to the CPU's cycle. A stop does not move the guest's clock: the server waits for the CPU's own next sync point instead of ending its cycle budget, and the test `gdb_server_stops_a_gba_run_at_a_sync_point_and_keeps_its_timing` checks that a run stopped halfway ends on the same cycle as one never stopped. Breakpoints, watchpoints, `monitor bt` and `relift_guest.py` are for Switch programs only.
+Registers are the current mode's `r0` to `r12`, `sp`, `lr`, `pc` and `cpsr`. Memory is the bus by address, read without wait states or side effects; a write goes through the bus as the CPU's store would. The I/O registers at `0x04000000` read as the CPU would read them but without side effects: no device catches up and nothing is cleared or sampled, so a register shows its device's state as of the device's last catch-up, which can lag the CPU's cycle (a timer counter or `VCOUNT` a little behind). A stop does not move the guest's clock: the server waits for the CPU's own next sync point instead of ending its cycle budget, and the test `gdb_server_stops_a_gba_run_at_a_sync_point_and_keeps_its_timing` checks that a run stopped halfway ends on the same cycle as one never stopped. Breakpoints, watchpoints, `monitor bt` and `relift_guest.py` are for Switch programs only.
 
 ## Breakpoints
 
@@ -231,6 +231,6 @@ The packets the server answers, its limits, the monitor commands and the registe
 
 ## Not available
 
-- No server for Game Boy, Nintendo 64 and Nintendo DS programs, and no GBA I/O register reads, as above.
+- No server for Game Boy, Nintendo 64 and Nintendo DS programs, as above.
 - Breakpoints and write watchpoints are x86-64 Linux only. On other hosts the server answers registers, memory and threads, and gdb reports the breakpoint as unsupported.
 - No breakpoint at a guest address that is not a function entry, and none at a function clang inlined.
