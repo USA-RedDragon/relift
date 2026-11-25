@@ -86,7 +86,7 @@ $1 = 0x4210
 0x150:	0x3e	0x42	0x06	0x13	0x0c	0x18	0xfd
 ```
 
-Memory is the CPU's 16-bit bus as the device library sees it, read without timing effects, so `0x4000` to `0x7fff` shows the ROM bank mapped now. Memory and register writes are not supported for the Game Boy yet (a bus write is timed). The script also checks that a run stopped this way ends on the same frame and instruction count as one never stopped, and that nothing was interpreted.
+Memory is the CPU's 16-bit bus as the device library sees it, read without timing effects, so `0x4000` to `0x7fff` shows the ROM bank mapped now. Register writes go into the stopped CPU, and gdb sends them when it resumes. Memory writes (video RAM, cartridge RAM, work RAM, OAM and high RAM) charge no cycles; writes to ROM and mapper registers, the I/O registers (`0xff00` to `0xff7f`) and `0xffff` are refused with an error, because the guest's own write there acts at a cycle. The script also writes `bc` and a work RAM byte, which the cart reads after the program runs on, and checks that a run stopped this way ends on the same frame and instruction count as one never stopped, and that nothing was interpreted.
 
 ## A Game Boy Advance program
 
@@ -277,6 +277,5 @@ The packets the server answers, its limits, the monitor commands and the registe
 
 ## Not available
 
-- No reads of the Nintendo 64's hardware registers and no Game Boy memory writes, as above.
 - Breakpoints and write watchpoints are x86-64 and arm64 Linux (and Android) only, and Switch programs only. On other hosts and guests the server answers registers, memory and threads, and gdb reports the breakpoint as unsupported. The arm64 path was run under qemu-aarch64 and on an arm64 Android device.
 - No breakpoint at a guest address that is not a function entry, and none at a function clang inlined.

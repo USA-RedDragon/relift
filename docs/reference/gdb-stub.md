@@ -637,8 +637,10 @@ rl_gdb_point_at(c, pc);
 <!-- docgen:code file=runtime/guests/gb/exact/exact.c region=gdb-memory -->
 ```c
 * @brief Memory for the GDB server: the CPU's 16-bit bus through the device library's peek (rlgbd_peek, no timing
-* effect; the runtime reads opcodes with it mid-run), so 0x4000 to 0x7FFF shows the ROM bank mapped now. Writes are
-* refused: a bus write is timed.
+* effect; the runtime reads opcodes with it mid-run), so 0x4000 to 0x7FFF shows the ROM bank mapped now. Writes go
+* through rlgbd_poke, which charges no dots: video RAM, cartridge RAM, work RAM, OAM and high RAM take them; ROM and
+* mapper registers, I/O registers and IE are refused, since the guest's own write there acts at a cycle. The
+* registers are written in the stopped context (the SM83 layer).
 ```
 <!-- /docgen:code -->
 
