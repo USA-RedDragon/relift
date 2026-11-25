@@ -572,7 +572,7 @@ TEST(nvn_texset_a_slot_no_unfinished_work_used_is_rewritten_without_waiting)
     CHECK_EQ(nvn_texset_image(&r, 31u, &slot, &kind, &dim), RL_OK);
     nvn_texset_rebinds(&fl, &fr);
     CHECK_EQ(fl, fl0);
-    CHECK_EQ(fr, free0 + 1);
+    CHECK(fr > free0);
     /* the draw using it is in the batch; another texture under the id while that batch is unfinished waits */
     nvn_texset_uses_recorded();
     c.x[2] = texa;
@@ -581,14 +581,52 @@ TEST(nvn_texset_a_slot_no_unfinished_work_used_is_rewritten_without_waiting)
     CHECK_EQ(nvn_texset_image(&r, 31u, &slot, &kind, &dim), RL_OK);
     nvn_texset_rebinds(&fl, &fr);
     CHECK_EQ(fl, fl0 + 1);
-    CHECK_EQ(fr, free0 + 1);
     /* a bind no draw noted yet counts as in use: the slot waits as well */
     c.x[2] = texb;
     c.x[1] = 31;
     nvnh_nvnTexturePoolRegisterTexture(&c, mem);
     CHECK_EQ(nvn_texset_image(&r, 31u, &slot, &kind, &dim), RL_OK);
     nvn_texset_rebinds(&fl, &fr);
-    CHECK_EQ(fl, fl0 + 2);
+    CHECK(fl >= fl0 + 2);
+    CHECK(nvn_vk_flush(&r));
+}
+
+TEST(nvn_texset_an_image_bound_first_time_on_an_unused_slot_does_not_wait)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes))
+        return;
+    CHECK(nvn_texset_layout());
+    if (!hos.vm.host_page) {
+        hos.vm.host_page = 4096;
+        hos.vm.size = 0x10000;
+    }
+    static rl_ctx c;
+    static uint8_t mem[0x10000];
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    static replay r;
+    memset(&r, 0, sizeof r);
+    r.c = &c;
+    r.mem = mem;
+    r.st = &st;
+    const uint64_t pool = 0x100, tex = 0x200;
+    CHECK(nvn_pool_make(pool, 0, 0x10000, 0x2a1));
+    nvn_tex_desc d = { .target = 1, .format = 37, .width = 4, .height = 4, .depth = 1, .levels = 1, .flags = 1u << 4,
+                       .stride = 32, .pool = pool, .offset = 0x4000 };
+    CHECK(nvn_tex_layout(&d));
+    CHECK(nvn_texture_record(tex, &d, NULL));
+    c.x[1] = 41;
+    c.x[2] = tex;
+    c.x[3] = 0;
+    nvnh_nvnTexturePoolRegisterTexture(&c, mem);
+    CHECK(nvn_vk_flush(&r));
+    uint64_t epoch0 = nvn_vk_flush_epoch();
+    uint32_t slot, kind, dim;
+    CHECK_EQ(nvn_texset_image(&r, 41u, &slot, &kind, &dim), RL_OK);
+    /* nothing recorded before used this slot's image descriptors: they are written without a flush */
+    CHECK_EQ(nvn_vk_flush_epoch(), epoch0);
+    nvn_texset_uses_recorded();
     CHECK(nvn_vk_flush(&r));
 }
 

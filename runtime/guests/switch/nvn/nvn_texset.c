@@ -108,6 +108,8 @@ static struct {
     bool dynamic;
     /** @brief nvn_texset_sync_registered is binding: its binds are not uses of the slots. */
     bool syncing;
+    /** @brief The epoch of the last use of the slot bind_texture_slot bound last, as it was before this bind (0: a fresh slot). */
+    uint64_t last_was;
     /** @brief The kind of each texture id's bound view (its format's sampled type). */
     uint32_t *tex_kind;
     uint8_t (*tex_view)[17];
@@ -708,19 +710,21 @@ static bool g_ring_ok(void) { return g.unused_while_pending; }
  * a program that reads handles from memory, since the last full flush); false when the device failed. A slot no unfinished
  * work used is rewritten at once.
  */
-static bool slot_settle(replay *r, uint32_t sl)
+static bool slot_settle_since(replay *r, uint64_t last_use)
 {
     uint64_t epoch = nvn_vk_flush_epoch();
     static int always = -1;
     if (always < 0)
         always = getenv("RELIFT_NVN_SLOT_WAIT") != NULL;
-    if (!always && t.tex_epoch[sl] < epoch && !t.bindless_busy && t.bindless_epoch < epoch) {
+    if (!always && last_use < epoch && !t.bindless_busy && t.bindless_epoch < epoch) {
         t.rebind_free++;
         return true;
     }
     t.rebind_flushed++;
     return nvn_vk_flush(r);
 }
+
+static bool slot_settle(replay *r, uint32_t sl) { return slot_settle_since(r, t.tex_epoch[sl]); }
 
 /** @brief A slot a draw is about to read counts as busy until nvn_texset_uses_recorded says the draw is in its batch. */
 #define SLOT_BUSY UINT64_MAX
@@ -999,6 +1003,7 @@ static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_
     uint32_t sl = *slot;
     bool ring = sl == UINT32_MAX || (sl >= t.ring_lo && t.ring_n && sl < t.ring_lo + t.ring_n && t.ring_owner[sl] == id + 1);
     uint64_t was_used = sl == UINT32_MAX ? 0 : t.tex_epoch[sl];
+    t.last_was = was_used;
     view[16] = has_view;
     vimg *v = nvn_vk_image(r, tex);
     if (!v)
@@ -1406,7 +1411,8 @@ int nvn_texset_image(replay *r, uint32_t handle, uint32_t *slot, uint32_t *kind,
         *slot = ts;
         return RL_OK;
     }
-    if (!nvn_vk_flush(r))
+    /* The storage-image descriptors of this slot are rewritten: work still unfinished that used the slot's old ones needs them. */
+    if (!slot_settle_since(r, t.last_was))
         return nvn_vk_stop(r, "the host device failed a submit");
     if ((rc = bind_image(r, id, ts, t.tex_img[ts], t.tex_level[ts], t.tex_target[ts], t.tex_layer[ts],
                          t.tex_layers[ts])) != RL_OK)
