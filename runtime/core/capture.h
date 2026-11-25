@@ -19,6 +19,12 @@ RL_RUNTIME_API void rl_capture_present_begin(void);
 RL_RUNTIME_API void rl_capture_present_end(void);
 
 /**
+ * @brief A Vulkan instance and device exist now: finds RenderDoc's library where its layer loaded it with the
+ * instance, and starts a capture of present 1 that the first look could not.
+ */
+RL_RUNTIME_API void rl_capture_vulkan_up(void);
+
+/**
  * @brief Whether a capture tool is in the process: RenderDoc's library is loaded (renderdoccmd or qrenderdoc injected
  * it) or its Vulkan layer is enabled (ENABLE_VULKAN_RENDERDOC_CAPTURE=1), so labels and object names are worth making.
  */

@@ -7,6 +7,7 @@
 #include "vkf.h"
 
 #include "vkdev.h"
+#include "capture.h"
 #include "hostlib.h"
 #include "vi.h"
 
@@ -1000,6 +1001,7 @@ uint64_t vkh_vkCreateInstance(rl_ctx *restrict c, uint8_t *mem)
     o->inst = st;
     vkf_cb_adopt((uint64_t)(uintptr_t)inst);
     vkf_s64(&k, gout, vkf_id(o));
+    rl_capture_vulkan_up();
     c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateInstance, r);
     return vkf_end(&k);
 }

@@ -35,6 +35,10 @@
 static struct {
     pthread_mutex_t lock;
     bool init, armed, active;
+    /** @brief The lookup found no library while RenderDoc's layer is enabled: the next Vulkan instance loads it. */
+    bool wait_layer;
+    /** @brief Between rl_capture_present_begin and rl_capture_present_end. */
+    bool in_present;
     uint64_t presents, first, frames;
     /** @brief renderdoc.capture=file: the file whose appearance asks for a capture of the next present. */
     char trigger[1100];
@@ -70,7 +74,7 @@ static void set_capture_path(void)
     }
 }
 
-static void rd_init(void)
+static void rd_init(bool can_wait)
 {
     rd.init = true;
     rl_settings_declare_runtime();
@@ -90,6 +94,12 @@ static void rd_init(void)
     void *lib = rl_hostlib_loaded(names);
     pRENDERDOC_GetAPI get = (pRENDERDOC_GetAPI)rl_hostlib_sym(lib, "RENDERDOC_GetAPI");
     if (!get || !get(eRENDERDOC_API_Version_1_1_2, (void **)&rd.api) || !rd.api) {
+        rd.api = NULL;
+        const char *layer = getenv("ENABLE_VULKAN_RENDERDOC_CAPTURE");
+        if (can_wait && layer && strcmp(layer, "1") == 0) {
+            rd.wait_layer = true;
+            return;
+        }
         rl_log(RL_LOG_WARN, "capture", "renderdoc.capture is set but RenderDoc is not loaded into the process");
         return;
     }
@@ -103,7 +113,8 @@ static void edge(bool done)
 {
     pthread_mutex_lock(&rd.lock);
     if (!rd.init)
-        rd_init();
+        rd_init(true);
+    rd.in_present = !done;
     if (rd.armed) {
         if (done)
             rd.presents++;
@@ -142,6 +153,29 @@ void rl_capture_present_end(void)
 {
     edge(true);
     rl_snapshot_present();
+}
+
+/**
+ * docgen:region vulkan-up
+ * @brief RenderDoc's Vulkan layer (ENABLE_VULKAN_RENDERDOC_CAPTURE=1) loads its library into the process when a
+ * Vulkan instance is made, which for a presenter can be inside the first present, after the first look for it. So
+ * the look waits for the instance when the layer is enabled, and is made again here, once the core device is up or a
+ * guest's own instance is made; a capture that starts with present 1 starts here when that present is under way.
+ * docgen:end
+ */
+void rl_capture_vulkan_up(void)
+{
+    pthread_mutex_lock(&rd.lock);
+    if (!rd.init || rd.wait_layer) {
+        rd.wait_layer = false;
+        rd_init(false);
+    }
+    if (rd.armed && !rd.active && rd.in_present && rd.presents == 0 && rd.first == 1) {
+        rd.api->StartFrameCapture(NULL, NULL);
+        rd.active = true;
+        rl_log(RL_LOG_INFO, "capture", "RenderDoc capture started before frame 1");
+    }
+    pthread_mutex_unlock(&rd.lock);
 }
 
 bool rl_capture_tool(void)

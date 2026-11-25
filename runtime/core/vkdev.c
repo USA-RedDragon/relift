@@ -463,6 +463,8 @@ const rlvk_dev *rl_vkdev(void)
         if (g_ok)
             rl_log(RL_LOG_INFO, "vulkan", "core device up on %s, queue family %u, %u queue%s, %s", g_dev.name, g_dev.family,
                    g_shared_queue ? 1u : 2u, g_shared_queue ? "" : "s", g_dev.surfaces ? "with swapchains" : "without swapchains");
+        if (g_ok)
+            rl_capture_vulkan_up();
         g_dev.debug_utils = g_ok && g_debug_utils;
         if (g_dev.debug_utils)
             rl_log(RL_LOG_INFO, "vulkan", "a capture tool is loaded: VK_EXT_debug_utils on, for command labels and object names");
