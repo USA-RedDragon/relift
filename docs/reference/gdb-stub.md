@@ -597,6 +597,39 @@ sync point (`rl_sched_sync_pc`).
 ```
 <!-- /docgen:code -->
 
+### SM83
+
+<!-- docgen:code file=runtime/cpus/sm83/gdb.c region=registers -->
+```c
+* @brief The SM83 registers for the GDB server (core/gdbstub.h), as gdb's
+* gbz80 architecture numbers them: af (a high, f low), bc, de, hl, sp, pc,
+* then ix, iy, af', bc', de', hl' and ir, which the SM83 does not have and
+* read as zero, 16 bits each, little-endian. pc is the guest address the
+* thread resumes at where it parked at a sync point; its bank is the one
+* mapped at 0x4000 now.
+```
+<!-- /docgen:code -->
+
+The Game Boy parks in `rl_gb_sync`, its own sync point:
+
+<!-- docgen:code file=runtime/guests/gb/exact/exact.c region=gdb-point -->
+```c
+/* Between two instructions, the lifted code's registers stored: a safe point for the GDB server at pc. */
+rl_gdb_point_at(c, pc);
+```
+<!-- /docgen:code -->
+
+<!-- docgen:code file=runtime/guests/gb/exact/exact.c region=gdb-memory -->
+```c
+* @brief Memory for the GDB server: the CPU's 16-bit bus through the device library's peek (rlgbd_peek, no timing
+* effect; the runtime reads opcodes with it mid-run), so 0x4000 to 0x7FFF shows the ROM bank mapped now. Writes are
+* refused: a bus write is timed.
+```
+<!-- /docgen:code -->
+
+`scripts/ci/gdb-gb.sh` (run by the gb-corpus CI job) builds a test cart and
+stops it with a real gdb.
+
 ### VR4300
 
 <!-- docgen:code file=runtime/cpus/mips/gdb.c region=registers -->

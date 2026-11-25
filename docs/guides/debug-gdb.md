@@ -8,10 +8,10 @@ The output below is real. It comes from a dev build of a hand-assembled Switch t
 
 | Tool | Sees | Stops | Works on |
 |---|---|---|---|
-| The GDB server (`debug.gdb`) | guest threads, guest registers (A64; ARM on the Game Boy Advance and Nintendo DS; MIPS on the Nintendo 64), guest memory by guest address, lifted functions by guest address | the guest, at a safe point | Switch, Switch 2, Game Boy Advance, Nintendo DS and Nintendo 64 programs; every host but Windows and iOS |
+| The GDB server (`debug.gdb`) | guest threads, guest registers (A64; ARM on the Game Boy Advance and Nintendo DS; MIPS on the Nintendo 64; SM83 as gdb's gbz80 on the Game Boy), guest memory by guest address, lifted functions by guest address | the guest, at a safe point | Switch, Switch 2, Game Boy, Game Boy Advance, Nintendo DS and Nintendo 64 programs; every host but Windows and iOS |
 | gdb on the host process | the lifted C (`-gline-tables-only`), the runtime, host threads and their stacks | everything, including the server | every guest and host gdb runs on |
 
-The server is in the runtime of dev builds (`relift run`, `relift build --dev`), of desktop builds with `package.appimage = "never"`, and of APKs signed with the debug key. It is never in a player package: an AppImage, a signed macOS app, an iOS app, or an APK signed with the project's own key (`package.android-keystore`) is built with `RL_NO_DEBUG_STUB`. It listens only when `debug.gdb` names a port. Game Boy programs do not start the server today: `rl_gdb_start` is called by the Switch layer (`guests/switch/kthread.c`) and the Game Boy Advance, Nintendo DS and Nintendo 64 runs (`guests/<guest>/run/cpu.c`) only. For those guests use gdb on the host process (below).
+The server is in the runtime of dev builds (`relift run`, `relift build --dev`), of desktop builds with `package.appimage = "never"`, and of APKs signed with the debug key. It is never in a player package: an AppImage, a signed macOS app, an iOS app, or an APK signed with the project's own key (`package.android-keystore`) is built with `RL_NO_DEBUG_STUB`. It listens only when `debug.gdb` names a port. `rl_gdb_start` is called by the Switch layer (`guests/switch/kthread.c`), the Game Boy run (`guests/gb/exact/exact.c`) and the Game Boy Advance, Nintendo DS and Nintendo 64 runs (`guests/<guest>/run/cpu.c`). For those guests use gdb on the host process (below).
 
 ## Start a game with the server
 
@@ -69,6 +69,24 @@ no lifted function holds 0x1234
 `nest` is the module, `+0xa00` the function's offset from the module's base, and the last word the function's host name. Unnamed functions are `fn_<hex offset>`; a function with a symbol in the guest binary carries it as an Itanium name in the `guest` namespace (`_ZN5guest4main3fooEv` is `guest::main::foo()`, [the ABI](../abi.md) section 11). Load `relift_frames.py` in a gdb that talks to the host process to see those names demangled; the server's answers show the raw name.
 
 gdb sends the text after `monitor` as typed and does not evaluate it, so the server reads registers by the names in its target description itself. A gdb expression such as `$x30 & ~0xf` or a convenience variable is not understood; print it with `p/x` and pass the number.
+
+## A Game Boy program
+
+The server speaks gdb's `gbz80` target for a Game Boy program: `af`, `bc`, `de`, `hl`, `sp` and `pc`, plus the Z80 registers the SM83 lacks, which read as zero. The one thread stops between two instructions. This is the cart `scripts/ci/gdb-gb.sh` builds, which sets `a` and `b` and counts `c` in a loop:
+
+```text
+$ gdb -ex 'set architecture gbz80' -ex 'target remote :2345'
+0x00000155 in ?? ()
+(gdb) info threads
+  Id   Target Id                                                    Frame 
+* 1    Thread 1 "1" (stopped; pc 0x155 fixed+0x100 gb_f_0100_part1) 0x00000155 in ?? ()
+(gdb) p/x $af
+$1 = 0x4210
+(gdb) x/7xb 0x150
+0x150:	0x3e	0x42	0x06	0x13	0x0c	0x18	0xfd
+```
+
+Memory is the CPU's 16-bit bus as the device library sees it, read without timing effects, so `0x4000` to `0x7fff` shows the ROM bank mapped now. Memory and register writes are not supported for the Game Boy yet (a bus write is timed). The script also checks that a run stopped this way ends on the same frame and instruction count as one never stopped, and that nothing was interpreted.
 
 ## A Game Boy Advance program
 
@@ -259,6 +277,6 @@ The packets the server answers, its limits, the monitor commands and the registe
 
 ## Not available
 
-- No server for Game Boy programs, and no reads of the Nintendo 64's hardware registers, as above.
+- No reads of the Nintendo 64's hardware registers and no Game Boy memory writes, as above.
 - Breakpoints and write watchpoints are x86-64 Linux only. On other hosts the server answers registers, memory and threads, and gdb reports the breakpoint as unsupported.
 - No breakpoint at a guest address that is not a function entry, and none at a function clang inlined.
