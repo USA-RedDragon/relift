@@ -88,6 +88,10 @@ static struct {
     bool bindless_busy;
     /** @brief The slot rebinds that waited for the device, and those that did not because no unfinished work used the slot. */
     uint64_t rebind_flushed, rebind_free;
+    /** @brief Why a slot was rewritten (a different texture, the same texture with another view, the same texture in another host image), and the distinct slots rewritten since the last nvn_texset_rewrite_report. */
+    uint64_t why_texture, why_view, why_image;
+    uint8_t *rewritten;
+    uint64_t distinct;
     /** @brief The kind of each texture id's bound view (its format's sampled type). */
     uint32_t *tex_kind;
     uint8_t (*tex_view)[17];
@@ -287,6 +291,7 @@ static bool make(void)
     t.tex_img = calloc(t.ntex, sizeof *t.tex_img);
     t.tex_guest = calloc(t.ntex, sizeof *t.tex_guest);
     t.tex_epoch = calloc(t.ntex, sizeof *t.tex_epoch);
+    t.rewritten = calloc(t.ntex, 1);
     t.bound = calloc(t.ntex, sizeof *t.bound);
     t.tex_kind = calloc(t.ntex, sizeof *t.tex_kind);
     t.tex_view = calloc(t.ntex, sizeof *t.tex_view);
@@ -714,6 +719,17 @@ void nvn_texset_uses_recorded(void)
     }
 }
 
+void nvn_texset_rewrite_report(uint64_t *texture, uint64_t *view, uint64_t *image, uint64_t *distinct)
+{
+    *texture = t.why_texture;
+    *view = t.why_view;
+    *image = t.why_image;
+    *distinct = t.distinct;
+    if (t.ok && t.rewritten)
+        memset(t.rewritten, 0, t.ntex);
+    t.distinct = 0;
+}
+
 void nvn_texset_rebinds(uint64_t *flushed, uint64_t *free_of_wait)
 {
     *flushed = t.rebind_flushed;
@@ -933,6 +949,18 @@ static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_
         return nvn_vk_stop(r, "texture id %u of %u samples is registered as a view of target %u", id, v->d.samples,
                            has_view && nv.has_target ? nv.target : v->d.target);
     t.tex_epoch[sl] = was_used;
+    if (t.tex_img[sl]) {
+        if (t.tex_guest[sl] != tex)
+            t.why_texture++;
+        else if (t.tex_img[sl] != v)
+            t.why_image++;
+        else
+            t.why_view++;
+        if (t.rewritten && !t.rewritten[sl]) {
+            t.rewritten[sl] = 1;
+            t.distinct++;
+        }
+    }
     if (t.tex_img[sl] && !slot_settle(r, sl))
         return nvn_vk_stop(r, "the host device failed a submit");
     slot_busy(sl);

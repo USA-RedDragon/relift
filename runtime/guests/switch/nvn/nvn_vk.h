@@ -1502,6 +1502,11 @@ void nvn_texset_image_gone(const vimg *v);
 void nvn_texset_uses_recorded(void);
 /** @brief How many slot rewrites waited for the device and how many did not because no unfinished work used the slot. */
 void nvn_texset_rebinds(uint64_t *flushed, uint64_t *free_of_wait);
+/**
+ * @brief Why texture slots were rewritten since the start (a different texture under the slot, the same texture with another view, the same
+ * texture in another host image) and how many distinct slots were rewritten since the last call.
+ */
+void nvn_texset_rewrite_report(uint64_t *texture, uint64_t *view, uint64_t *image, uint64_t *distinct);
 /** @brief Forgets image v in the trace's capture cache before v is freed. */
 void nvn_trace_image_gone(const vimg *v);
 

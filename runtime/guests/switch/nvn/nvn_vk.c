@@ -7061,6 +7061,10 @@ static void present_rate(uint64_t total)
         nvn_texset_rebinds(&rb_flushed, &rb_free);
         rl_log(RL_LOG_INFO, "nvn", "texture slot rewrites: %llu waited for the device, %llu did not (no unfinished work used the slot)",
                (unsigned long long)rb_flushed, (unsigned long long)rb_free);
+        uint64_t why_t, why_v, why_i, distinct;
+        nvn_texset_rewrite_report(&why_t, &why_v, &why_i, &distinct);
+        rl_log(RL_LOG_INFO, "nvn", "texture slot rewrites by cause: %llu other texture, %llu other view, %llu other host image; %llu distinct slots since the last line",
+               (unsigned long long)why_t, (unsigned long long)why_v, (unsigned long long)why_i, (unsigned long long)distinct);
         uint64_t sets_live, sets_bytes, sets_made, sets_reused;
         nvn_cmdset_stats(&sets_live, &sets_bytes, &sets_made, &sets_reused);
         rl_log(RL_LOG_INFO, "nvn", "command sets: %llu alive (%.1f MiB), %llu made, %llu ended as a later recording wrote over their bytes",
