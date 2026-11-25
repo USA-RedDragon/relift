@@ -42,9 +42,12 @@
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
-#if defined(__linux__) && defined(__x86_64__)
+#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
 #include <ucontext.h>
-/** @brief Breakpoints and watchpoints: they trap on the host and step one host instruction with the trap flag. */
+/**
+ * @brief Breakpoints and watchpoints: they trap on the host and step one host instruction, with the trap flag on
+ * x86-64 and with a second trap at the instruction's successors on arm64 (Linux and Android).
+ */
 #define RL_GDB_TRAPS 1
 #endif
 
@@ -75,7 +78,8 @@ typedef struct parked {
 typedef struct breakpoint {
     uint64_t guest;
     uint8_t *host;
-    uint8_t orig;
+    /** @brief The host instruction bytes the trap replaced (1 on x86-64, 4 on arm64). */
+    uint32_t orig;
     bool on;
 } breakpoint;
 
@@ -540,24 +544,61 @@ static bool mem_write(uint64_t a, const uint8_t *src, size_t n)
 /** @brief The guest page size the watchpoints work in: the host page of the guest's address space. */
 static uint64_t host_page(void) { return G.guest->vm->host_page; }
 
-/** @brief Writes byte v over host code at p (the page made writable for the write, then executable again). */
-static void poke_code(uint8_t *p, uint8_t v)
+#if defined(__aarch64__)
+/** @brief Bytes of the trap instruction: BRK #0x7e5, which gdb's own breakpoints never use. */
+#define TRAP_LEN 4
+static const uint32_t TRAP_INSN = 0xd4200000u | 0x7e5u << 5;
+#else
+#define TRAP_LEN 1
+static const uint32_t TRAP_INSN = 0xccu;
+#endif
+
+/** @brief Writes the TRAP_LEN bytes of v over host code at p (the page made writable for the write, then executable). */
+static void poke_code(uint8_t *p, uint32_t v)
 {
     uintptr_t pg = (uintptr_t)sysconf(_SC_PAGESIZE);
     void *page = (void *)((uintptr_t)p & ~(pg - 1));
-    size_t len = (uintptr_t)p + 1 - (uintptr_t)page <= pg ? pg : 2 * pg;
+    size_t len = (uintptr_t)p + TRAP_LEN - (uintptr_t)page <= pg ? pg : 2 * pg;
     mprotect(page, len, PROT_READ | PROT_WRITE | PROT_EXEC);
-    __atomic_store_n(p, v, __ATOMIC_SEQ_CST);
+#if defined(__aarch64__)
+    __atomic_store_n((uint32_t *)(void *)p, v, __ATOMIC_SEQ_CST);
+    __builtin___clear_cache((char *)p, (char *)p + 4);
+#else
+    __atomic_store_n(p, (uint8_t)v, __ATOMIC_SEQ_CST);
+#endif
     mprotect(page, len, PROT_READ | PROT_EXEC);
 }
 
+/** @brief The host instruction bytes at p that a trap replaces. */
+static uint32_t code_at(const uint8_t *p)
+{
+    uint32_t v = 0;
+    memcpy(&v, p, TRAP_LEN);
+    return v;
+}
+
+static struct sigaction g_old_trap;
+
+/** @brief A SIGTRAP that is not the stub's: to the handler that was there before, or the default action. */
+static void pass_on(int sig, siginfo_t *si, void *uc)
+{
+    if (g_old_trap.sa_flags & SA_SIGINFO && g_old_trap.sa_sigaction)
+        g_old_trap.sa_sigaction(sig, si, uc);
+    else if (g_old_trap.sa_handler != SIG_DFL && g_old_trap.sa_handler != SIG_IGN)
+        g_old_trap.sa_handler(sig);
+    else {
+        signal(SIGTRAP, SIG_DFL);
+        raise(SIGTRAP);
+    }
+}
+
+#if defined(__x86_64__)
 /** @brief Per host thread: a breakpoint (index + 1) or a watched page to set again after one stepped instruction. */
 static _Thread_local int t_reinsert;
 static _Thread_local uint64_t t_rewatch;
 static _Thread_local bool t_rewatch_on;
 /** @brief The guest address of a watched store the stepped instruction made, 0 for none: stops after the store. */
 static _Thread_local uint64_t t_watch_hit;
-static struct sigaction g_old_trap;
 
 static void set_tf(ucontext_t *u, bool on)
 {
@@ -576,7 +617,7 @@ static void on_trap(int sig, siginfo_t *si, void *uc)
         if (t_reinsert) {
             breakpoint *b = &G.bp[t_reinsert - 1];
             if (b->on)
-                poke_code(b->host, 0xcc);
+                poke_code(b->host, TRAP_INSN);
             t_reinsert = 0;
         }
         if (t_rewatch_on) {
@@ -606,14 +647,7 @@ static void on_trap(int sig, siginfo_t *si, void *uc)
         }
         return;
     }
-    if (g_old_trap.sa_flags & SA_SIGINFO && g_old_trap.sa_sigaction)
-        g_old_trap.sa_sigaction(sig, si, uc);
-    else if (g_old_trap.sa_handler != SIG_DFL && g_old_trap.sa_handler != SIG_IGN)
-        g_old_trap.sa_handler(sig);
-    else {
-        signal(SIGTRAP, SIG_DFL);
-        raise(SIGTRAP);
-    }
+    pass_on(sig, si, uc);
 }
 
 /** @brief The debugger's fault hook: a write to a watched page stops the guest when it hits a watched range. */
@@ -640,6 +674,192 @@ static bool on_watch_fault(const rl_fault *f, void *uc)
     set_tf(uc, true);
     return true;
 }
+
+#else
+
+/*
+ * docgen:region arm64-step
+ * arm64 has no trap flag a signal handler can set (single-step is ptrace's), so one host instruction is stepped by
+ * planting a second trap at every instruction that can run after it: the next one, or for a branch its targets from
+ * the saved registers (B and BL, both ways of B.cond, CBZ, CBNZ, TBZ and TBNZ, and the register of BR, BLR and RET).
+ * The instruction itself runs in place, so PC-relative ones (ADR, ADRP, LDR literal) are right. When one of the
+ * planted traps is hit, all of them go and the breakpoint is set again, or the watched page closed again and a hit
+ * reported.
+ * docgen:end
+ */
+
+/** @brief Planted step traps at once (two per conditional branch, one per thread stepping). */
+#define MAX_STEPS 32
+
+/** @brief A step trap: where, the instruction under it, the step it belongs to and what finishing the step does. */
+typedef struct step_trap {
+    uint32_t *at;
+    uint32_t orig;
+    /** @brief The step: traps of one step (a branch's two ways) share it; 0 is a free slot. */
+    uint32_t step;
+    /** @brief The trap is another's (a breakpoint's): finishing the step leaves the instruction alone. */
+    bool shared;
+    /** @brief Breakpoint to set again (index + 1), or 0. */
+    int rearm;
+    /** @brief Watched page to close again, and the guest address of a watched store to report (0 for none). */
+    bool rewatch;
+    uint64_t page, hit;
+} step_trap;
+
+static step_trap g_steps[MAX_STEPS];
+static uint32_t g_step_seq;
+static int g_step_lock;
+
+static void step_lock(void)
+{
+    while (__atomic_exchange_n(&g_step_lock, 1, __ATOMIC_ACQUIRE))
+        ;
+}
+
+static void step_unlock(void) { __atomic_store_n(&g_step_lock, 0, __ATOMIC_RELEASE); }
+
+static int64_t sext(uint64_t v, unsigned bits) { return (int64_t)(v << (64 - bits)) >> (64 - bits); }
+
+/** @brief The addresses that can run after the instruction insn at pc, given the saved registers x; returns how many. */
+static int successors(uint32_t insn, uint64_t pc, const uint64_t *x, uint64_t out[2])
+{
+    if ((insn & 0x7c000000u) == 0x14000000u) { /* B, BL */
+        out[0] = pc + (uint64_t)(sext(insn & 0x3ffffffu, 26) * 4);
+        return 1;
+    }
+    if ((insn & 0xff000010u) == 0x54000000u || (insn & 0x7e000000u) == 0x34000000u) { /* B.cond, CBZ, CBNZ */
+        out[0] = pc + 4;
+        out[1] = pc + (uint64_t)(sext(insn >> 5 & 0x7ffffu, 19) * 4);
+        return 2;
+    }
+    if ((insn & 0x7e000000u) == 0x36000000u) { /* TBZ, TBNZ */
+        out[0] = pc + 4;
+        out[1] = pc + (uint64_t)(sext(insn >> 5 & 0x3fffu, 14) * 4);
+        return 2;
+    }
+    if ((insn & 0xff9ffc1fu) == 0xd61f0000u || (insn & 0xfffffc1fu) == 0xd65f0000u) { /* BR, BLR, RET */
+        unsigned rn = insn >> 5 & 31u;
+        out[0] = rn == 31 ? 0 : x[rn];
+        return out[0] ? 1 : 0;
+    }
+    out[0] = pc + 4;
+    return 1;
+}
+
+/** @brief Plants the traps that end a step of insn at pc; the step then does what t says. Takes the lock. */
+static void step_over(uint32_t insn, uint64_t pc, const uint64_t *x, step_trap t)
+{
+    uint64_t next[2];
+    int n = successors(insn, pc, x, next);
+    step_lock();
+    t.step = ++g_step_seq ? g_step_seq : ++g_step_seq;
+    for (int k = 0; k < n; k++) {
+        uint32_t *at = (uint32_t *)(uintptr_t)next[k];
+        int slot = -1;
+        bool shared = false;
+        for (int i = 0; i < MAX_STEPS; i++) {
+            if (g_steps[i].step && g_steps[i].at == at)
+                shared = true;
+            if (!g_steps[i].step && slot < 0)
+                slot = i;
+        }
+        for (int i = 0; i < MAX_BREAKS && !shared; i++)
+            shared = G.bp[i].on && G.bp[i].host == (uint8_t *)at;
+        if (slot < 0)
+            break;
+        step_trap *s = &g_steps[slot];
+        *s = t;
+        s->at = at;
+        s->shared = shared;
+        s->rearm = k == 0 ? t.rearm : 0;
+        s->rewatch = k == 0 && t.rewatch;
+        s->hit = k == 0 ? t.hit : 0;
+        if (!shared) {
+            s->orig = *at;
+            poke_code((uint8_t *)at, TRAP_INSN);
+        }
+    }
+    step_unlock();
+}
+
+/** @brief Finishes the steps whose trap is at pc; true when one was. A hit of a watched store parks after it. */
+static bool step_done(uint8_t *pc)
+{
+    bool any = false;
+    uint64_t hit = 0;
+    step_lock();
+    for (int i = 0; i < MAX_STEPS; i++) {
+        if (!g_steps[i].step || (uint8_t *)g_steps[i].at != pc)
+            continue;
+        any = true;
+        uint32_t step = g_steps[i].step;
+        for (int k = 0; k < MAX_STEPS; k++) {
+            step_trap *s = &g_steps[k];
+            if (s->step != step)
+                continue;
+            if (!s->shared)
+                poke_code((uint8_t *)s->at, s->orig);
+            if (s->rearm && G.bp[s->rearm - 1].on)
+                poke_code(G.bp[s->rearm - 1].host, TRAP_INSN);
+            if (s->rewatch)
+                rl_vm_host_watch(G.guest->vm, s->page, host_page(), true);
+            hit = hit ? hit : s->hit;
+            s->step = 0;
+        }
+    }
+    step_unlock();
+    struct rl_thread *t = rl_thread_current();
+    if (hit && t && t->ctx)
+        park(t->ctx, false, HIT_WATCH, false, 0, hit);
+    return any;
+}
+
+static void on_trap(int sig, siginfo_t *si, void *uc)
+{
+    ucontext_t *u = uc;
+    uint8_t *pc = (uint8_t *)(uintptr_t)u->uc_mcontext.pc;
+    bool stepped = step_done(pc);
+    for (int i = 0; i < MAX_BREAKS; i++) {
+        breakpoint *b = &G.bp[i];
+        if (!b->on || b->host != pc)
+            continue;
+        /* A lifted function is entered as fn(rl_ctx *c, uint8_t *mem): c is in x0, and its registers are exact. */
+        park((rl_ctx *)(uintptr_t)u->uc_mcontext.regs[0], true, HIT_BREAK, true, b->guest, 0);
+        if (b->on) {
+            poke_code(b->host, b->orig);
+            step_over(b->orig, (uint64_t)(uintptr_t)pc, (const uint64_t *)u->uc_mcontext.regs,
+                      (step_trap){ .rearm = i + 1 });
+        }
+        return;
+    }
+    if (!stepped)
+        pass_on(sig, si, uc);
+}
+
+/** @brief The debugger's fault hook: a write to a watched page stops the guest when it hits a watched range. */
+static bool on_watch_fault(const rl_fault *f, void *uc)
+{
+    uint64_t hp = host_page(), page = f->guest_addr & ~(hp - 1);
+    bool ours = false, hit = false;
+    for (int i = 0; i < MAX_WATCHES; i++) {
+        watchpoint *w = &G.wp[i];
+        if (!w->on)
+            continue;
+        uint64_t lo = w->addr & ~(hp - 1), hi = (w->addr + w->len + hp - 1) & ~(hp - 1);
+        ours |= page >= lo && page < hi;
+        hit |= f->guest_addr >= w->addr && f->guest_addr < w->addr + w->len;
+    }
+    if (!ours)
+        return false;
+    /* Let the store happen: open the page, step the store, then close the page and stop after a hit. */
+    ucontext_t *u = uc;
+    uint32_t *pc = (uint32_t *)(uintptr_t)u->uc_mcontext.pc;
+    rl_vm_host_access(G.guest->vm, page, hp, true);
+    step_over(*pc, (uint64_t)(uintptr_t)pc, (const uint64_t *)u->uc_mcontext.regs,
+              (step_trap){ .rewatch = true, .page = page, .hit = hit ? f->guest_addr : 0 });
+    return true;
+}
+#endif
 
 static void traps_install(void)
 {
@@ -677,9 +897,9 @@ static int break_set(uint64_t a, bool on)
     breakpoint *b = &G.bp[free_slot];
     b->guest = a;
     b->host = (uint8_t *)(uintptr_t)h.fn->fn;
-    b->orig = *b->host;
+    b->orig = code_at(b->host);
     b->on = true;
-    poke_code(b->host, 0xcc);
+    poke_code(b->host, TRAP_INSN);
     return 0;
 }
 

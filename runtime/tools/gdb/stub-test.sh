@@ -5,7 +5,7 @@
 # threads, walks the guest backtrace of three nested calls (monitor bt and
 # bt with relift_guest.py), names $pc and x30 - 4 with monitor sym, reads x0 and
 # guest memory, writes x2, stops at a breakpoint and a write watchpoint
-# (x86-64 hosts), writes a word, and detaches; then the same for a GBA run
+# (x86-64 and arm64 hosts), writes a word, and detaches; then the same for a GBA run
 # (gba_run_tests gdb_serve_a_gba_run_for_a_debugger) with gdb's arm target,
 # and an N64 run (n64_run_tests) with gdb's mips target.
 #
@@ -90,7 +90,8 @@ if grep -q '^#3 ' "$out/gdb.log"; then echo "stub-test: bt goes past the outermo
 # monitor reads registers of the current thread: gdb sends the text unevaluated.
 expect '^nest+0xa00 inner$'
 expect '^nest+0x900 mid$'
-if [ "$(uname -m)" = x86_64 ]; then
+case $(uname -m) in x86_64 | aarch64) traps=1 ;; *) traps= ;; esac
+if [ -n "$traps" ]; then
     expect 'Breakpoint 1, 0x0000000008001000'
     expect 'atchpoint 2: '
     expect 'New value'

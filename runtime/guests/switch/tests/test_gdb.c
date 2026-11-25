@@ -182,7 +182,7 @@ static uint64_t bt_fn(rl_ctx *c, uint8_t *mem)
  * guest with known registers and memory until the debugger writes 1 to the word at heap + 16 (up to 30 s);
  * without it, passes at once.
  */
-#if defined(__linux__) && defined(__x86_64__)
+#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
 static uint64_t fake_lifted(rl_ctx *c, uint8_t *mem);
 #endif
 
@@ -227,7 +227,7 @@ TEST(gdb_serve_for_a_debugger)
     c->x[30] = heap + 0x914;
     c->sp = heap + 0xec0;
     c->pc = heap + 0xa08;
-#if defined(__linux__) && defined(__x86_64__)
+#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
     /* A lifted function at guest 0x8001000 runs each round, then a store to heap + 0x40: a breakpoint and a watch. */
     static rl_fn_info info[1];
     info[0] = (rl_fn_info){ .guest_addr = 0x8001000, .fn_addr = 0x8001000, .guest_size = 4, .fn = fake_lifted,
@@ -240,7 +240,7 @@ TEST(gdb_serve_for_a_debugger)
     fprintf(stderr, "gdb-serve: heap 0x%llx\n", (unsigned long long)heap);
     for (int i = 0; i < 3000 && rl_ld32(m, heap + 16) != 1; i++) {
         hos_sched_point();
-#if defined(__linux__) && defined(__x86_64__)
+#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
         uint64_t x2 = c->x[2];
         call(c, m);
         c->x[2] = x2;
@@ -252,7 +252,7 @@ TEST(gdb_serve_for_a_debugger)
     CHECK_EQ(c->x[2], 0x42ull);
 }
 
-#if defined(__linux__) && defined(__x86_64__)
+#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
 
 /** @brief A stand-in lifted function: adds 1 to x5. */
 __attribute__((noinline)) static uint64_t fake_lifted(rl_ctx *c, uint8_t *mem)
@@ -353,6 +353,79 @@ TEST(gdb_server_stops_at_a_breakpoint_and_a_watchpoint)
     snprintf(want, sizeof want, "watch:%llx;", (unsigned long long)(s.heap + 0x40));
     CHECK(strstr(s.stop_w, want) != NULL);
     CHECK_EQ(rl_ld64(m, s.heap + 0x40), 0x5555u);
+}
+
+/** @brief fake_lifted under a name the assembly below can branch to. */
+uint64_t rl_test_branch_target(rl_ctx *c, uint8_t *mem);
+uint64_t rl_test_branch_target(rl_ctx *c, uint8_t *mem) { return fake_lifted(c, mem); }
+
+/** @brief A stand-in lifted function whose first host instruction is a branch (to rl_test_branch_target). */
+uint64_t rl_test_branch_first(rl_ctx *c, uint8_t *mem);
+__asm__(".text\n.globl rl_test_branch_first\n.hidden rl_test_branch_first\n.p2align 4\nrl_test_branch_first:\n"
+#if defined(__aarch64__)
+        "b rl_test_branch_target\n"
+#else
+        "jmp rl_test_branch_target\n"
+#endif
+);
+
+/** @brief What the client of the branch-first breakpoint saw. */
+typedef struct branchy {
+    int port;
+    volatile int go, done;
+    char stop1[64], stop2[64];
+    bool ok;
+} branchy;
+
+static void *branchy_client(void *arg)
+{
+    branchy *s = arg;
+    char r[4096];
+    int fd = fd_of(s->port);
+    s->ok = fd >= 0 && ask(fd, "Z0,8003000,4", r, sizeof r) && strcmp(r, "OK") == 0;
+    __atomic_store_n(&s->go, 1, __ATOMIC_RELEASE);
+    s->ok = s->ok && ask(fd, "vCont;c", r, sizeof r);
+    snprintf(s->stop1, sizeof s->stop1, "%s", r);
+    s->ok = s->ok && ask(fd, "vCont;c", r, sizeof r);
+    snprintf(s->stop2, sizeof s->stop2, "%s", r);
+    s->ok = s->ok && ask(fd, "z0,8003000,4", r, sizeof r) && ask(fd, "D", r, sizeof r);
+    if (fd >= 0)
+        close(fd);
+    __atomic_store_n(&s->done, 1, __ATOMIC_RELEASE);
+    return NULL;
+}
+
+TEST(gdb_server_breakpoint_on_a_function_that_starts_with_a_branch_hits_twice)
+{
+    rl_ctx *c = t_boot(NULL);
+    branchy s = { .port = free_port() };
+    char port[16];
+    snprintf(port, sizeof port, "%d", s.port);
+    CHECK_EQ(rl_settings_set("debug.gdb", port), RL_SETTING_OK);
+    CHECK(rl_gdb_start(rl_arm64_gdb(), hos_gdb_guest()));
+    static rl_fn_info info[1];
+    info[0] = (rl_fn_info){ .guest_addr = 0x8003000, .fn_addr = 0x8003000, .guest_size = 4,
+                            .fn = rl_test_branch_first, .host_sym = "rl_test_branch_first", .guest_name = "branchy" };
+    static rl_fn_map map = { RL_FN_MAP_VERSION, 1, info, "main", "main-0", 0x8000000, NULL, NULL };
+    const rl_fn_map *maps[] = { &map };
+    CHECK_EQ(rl_fn_maps_register(maps, 1), 0);
+    uint8_t *m = t_mem();
+    c->x[5] = 0;
+    uint64_t (*volatile call)(rl_ctx *, uint8_t *) = rl_test_branch_first;
+    pthread_t th;
+    CHECK_EQ(pthread_create(&th, NULL, branchy_client, &s), 0);
+    /* The guest calls it again and again: the second stop shows the breakpoint was set again after the branch. */
+    while (!__atomic_load_n(&s.done, __ATOMIC_ACQUIRE)) {
+        hos_sched_point();
+        if (__atomic_load_n(&s.go, __ATOMIC_ACQUIRE))
+            call(c, m);
+    }
+    pthread_join(th, NULL);
+    rl_fn_maps_reset();
+    CHECK(s.ok);
+    CHECK(strncmp(s.stop1, "T05thread:", 10) == 0);
+    CHECK(strncmp(s.stop2, "T05thread:", 10) == 0);
+    CHECK(c->x[5] >= 2u);
 }
 
 /** @brief A write watchpoint hit many times in a row: every continue runs the guest on to its next hit. */
