@@ -347,7 +347,7 @@ impl Ctx {
         {
             return self.arith_flush_fixed(k, xs, fix);
         }
-        if k == Arith::Fma && !self.host.fused_fma {
+        if k == Arith::Fma && !self.host.has_fused_fma() {
             if mode == Round::Nearest {
                 return self.float_fma(xs[0], xs[1], xs[2], ftz);
             }

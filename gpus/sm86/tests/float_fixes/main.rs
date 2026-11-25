@@ -1218,6 +1218,29 @@ fn ffma_is_exact_without_a_fused_host_fma() {
     }
 }
 
+/// A device whose probe found GLSL `Fma` fused, with no `OpFmaKHR`, takes the fused path through GLSL `Fma`: FFMA and
+/// the directed FMUL stay exact on devices that fuse, and the module needs no SPV_KHR_fma.
+#[test]
+fn ffma_is_exact_on_a_device_whose_glsl_fma_is_fused() {
+    for h in HostProfile::presets() {
+        let h = HostProfile {
+            fused_fma: false,
+            glsl_fma: true,
+            ..h
+        };
+        let o = host(h.clone());
+        let devs: Vec<Device> = devices(&h)
+            .into_iter()
+            .map(|d| Device { fused: true, ..d })
+            .collect();
+        check_vectors("FFMA", &o, &devs, ffma, &FFMA_VECTORS);
+        check_vectors("FMUL", &o, &devs, fmul, &FMUL_VECTORS);
+        let s =
+            translate_with(&program(ffma(RN.ftz()), 0, 0, 0), &o).unwrap_or_else(|e| panic!("{e}"));
+        assert!(!s.interface.host.fma_khr, "{}", h.name);
+    }
+}
+
 /// Only presets whose device capture reports `shaderFmaFloat32` use
 /// `OpFmaKHR`, and the report says so.
 #[test]

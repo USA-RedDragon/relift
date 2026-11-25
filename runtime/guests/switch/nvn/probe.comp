@@ -113,6 +113,16 @@ void main() {
     }
 }
 #else
+#ifdef GFMA32
+// GFMA32: row i reads a, b and c from w[3i..3i+2] and writes the bits of GLSL fma(a, b, c) to w[3n + i], with
+// SignedZeroInfNanPreserve and no denormal mode (the modes the translator emits).
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= n)
+        return;
+    w[3 * n + i] = floatBitsToUint(fma(uintBitsToFloat(w[3 * i]), uintBitsToFloat(w[3 * i + 1]), uintBitsToFloat(w[3 * i + 2])));
+}
+#else
 #ifdef DEN32
 void main() {
     uint i = gl_GlobalInvocationID.x;
@@ -153,6 +163,7 @@ void main() {
     w[o + 3] = floatBitsToUint(nmin(a, b));
     w[o + 4] = floatBitsToUint(nmax(a, b));
 }
+#endif
 #endif
 #endif
 #endif

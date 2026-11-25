@@ -78,7 +78,11 @@ impl Ctx {
     /// The fused `a * b + c`, through `OpFmaKHR`: only for a host with
     /// [`HostProfile::fused_fma`](super::HostProfile::fused_fma).
     pub(crate) fn fma(&mut self, a: u32, b: u32, c: u32) -> u32 {
-        debug_assert!(self.host.fused_fma);
+        debug_assert!(self.host.has_fused_fma());
+        if !self.host.fused_fma {
+            let f = self.f32t();
+            return self.ext(f, glsl::FMA, &[a, b, c]);
+        }
         self.cap(CAP_FMA_KHR);
         self.exts.insert("SPV_KHR_fma");
         self.iface.host.fma_khr = true;
@@ -92,7 +96,7 @@ impl Ctx {
     /// Veltkamp's constant, which needs only correctly rounded multiplies
     /// and adds.
     pub(crate) fn prod_err(&mut self, a: u32, b: u32, p: u32) -> u32 {
-        if self.host.fused_fma {
+        if self.host.has_fused_fma() {
             let np = self.fneg(p);
             return self.fma(a, b, np);
         }

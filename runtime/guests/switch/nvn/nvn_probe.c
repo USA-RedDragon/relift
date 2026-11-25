@@ -17,6 +17,46 @@ static const uint32_t nan_vals[] = { 0x7fc00000, 0xffc00000, 0x7f800001, 0x7fbff
                                      0x3f800000, 0xbf800000, 0x00000001, 0x80000001, 0x7f7fffff };
 #define NAN_VALS (uint32_t)(sizeof nan_vals / sizeof nan_vals[0])
 
+#define GFMA_ROWS 8192u
+
+uint32_t nvn_probe_gfma_rows(void) { return GFMA_ROWS; }
+
+void nvn_probe_gfma_input(uint32_t *w)
+{
+    uint32_t x = 0x9e3779b9u;
+    for (uint32_t i = 0; i < GFMA_ROWS; i++) {
+        uint32_t r[3];
+        for (int k = 0; k < 3; k++) {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            r[k] = x;
+        }
+        /* Normal numbers of moderate exponents, with c about the size of the product so the rounding of a * b shows. */
+        w[3 * i] = (r[0] & 0x807fffffu) | (126u + r[0] % 5) << 23;
+        w[3 * i + 1] = (r[1] & 0x807fffffu) | (126u + r[1] % 5) << 23;
+        w[3 * i + 2] = (r[2] & 0x807fffffu) | (125u + r[2] % 7) << 23;
+    }
+}
+
+bool nvn_probe_gfma_check(const uint32_t *w)
+{
+    uint32_t differ = 0;
+    for (uint32_t i = 0; i < GFMA_ROWS; i++) {
+        float a, b, c, got;
+        memcpy(&a, w + 3 * i, 4);
+        memcpy(&b, w + 3 * i + 1, 4);
+        memcpy(&c, w + 3 * i + 2, 4);
+        memcpy(&got, w + 3 * GFMA_ROWS + i, 4);
+        volatile float p = a * b;
+        float unfused = p + c, fused = fmaf(a, b, c);
+        if (memcmp(&got, &fused, 4))
+            return false;
+        differ += memcmp(&unfused, &fused, 4) != 0;
+    }
+    return differ >= 64;
+}
+
 uint32_t nvn_probe_nan_rows(void) { return NAN_VALS * NAN_VALS * 2; }
 
 void nvn_probe_nan_input(uint32_t *w)

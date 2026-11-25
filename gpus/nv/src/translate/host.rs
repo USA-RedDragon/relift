@@ -134,6 +134,9 @@ pub struct HostProfile {
     /// fused. GLSL `Fma` only has to be as precise as a multiply and an add,
     /// so without this FFMA is built from integer operations.
     pub fused_fma: bool,
+    /// GLSL `Fma` is a fused multiply-add on this device (the runtime's `glslFmaFused32` probe, every row of random
+    /// inputs matching a single rounding), though it has no `OpFmaKHR`: the fused operation is then GLSL `Fma`.
+    pub glsl_fma: bool,
     /// The runtime keeps guest memory pools as device mirrors (the device has
     /// no `VK_EXT_external_memory_host`; the runtime's `guestMemoryMirrored`
     /// probe) and copies back what the GPU wrote: stores and atomics through
@@ -218,6 +221,11 @@ impl Default for HostProfile {
 }
 
 impl HostProfile {
+    /// A fused multiply-add is available: `OpFmaKHR`, or GLSL `Fma` where the probe found it fused.
+    pub fn has_fused_fma(&self) -> bool {
+        self.fused_fma || self.glsl_fma
+    }
+
     /// The RTX 3090 on NVIDIA's proprietary driver (`tests/caps/nvidia.json`).
     pub fn nvidia() -> HostProfile {
         HostProfile {
@@ -245,6 +253,7 @@ impl HostProfile {
             denorm_flush_exact: false,
             signed_zero_inf_nan_preserve: true,
             fused_fma: true,
+            glsl_fma: false,
             mirror_writes: false,
             constant_cull_stores: false,
             clock: Clock::Device,
@@ -417,6 +426,7 @@ impl HostProfile {
             denorm_flush_mode: true,
             denorm_flush_exact: false,
             fused_fma: false,
+            glsl_fma: false,
             clock: Clock::None,
             max_shared_bytes: 32_768,
             max_samplers: 1 << 24,
@@ -456,6 +466,7 @@ impl HostProfile {
             denorm_flush_mode: true,
             denorm_flush_exact: false,
             fused_fma: false,
+            glsl_fma: false,
             max_shared_bytes: 32_768,
             max_samplers: 1 << 24,
             max_sampled_images: 1 << 24,
@@ -492,6 +503,7 @@ impl HostProfile {
             denorm_flush_mode: true,
             denorm_flush_exact: false,
             fused_fma: false,
+            glsl_fma: false,
             max_shared_bytes: 32_768,
             max_samplers: 1 << 23,
             max_sampled_images: 1 << 23,
@@ -528,6 +540,7 @@ impl HostProfile {
             denorm: Denorm::Flush,
             flush_fix: None,
             fused_fma: false,
+            glsl_fma: false,
             constant_cull_stores: true,
             max_shared_bytes: 32_768,
             max_samplers: 1_015_808,
@@ -595,6 +608,7 @@ impl HostProfile {
             denorm_flush_exact: false,
             signed_zero_inf_nan_preserve: false,
             fused_fma: false,
+            glsl_fma: false,
             mirror_writes: false,
             constant_cull_stores: false,
             clock: Clock::None,
@@ -704,6 +718,7 @@ impl HostProfile {
                 && caps.on("denormFlushMode32"),
             signed_zero_inf_nan_preserve: caps.on("shaderSignedZeroInfNanPreserveFloat32"),
             fused_fma: caps.extension_on("VK_KHR_shader_fma", "shaderFmaFloat32"),
+            glsl_fma: caps.on("glslFmaFused32"),
             mirror_writes: caps.on("guestMemoryMirrored"),
             constant_cull_stores: caps.get("driverID") == DRIVER_MESA_LLVMPIPE,
             clock: if caps.extension_on("VK_KHR_shader_clock", "shaderDeviceClock") {

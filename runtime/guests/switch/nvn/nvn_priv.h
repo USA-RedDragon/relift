@@ -408,6 +408,8 @@ typedef struct nvn_probes {
     bool canonical_nan32;
     /** @brief Half-precision add, multiply, fused multiply-add and conversions are exact binary16, NaNs aside. */
     bool exact_f16;
+    /** @brief GLSL Fma (no VK_KHR_shader_fma) is a fused multiply-add on every probe row (nvn_probe_gfma_check). */
+    bool glsl_fma32;
     /**
      * @brief VK_KHR_cooperative_matrix half 16x8x16 and 16x8x8 multiply-adds, built from and read into each lane's
      * components in the translator's register order, give the SM86 HMMA.F16 results.
@@ -439,6 +441,11 @@ bool nvn_vk_probes(nvn_probes *out);
 /** @brief The name device.json gives VkShaderStageFlagBits bit (VK_SHADER_STAGE_MESH_BIT_EXT for 7), NULL past the mesh stage. */
 const char *nvn_vk_stage_flag_name(uint32_t bit);
 /** @brief Rows of the single-precision NaN probe (three input words and five output words each). */
+/** @brief Rows of the fused multiply-add probe (probe.comp GFMA32): a, b, c per row in three words, results from word 3 * rows. */
+uint32_t nvn_probe_gfma_rows(void);
+void nvn_probe_gfma_input(uint32_t *w);
+/** @brief Whether every result is the single-rounded a * b + c (fmaf), with enough rows that differ from a rounded product plus c to tell fused from unfused. */
+bool nvn_probe_gfma_check(const uint32_t *w);
 uint32_t nvn_probe_nan_rows(void);
 /** @brief Writes the NaN probe's inputs to w[0 .. 3 * rows). */
 void nvn_probe_nan_input(uint32_t *w);

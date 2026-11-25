@@ -1345,6 +1345,35 @@ static void nan_device(uint32_t *w, bool canon)
     }
 }
 
+TEST(nvn_probe_checks_a_fused_multiply_add_by_every_row)
+{
+    uint32_t rows = nvn_probe_gfma_rows();
+    uint32_t *w = calloc(4, rows * 4ull);
+    CHECK(w != NULL);
+    nvn_probe_gfma_input(w);
+    for (uint32_t i = 0; i < rows; i++) {
+        float a, b, c, f;
+        memcpy(&a, w + 3 * i, 4);
+        memcpy(&b, w + 3 * i + 1, 4);
+        memcpy(&c, w + 3 * i + 2, 4);
+        f = fmaf(a, b, c);
+        memcpy(w + 3 * rows + i, &f, 4);
+    }
+    CHECK(nvn_probe_gfma_check(w));
+    /* A multiply rounded before the add is what an unfused device gives, and the inputs tell it from the fused result. */
+    for (uint32_t i = 0; i < rows; i++) {
+        float a, b, c;
+        memcpy(&a, w + 3 * i, 4);
+        memcpy(&b, w + 3 * i + 1, 4);
+        memcpy(&c, w + 3 * i + 2, 4);
+        volatile float p = a * b;
+        float f = p + c;
+        memcpy(w + 3 * rows + i, &f, 4);
+    }
+    CHECK(!nvn_probe_gfma_check(w));
+    free(w);
+}
+
 TEST(nvn_probe_checks_nan_results)
 {
     uint32_t rows = nvn_probe_nan_rows();

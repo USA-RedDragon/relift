@@ -1136,6 +1136,23 @@ out:
  * times zero and opposite infinities (nvn_probe_nan_check). False when the
  * device lacks SignedZeroInfNanPreserve or a probe cannot run.
  */
+/** @brief Whether GLSL Fma on the device is a fused multiply-add, which the translator then uses in place of OpFmaKHR (probe.comp GFMA32). */
+static bool probe_glsl_fma32(bool szinp)
+{
+    if (!szinp)
+        return false;
+    uint32_t rows = nvn_probe_gfma_rows();
+    staging buf;
+    if (!nvn_vk_staging_new(&buf, 16ull * rows))
+        return false;
+    uint32_t *w = (uint32_t *)(void *)buf.map;
+    memset(w, 0, 16ull * rows);
+    nvn_probe_gfma_input(w);
+    bool ok = run_probe(nvn_probe_gfma, sizeof nvn_probe_gfma, &buf, rows, 0, (rows + 63) / 64, 0) && nvn_probe_gfma_check(w);
+    nvn_vk_staging_free(&buf);
+    return ok;
+}
+
 static bool probe_canonical_nan(bool szinp, bool dp32, bool fma32)
 {
     if (!szinp)
@@ -1410,6 +1427,7 @@ static void write_caps(void)
                 fma.b[0];
     g.probes.canonical_nan32 = probe_canonical_nan(p12.shaderSignedZeroInfNanPreserveFloat32,
                                                    p12.shaderDenormPreserveFloat32, has[3] && fma.b[1]);
+    g.probes.glsl_fma32 = probe_glsl_fma32(p12.shaderSignedZeroInfNanPreserveFloat32);
     nvn_denorm_class dc;
     g.probes.denorm32 = probe_denorm32(p12.shaderSignedZeroInfNanPreserveFloat32, p12.shaderDenormPreserveFloat32,
                                        p12.shaderDenormFlushToZeroFloat32, &g.probes.denorm_preserve_mode32,
@@ -1424,10 +1442,10 @@ static void write_caps(void)
     fprintf(f,
             "    \"ReliftDeviceProbes\": { \"canonicalNan32\": %s, \"exactFloat16\": %s, \"hmmaCooperativeMatrix\": "
             "%s, \"denormDefault32\": %u, \"denormPreserveMode32\": %s, \"denormAddFlush32\": %s, "
-            "\"denormMulFix32\": %u, \"denormFlushMode32\": %s, \"guestMemoryMirrored\": %s },\n",
+            "\"denormMulFix32\": %u, \"denormFlushMode32\": %s, \"glslFmaFused32\": %s, \"guestMemoryMirrored\": %s },\n",
             B(g.probes.canonical_nan32), B(g.probes.exact_f16), B(g.probes.hmma_coop), g.probes.denorm32,
             B(g.probes.denorm_preserve_mode32), B(g.probes.denorm_add_flush), g.probes.denorm_mul_fix,
-            B(g.probes.denorm_flush_mode32), B(!g.host_import));
+            B(g.probes.denorm_flush_mode32), B(g.probes.glsl_fma32), B(!g.host_import));
     fprintf(f, "    \"VkPhysicalDeviceVulkan13Properties\": { \"maxSubgroupSize\": %u, \"minSubgroupSize\": %u, ",
             p13.maxSubgroupSize, p13.minSubgroupSize);
     json_flags(f, "requiredSubgroupSizeStages", p13.requiredSubgroupSizeStages, stages, sizeof stages / sizeof stages[0]);
