@@ -128,6 +128,17 @@ static VkPipeline pipeline(uint32_t tile, uint32_t volume, uint32_t words_log2)
     return *p;
 }
 
+/** @brief How many idle slabs to keep: at most ARENAS_KEPT, and no more than 1/32 of the largest device-local heap (a handheld's shared memory keeps few). */
+static uint32_t arenas_kept(void)
+{
+    uint64_t heap = 0;
+    for (uint32_t i = 0; i < g.memprops.memoryHeapCount; i++)
+        if ((g.memprops.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) && g.memprops.memoryHeaps[i].size > heap)
+            heap = g.memprops.memoryHeaps[i].size;
+    uint64_t n = heap / 32 / ARENA_BYTES;
+    return n > ARENAS_KEPT ? ARENAS_KEPT : (uint32_t)n;
+}
+
 void nvn_untile_release(uint32_t slot)
 {
     uint32_t cur = U.cur;
@@ -145,7 +156,7 @@ void nvn_untile_release(uint32_t slot)
     for (uint32_t i = 0; i < U.narenas[U.cur]; i++) {
         packed_arena a = U.arenas[U.cur][i];
         a.used = 0;
-        if (U.nidle < ARENAS_KEPT) {
+        if (U.nidle < arenas_kept()) {
             U.idle[U.nidle++] = a;
         } else {
             VK(vkDestroyBuffer)(g.dev, a.buf, NULL);
