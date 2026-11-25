@@ -645,6 +645,8 @@ void nds_irq_write(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t m
 void nds_ipc_reset(rl_nds *m);
 /** @brief IPCSYNC, IPCFIFOCNT or IPCFIFORECV (which pops) at word offset off. */
 uint32_t nds_ipc_read(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now);
+/** @brief nds_ipc_read for a debugger: the receive FIFO's front word without taking it. */
+uint32_t nds_ipc_peek(rl_nds *m, unsigned cpu, uint32_t off);
 /** @brief A write of the mask bits of v to IPCSYNC, IPCFIFOCNT or IPCFIFOSEND. */
 void nds_ipc_write(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t mask, uint64_t now);
 
@@ -724,6 +726,8 @@ void nds_gx_attach(rl_nds *m);
 bool nds_gx_reg(unsigned cpu, uint32_t off);
 /** @brief A 3D engine register word at tick now. */
 uint32_t nds_gx_read(rl_nds *m, uint32_t off, uint64_t now);
+/** @brief nds_gx_read for a debugger: the geometry engine as it last ran, not run to now. */
+uint32_t nds_gx_peek(rl_nds *m, uint32_t off, uint64_t now);
 /** @brief A write of the mask bits of v to a 3D engine register word at tick now (GXFIFO and the command ports queue commands). */
 void nds_gx_write(rl_nds *m, uint32_t off, uint32_t v, uint32_t mask, uint64_t now);
 /** @brief Runs the geometry engine's queue up to tick to. */
@@ -836,6 +840,8 @@ void nds_snd_attach(rl_nds *m);
 void nds_snd_run(rl_nds *m, uint64_t to);
 /** @brief A sound register (word offset 0x400 to 0x51C) at tick now. */
 uint32_t nds_snd_read(rl_nds *m, uint32_t off, uint64_t now);
+/** @brief nds_snd_read for a debugger: the sound unit as it last ran. */
+uint32_t nds_snd_peek(const rl_nds *m, uint32_t off);
 /** @brief A write of the mask bits of v to a sound register at tick now (a start bit that goes from 0 to 1 starts). */
 void nds_snd_write(rl_nds *m, uint32_t off, uint32_t v, uint32_t mask, uint64_t now);
 

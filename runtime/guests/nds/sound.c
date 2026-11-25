@@ -463,8 +463,13 @@ void nds_snd_attach(rl_nds *m)
 
 uint32_t nds_snd_read(rl_nds *m, uint32_t off, uint64_t now)
 {
-    nds_sound *s = &m->snd;
     nds_snd_run(m, now);
+    return nds_snd_peek(m, off);
+}
+
+uint32_t nds_snd_peek(const rl_nds *m, uint32_t off)
+{
+    const nds_sound *s = &m->snd;
     if (off < 0x500)
         return (off & 0xF) == 0 ? s->ch[(off - 0x400) >> 4].cnt : 0;
     switch (off) {

@@ -675,7 +675,9 @@ bool rl_sched_peek(rl_sched_cpu *c, uint64_t addr, uint32_t size, uint64_t *out)
         const sched_range *r = find_range(c->sched, addr + i);
         if (!r || !r->owner->peek)
             return false;
-        v |= (r->owner->peek(r->owner, addr + i, 1, r->owner->now) & 0xff) << (8 * i);
+        /* A device that catches up answers as of its own tick; one whose state changes only on access is current. */
+        uint64_t at = r->owner->catch_up ? r->owner->now : rl_sched_now(c);
+        v |= (r->owner->peek(r->owner, addr + i, 1, at) & 0xff) << (8 * i);
     }
     *out = v;
     return true;

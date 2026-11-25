@@ -77,6 +77,14 @@ static uint32_t recv(rl_nds *m, unsigned me, uint64_t now)
     return v;
 }
 
+uint32_t nds_ipc_peek(rl_nds *m, unsigned cpu, uint32_t off)
+{
+    const nds_fifo *f = &m->ipc.fifo[cpu ^ 1];
+    if (off == NDS_FIFORECV)
+        return f->n ? f->q[f->rd] : m->ipc.last[cpu];
+    return nds_ipc_read(m, cpu, off, 0);
+}
+
 uint32_t nds_ipc_read(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now)
 {
     const nds_ipc *p = &m->ipc;

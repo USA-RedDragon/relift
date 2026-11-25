@@ -51,12 +51,16 @@ static bool math_reg(unsigned cpu, uint32_t off) { return cpu == RL_NDS_ARM9 && 
 
 static bool dma_reg(unsigned cpu, uint32_t off) { return off >= 0xB0 && off < (cpu == RL_NDS_ARM9 ? 0xF0u : 0xE0u); }
 
-static uint32_t read32(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now)
+/**
+ * @brief One I/O word as cpu reads it at now. With peek (a debugger's read) nothing changes: the units that run on
+ * read (geometry, sound) are not run, the cartridge does not settle or take a word, the FIFO keeps its word.
+ */
+static uint32_t read32(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now, bool peek)
 {
     if (nds_disp_reg(cpu, off))
         return nds_disp_read(m, off);
     if (nds_gx_reg(cpu, off))
-        return nds_gx_read(m, off, now);
+        return peek ? nds_gx_peek(m, off, now) : nds_gx_read(m, off, now);
     if (off >= 0x100 && off < 0x110)
         return nds_timer_read(m, cpu, off, now);
     if (dma_reg(cpu, off))
@@ -64,7 +68,7 @@ static uint32_t read32(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now)
     if (off == 0x130 || (off == 0x134 && cpu == RL_NDS_ARM7))
         return nds_keypad_read(m, cpu, off);
     if ((off >= 0x1A0 && off < 0x1C0 && off != 0x1A8 && off != 0x1AC) || off == NDS_CARDPORT)
-        return nds_cart_read(m, off, now);
+        return peek ? nds_cart_peek(m, off, now) : nds_cart_read(m, off, now);
     if (cpu == RL_NDS_ARM7 && off == 0x1C0)
         return nds_spi_read(m, now);
     if (cpu == RL_NDS_ARM7 && off == 0x138)
@@ -76,7 +80,7 @@ static uint32_t read32(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now)
     case 0x184:
     case 0x188:
     case NDS_FIFORECV:
-        return nds_ipc_read(m, cpu, off, now);
+        return peek ? nds_ipc_peek(m, cpu, off) : nds_ipc_read(m, cpu, off, now);
     case 0x208:
     case 0x20C:
     case 0x210:
@@ -102,7 +106,7 @@ static uint32_t read32(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now)
         return m->postflg[cpu];
     default:
         if (cpu == RL_NDS_ARM7 && nds_sys_has(off))
-            return nds_sys_read(m, off, now);
+            return peek && off != 0x304 && off != 0x308 ? nds_snd_peek(m, off) : nds_sys_read(m, off, now);
         if (off < NDS_REGS)
             return regs_word(m, cpu, off);
         return 0;
@@ -209,7 +213,7 @@ static void write32(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t 
 uint32_t nds_io_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint64_t now)
 {
     uint32_t off = addr - 0x04000000u;
-    uint32_t w = read32(m, cpu, off & ~3u, now);
+    uint32_t w = read32(m, cpu, off & ~3u, now, false);
     return (w >> (8 * (off & 3))) & nds_mask(size);
 }
 
@@ -274,6 +278,21 @@ static uint64_t io_read(rl_device *d, uint64_t addr, uint32_t size, uint64_t now
     return nds_io_read(m, (unsigned)(addr >> 32), (uint32_t)addr, size, now);
 }
 
+/**
+ * docgen:region io-peek
+ * @brief The debugger's read of the NDS I/O registers (rl_device.peek): read32 with peek, so the units that run on
+ * a read (geometry engine, sound) answer as they last ran, the cartridge's data port gives its last word, and the IPC
+ * receive FIFO shows its front word without taking it. The other registers' reads change nothing already.
+ * docgen:end
+ */
+static uint64_t io_peek(rl_device *d, uint64_t addr, uint32_t size, uint64_t now)
+{
+    rl_nds *m = ((nds_dev *)d->opaque)->m;
+    uint32_t off = (uint32_t)addr - 0x04000000u;
+    uint32_t w = read32(m, (unsigned)(addr >> 32), off & ~3u, now, true);
+    return (w >> (8 * (off & 3))) & nds_mask(size);
+}
+
 static void io_write(rl_device *d, uint64_t addr, uint32_t size, uint64_t value, uint64_t now)
 {
     rl_nds *m = ((nds_dev *)d->opaque)->m;
@@ -282,7 +301,7 @@ static void io_write(rl_device *d, uint64_t addr, uint32_t size, uint64_t value,
 
 int nds_io_attach(rl_nds *m)
 {
-    m->d_io = (nds_dev){.dev = {.name = "nds io", .read = io_read, .write = io_write, .line = RL_LINE_NONE}, .m = m};
+    m->d_io = (nds_dev){.dev = {.name = "nds io", .read = io_read, .write = io_write, .peek = io_peek, .line = RL_LINE_NONE}, .m = m};
     m->d_io.dev.opaque = &m->d_io;
     if (rl_sched_add_device(m->sched, &m->d_io.dev) != 0 || nds_disp_add(m) != 0)
         return -1;

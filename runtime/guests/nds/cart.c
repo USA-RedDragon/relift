@@ -172,6 +172,22 @@ static void start(nds_cart *c, uint64_t now)
     c->next = c->words ? c->at + step(c, 0) : NDS_NEVER;
 }
 
+uint32_t nds_cart_peek(const rl_nds *m, uint32_t off, uint64_t now)
+{
+    const nds_cart *c = &m->cart;
+    switch (off) {
+    case 0x1A0:
+        return (c->auxcnt | (now < c->spi_end ? 0x80u : 0)) | (uint32_t)c->spi_in << 16;
+    case 0x1A4:
+        return (c->romctrl & ROM_MASK & ~ROM_DRQ) | (c->busy ? ROM_START : 0) |
+               (c->busy && c->produced > c->consumed ? ROM_DRQ : 0);
+    case NDS_CARDPORT:
+        return c->last;
+    default:
+        return 0;
+    }
+}
+
 uint32_t nds_cart_read(rl_nds *m, uint32_t off, uint64_t now)
 {
     nds_cart *c = &m->cart;

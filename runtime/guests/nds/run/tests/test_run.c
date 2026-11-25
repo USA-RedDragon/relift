@@ -250,7 +250,7 @@ TEST(nds_run_code_no_unit_holds_stops_the_program)
 /** @brief What the client saw. */
 typedef struct nclient {
     int port;
-    char threads[1024], r0a[16], r0b[16], r6b[16], pcb[16], mem7[16], io[8], det[8];
+    char threads[1024], r0a[16], r0b[16], r6b[16], pcb[16], mem7[16], io[8], det[8], ioa[80], iob[80];
     bool ok;
 } nclient;
 
@@ -306,8 +306,17 @@ static void *nclient_run(void *arg)
     snprintf(s->pcb, sizeof s->pcb, "%s", r);
     s->ok = s->ok && nask(fd, "m2380000,4", r, sizeof r);
     snprintf(s->mem7, sizeof s->mem7, "%s", r);
-    s->ok = s->ok && nask(fd, "m4000180,4", r, sizeof r);
-    snprintf(s->io, sizeof s->io, "%s", r);
+    /* Twice each, while stopped: IPCSYNC/IPCFIFOCNT, the FIFO receive port, IME/IE/IF, VCOUNT/DISPSTAT, timer 0. */
+    static const char *const io_pk[] = { "m4000180,8", "m4100000,4", "m4000208,10", "m4000004,4", "m4000100,4" };
+    for (int round = 0; round < 2; round++)
+        for (int k = 0; k < 5; k++) {
+            s->ok = s->ok && nask(fd, io_pk[k], r, sizeof r);
+            char *dst = round ? s->iob : s->ioa;
+            size_t o = strlen(dst);
+            snprintf(dst + o, 80 - o, "%.15s,", r);
+        }
+    s->ok = s->ok && nask(fd, "Hg1", r, sizeof r) && nask(fd, "m4000180,8", r, sizeof r);
+    snprintf(s->io, sizeof s->io, "%.7s", r);
     s->ok = s->ok && nask(fd, "D", r, sizeof r);
     snprintf(s->det, sizeof s->det, "%s", r);
     close(fd);
@@ -358,7 +367,9 @@ TEST(gdb_server_stops_both_nds_cpus_and_keeps_their_timing)
     CHECK(le32(s.r6b) == (le32(s.pcb) == ENTRY7 ? 0u : 0x60u + RL_NDS_ARM7));
     /* The ARM7's map at its entry holds its code (0x70 ...). */
     CHECK(strcmp(s.mem7, "70717273") == 0);
-    CHECK(strcmp(s.io, "E14") == 0);
+    CHECK(strcmp(s.ioa, s.iob) == 0);
+    CHECK(strstr(s.ioa, "E") == NULL);
+    CHECK(strlen(s.io) == 7);
     CHECK(strcmp(s.det, "OK") == 0);
     CHECK_EQ(T.cycles[RL_NDS_ARM9], ref9);
     CHECK_EQ(T.cycles[RL_NDS_ARM7], ref7);

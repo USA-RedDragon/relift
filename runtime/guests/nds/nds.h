@@ -195,6 +195,11 @@ bool rl_nds_ordered(const rl_nds *m, unsigned cpu, uint32_t addr);
  * current tick (before rl_nds_attach, at tick 0), nothing charged.
  */
 uint32_t rl_nds_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size);
+/**
+ * @brief rl_nds_read for a debugger: I/O registers through their devices' peeks (rl_sched_peek), so nothing runs,
+ * settles or is taken. False where a register has no peek.
+ */
+bool rl_nds_peek(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_t *out);
 /** @brief The write twin of rl_nds_read (a HALTCNT write does not halt). */
 void rl_nds_write(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_t value);
 

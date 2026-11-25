@@ -267,8 +267,13 @@ static uint32_t gxstat(rl_nds *m, uint64_t now)
 
 uint32_t nds_gx_read(rl_nds *m, uint32_t off, uint64_t now)
 {
-    nds_gx *g = &m->gx;
     nds_gx_run(m, now);
+    return nds_gx_peek(m, off, now);
+}
+
+uint32_t nds_gx_peek(rl_nds *m, uint32_t off, uint64_t now)
+{
+    const nds_gx *g = &m->gx;
     if (off == 0x060)
         return g->disp3dcnt | (g->ram_over ? 0x2000u : 0);
     if (off == 0x320)

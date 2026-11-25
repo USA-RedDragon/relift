@@ -148,6 +148,8 @@ void nds_cart_reset(rl_nds *m);
 void nds_cart_attach(rl_nds *m);
 /** @brief Registers 0x1A0 to 0x1BB and the data port (word offset off) at tick now. */
 uint32_t nds_cart_read(rl_nds *m, uint32_t off, uint64_t now);
+/** @brief nds_cart_read for a debugger: no settle, and the data port gives the last word without taking the next. */
+uint32_t nds_cart_peek(const rl_nds *m, uint32_t off, uint64_t now);
 /** @brief A write of the mask bits of v to one of them. */
 void nds_cart_write(rl_nds *m, uint32_t off, uint32_t v, uint32_t mask, uint64_t now);
 /** @brief Raises a cartridge DMA request for tick t if a word waits in the data port. */

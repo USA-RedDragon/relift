@@ -314,6 +314,19 @@ uint32_t rl_nds_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size)
     }
 }
 
+bool rl_nds_peek(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_t *out)
+{
+    if (nds_decode(m, cpu, addr & ~(size - 1), false, false).kind != NDS_K_IO) {
+        *out = rl_nds_read(m, cpu, addr, size);
+        return true;
+    }
+    uint64_t v = 0;
+    if (m->sched && !rl_sched_peek(m->cpu[cpu], nds_io_key(cpu, addr & ~(size - 1)), size, &v))
+        return false;
+    *out = (uint32_t)v;
+    return true;
+}
+
 void rl_nds_write(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_t value)
 {
     addr &= ~(size - 1);

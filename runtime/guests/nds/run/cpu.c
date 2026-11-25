@@ -822,9 +822,8 @@ static uint32_t gdb_threads(rl_gdb_thread *out, uint32_t max)
 
 /**
  * docgen:region gdb-memory
- * @brief Memory of the selected CPU's map (thread 1 the ARM9's, 2 the ARM7's) without timing (rl_nds_read). The
- * I/O registers (0x04000000 to 0x04FFFFFF) are refused for now: their reads go through the scheduler, which catches
- * devices up.
+ * @brief Memory of the selected CPU's map (thread 1 the ARM9's, 2 the ARM7's) without timing or side effects
+ * (rl_nds_peek: the I/O registers through their devices' peeks); writes as the CPU's untimed stores (rl_nds_write).
  * docgen:end
  */
 static size_t gdb_read(uint64_t tid, uint64_t a, uint8_t *dst, size_t n)
@@ -832,8 +831,9 @@ static size_t gdb_read(uint64_t tid, uint64_t a, uint8_t *dst, size_t n)
     rl_nds_run *r = g_gdb_run;
     unsigned cpu = tid == 2 ? RL_NDS_ARM7 : RL_NDS_ARM9;
     size_t i = 0;
-    for (; r && i < n && a + i <= UINT32_MAX && (a + i) >> 24 != 0x4; i++)
-        dst[i] = (uint8_t)rl_nds_read(r->m, cpu, (uint32_t)(a + i), 1);
+    uint32_t v;
+    for (; r && i < n && a + i <= UINT32_MAX && rl_nds_peek(r->m, cpu, (uint32_t)(a + i), 1, &v); i++)
+        dst[i] = (uint8_t)v;
     return i;
 }
 

@@ -123,7 +123,8 @@ struct rl_device {
     /**
      * @brief A read for a debugger (rl_sched_peek), or NULL where the device cannot read without a side effect. It
      * returns what a read at tick now would, changes nothing (no flag cleared, no queue popped, no input sampled) and
-     * is called without catching the device up, with now at the device's own tick.
+     * is called without catching the device up, with now at the device's own tick (the CPU's tick for a device with
+     * no catch_up, whose state changes only on access).
      */
     rl_device_read *peek;
 };
@@ -359,7 +360,7 @@ RL_RUNTIME_API int rl_sched_map(rl_sched *s, uint64_t addr, uint64_t size, rl_de
 RL_RUNTIME_API uint64_t rl_sched_read(rl_sched_cpu *c, uint64_t addr, uint32_t size);
 /**
  * @brief Reads size bytes at addr for a debugger: no event fires, no device catches up, and the owner's peek answers
- * at the owner's own tick. False when a byte is unmapped or its device has no peek; *out is then left alone.
+ * at the owner's own tick (rl_device.peek). False when a byte is unmapped or its device has no peek; *out is then left alone.
  */
 RL_RUNTIME_API bool rl_sched_peek(rl_sched_cpu *c, uint64_t addr, uint32_t size, uint64_t *out);
 /** @brief The write twin of rl_sched_read. An unmapped write is dropped. */
