@@ -1360,6 +1360,22 @@ TEST(nvn_probe_checks_a_fused_multiply_add_by_every_row)
         memcpy(w + 3 * rows + i, &f, 4);
     }
     CHECK(nvn_probe_gfma_check(w));
+    /* A device that flushes the sign of a zero, or gives a number for 0 * inf + c, is not fused-exact. */
+    for (uint32_t i = 0; i < rows; i++) {
+        float a, b, c;
+        memcpy(&a, w + 3 * i, 4);
+        memcpy(&b, w + 3 * i + 1, 4);
+        memcpy(&c, w + 3 * i + 2, 4);
+        if (isnan(fmaf(a, b, c))) {
+            uint32_t n = 0x3f800000u;
+            memcpy(w + 3 * rows + i, &n, 4);
+            CHECK(!nvn_probe_gfma_check(w));
+            float f = fmaf(a, b, c);
+            memcpy(w + 3 * rows + i, &f, 4);
+            break;
+        }
+    }
+    CHECK(nvn_probe_gfma_check(w));
     /* A multiply rounded before the add is what an unfused device gives, and the inputs tell it from the fused result. */
     for (uint32_t i = 0; i < rows; i++) {
         float a, b, c;

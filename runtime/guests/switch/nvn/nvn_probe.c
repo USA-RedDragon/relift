@@ -17,14 +17,24 @@ static const uint32_t nan_vals[] = { 0x7fc00000, 0xffc00000, 0x7f800001, 0x7fbff
                                      0x3f800000, 0xbf800000, 0x00000001, 0x80000001, 0x7f7fffff };
 #define NAN_VALS (uint32_t)(sizeof nan_vals / sizeof nan_vals[0])
 
-#define GFMA_ROWS 8192u
+/**
+ * @brief Rows of the fused multiply-add probe: GFMA_RANDOM random normal rows whose product needs rounding before the
+ * add (so a device that rounds twice differs), then every combination of the special values below (signed zeros,
+ * infinities, NaNs, denormals, the extremes) as a, b and c.
+ */
+static const uint32_t gfma_vals[] = { 0x00000000, 0x80000000, 0x7f800000, 0xff800000, 0x7fc00000, 0x00000001, 0x80000001,
+                                      0x007fffff, 0x00800000, 0x80800000, 0x3f800000, 0xbf800000, 0x7f7fffff, 0xff7fffff,
+                                      0x34000000, 0x33800000, 0x40000000 };
+#define GFMA_VALS (uint32_t)(sizeof gfma_vals / sizeof gfma_vals[0])
+#define GFMA_RANDOM 8192u
+#define GFMA_ROWS (GFMA_RANDOM + GFMA_VALS * GFMA_VALS * GFMA_VALS)
 
 uint32_t nvn_probe_gfma_rows(void) { return GFMA_ROWS; }
 
 void nvn_probe_gfma_input(uint32_t *w)
 {
     uint32_t x = 0x9e3779b9u;
-    for (uint32_t i = 0; i < GFMA_ROWS; i++) {
+    for (uint32_t i = 0; i < GFMA_RANDOM; i++) {
         uint32_t r[3];
         for (int k = 0; k < 3; k++) {
             x ^= x << 13;
@@ -37,7 +47,18 @@ void nvn_probe_gfma_input(uint32_t *w)
         w[3 * i + 1] = (r[1] & 0x807fffffu) | (126u + r[1] % 5) << 23;
         w[3 * i + 2] = (r[2] & 0x807fffffu) | (125u + r[2] % 7) << 23;
     }
+    for (uint32_t k = 0; k < GFMA_VALS * GFMA_VALS * GFMA_VALS; k++) {
+        uint32_t *row = w + 3 * (GFMA_RANDOM + k);
+        row[0] = gfma_vals[k / (GFMA_VALS * GFMA_VALS)];
+        row[1] = gfma_vals[k / GFMA_VALS % GFMA_VALS];
+        row[2] = gfma_vals[k % GFMA_VALS];
+    }
 }
+
+static bool gfma_nan(uint32_t v) { return (v & 0x7fffffffu) > 0x7f800000u; }
+
+/** @brief Whether a denormal is among the row's inputs or its result. */
+static bool gfma_denormal(uint32_t v) { return (v & 0x7f800000u) == 0 && (v & 0x007fffffu) != 0; }
 
 bool nvn_probe_gfma_check(const uint32_t *w)
 {
@@ -50,9 +71,19 @@ bool nvn_probe_gfma_check(const uint32_t *w)
         memcpy(&got, w + 3 * GFMA_ROWS + i, 4);
         volatile float p = a * b;
         float unfused = p + c, fused = fmaf(a, b, c);
-        if (memcmp(&got, &fused, 4))
+        uint32_t g, f;
+        memcpy(&g, &got, 4);
+        memcpy(&f, &fused, 4);
+        /* Denormal inputs and results are repaired where the translator guards them, so only the rest must match here. */
+        bool den = gfma_denormal(w[3 * i]) || gfma_denormal(w[3 * i + 1]) || gfma_denormal(w[3 * i + 2]) || gfma_denormal(f);
+        if (den)
+            continue;
+        /* A NaN is any NaN (the translator canonicalizes it); every other result matches bit for bit, signed zeros included. */
+        if (gfma_nan(f) ? !gfma_nan(g) : g != f)
             return false;
-        differ += memcmp(&unfused, &fused, 4) != 0;
+        uint32_t u;
+        memcpy(&u, &unfused, 4);
+        differ += u != f && !gfma_nan(f);
     }
     return differ >= 64;
 }
