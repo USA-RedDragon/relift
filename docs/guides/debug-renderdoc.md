@@ -23,7 +23,33 @@ Two settings control it, `renderdoc.capture` (`RELIFT_RENDERDOC_CAPTURE`) and `r
 
 ## Capture a frame
 
-The way that worked on the test program is to let `renderdoccmd` start it. RenderDoc then puts its library in the process from the start, and the runtime finds it:
+There are two ways to put RenderDoc in the process, and both were run on the test program. The first is to enable RenderDoc's Vulkan layer by environment, `ENABLE_VULKAN_RENDERDOC_CAPTURE=1`. This is also the form to use for the Switch 2 graphics layer, together with `RELIFT_NVN_MEMORY=mirror` (RenderDoc hides `VK_EXT_external_memory_host`, so the layer must mirror the game's memory pools, and the shader table must have been made for the run's own `shaders/device.json`):
+
+```text
+$ ENABLE_VULKAN_RENDERDOC_CAPTURE=1 RELIFT_RENDERDOC_CAPTURE=20 RELIFT_RENDERDOC_DIR=$PWD/caps \
+    ./game --frames 40 --no-save --no-audio
+[relift info window] RenderDoc's layer is on: using X11 (:0), as the layer has no Wayland surfaces
+[relift info window] SDL x11 video driver
+[relift info vulkan] core device up on <GPU name>, queue family 0, 2 queues, with swapchains
+[relift info capture] RenderDoc captures go to ~/caps/relift_capture.rdc
+[relift info vulkan] a capture tool is loaded: VK_EXT_debug_utils on, for command labels and object names
+[relift info present] SDL3 window: swapchain 640x576, 4 images, format 44, fifo, transform 0x1 of 0x1
+[relift info capture] RenderDoc capture started before frame 20
+[relift info capture] RenderDoc capture ended after present 20 (written)
+```
+
+The layer loads RenderDoc's library only when the program makes its first Vulkan instance, and a presenter makes it inside the first present, after the capture setting was first read. The runtime therefore looks for the library again once Vulkan is up:
+
+<!-- docgen:code file=runtime/core/capture.c region=vulkan-up -->
+```c
+* @brief RenderDoc's Vulkan layer (ENABLE_VULKAN_RENDERDOC_CAPTURE=1) loads its library into the process when a
+* Vulkan instance is made, which for a presenter can be inside the first present, after the first look for it. So
+* the look waits for the instance when the layer is enabled, and is made again here, once the core device is up or a
+* guest's own instance is made; a capture that starts with present 1 starts here when that present is under way.
+```
+<!-- /docgen:code -->
+
+The second way is to let `renderdoccmd` start the program. RenderDoc then puts its library in the process from the start:
 
 ```text
 $ RELIFT_RENDERDOC_CAPTURE=5 RELIFT_RENDERDOC_DIR=$PWD/caps \
@@ -41,13 +67,7 @@ Launching './game' with params: --frames 12
 
 The log lines say each step: X11 chosen, the capture folder, `VK_EXT_debug_utils` turned on, and the capture start and end. The window uses X11 under RenderDoc because the layer has no Wayland surfaces; with no `DISPLAY` there is no swapchain and every frame goes through host memory.
 
-The runtime's project notes also use the Vulkan layer by environment, `ENABLE_VULKAN_RENDERDOC_CAPTURE=1`, which is the form to use for the Switch 2 graphics layer, together with `RELIFT_NVN_MEMORY=mirror` (RenderDoc hides `VK_EXT_external_memory_host`, so the layer must mirror the game's memory pools, and the shader table must have been made for the run's own `shaders/device.json`). On the Game Boy test program that form alone did not capture: the capture setting is read at the first present, before the Vulkan instance exists, and the log said so:
-
-```text
-[relift warn capture] renderdoc.capture is set but RenderDoc is not loaded into the process
-```
-
-Start the program through `renderdoccmd capture`, as above, when you see that line.
+A capture of the first few presents can hold no GPU work: the window makes its swapchain a few presents in, and the frames before it carry none. On the test program a capture of present 5 held only the device's setup in some runs, under either way, and one of present 20 always held the copy, the blit and the present. Pick a present after the `SDL3 window: swapchain` line. If the log says `renderdoc.capture is set but RenderDoc is not loaded into the process`, neither way put RenderDoc in the process: check that RenderDoc's layer is installed (`renderdoc_capture.json` in a Vulkan `implicit_layer.d` folder) or use `renderdoccmd`.
 
 ### Capture the next frame by hand
 
