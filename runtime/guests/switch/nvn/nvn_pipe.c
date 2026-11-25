@@ -34,7 +34,7 @@ typedef struct entry {
     size_t len;
     uint32_t hash;
     VkPipeline p;
-    /** @brief 0 while a thread is making it, 1 made, 2 the driver refused. */
+    /** @brief 0 while a thread is making it, 1 made, 2 the driver refused, 3 made for the driver's cache and destroyed. */
     int state;
 } entry;
 
@@ -176,6 +176,11 @@ static VkPipeline peek(table *t, const void *key, size_t len)
     return p;
 }
 
+/** @brief The warm-up thread is making a library only for the driver's cache: it is destroyed once made. */
+static _Thread_local bool t_release;
+/** @brief The library the calling thread made for the cache and destroyed, or found already so. */
+static _Thread_local bool t_released;
+
 static entry *claim(table *t, const void *key, size_t len, bool *mine)
 {
     uint32_t h = hash_bytes(key, len);
@@ -201,7 +206,15 @@ static entry *claim(table *t, const void *key, size_t len, bool *mine)
     } else {
         while (e->state == 0)
             pthread_cond_wait(&P.cv, &P.lock);
-        if (e->state == 2)
+        if (e->state == 3) {
+            /* the warm-up destroyed it: a warm-up has it in the cache already; a draw makes it again from the cache */
+            if (t_release) {
+                t_released = true;
+            } else {
+                e->state = 0;
+                *mine = true;
+            }
+        } else if (e->state == 2)
             snprintf(t_why, sizeof t_why, "an earlier make of the same pipeline or library failed");
     }
     pthread_mutex_unlock(&P.lock);
@@ -787,6 +800,18 @@ static VkPipeline library(table *t, const void *key, size_t len, VkGraphicsPipel
     if (create_graphics(&ci, what, &p) != VK_SUCCESS)
         p = NULL;
     release_modules(&s);
+    if (p && t_release &&
+        (part == VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT ||
+         part == VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT)) {
+        VK(vkDestroyPipeline)(g.dev, p, NULL);
+        pthread_mutex_lock(&P.lock);
+        e->p = NULL;
+        e->state = 3;
+        pthread_cond_broadcast(&P.cv);
+        pthread_mutex_unlock(&P.lock);
+        t_released = true;
+        return NULL;
+    }
     finish(e, p);
     return p;
 }
@@ -895,9 +920,27 @@ static VkPipeline fragment_library(const nvn_pipe_key *k)
     return library(&P.fs, &sk, sizeof sk, VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT, &f, "fragment library");
 }
 
-bool nvn_pipe_warm_vertex(const nvn_pipe_key *k) { return P.gpl && vertex_library(k) != NULL; }
+bool nvn_pipe_warm_vertex(const nvn_pipe_key *k)
+{
+    if (!P.gpl)
+        return false;
+    t_release = true;
+    t_released = false;
+    bool ok = vertex_library(k) != NULL || t_released;
+    t_release = false;
+    return ok;
+}
 
-bool nvn_pipe_warm_fragment(const nvn_pipe_key *k) { return P.gpl && fragment_library(k) != NULL; }
+bool nvn_pipe_warm_fragment(const nvn_pipe_key *k)
+{
+    if (!P.gpl)
+        return false;
+    t_release = true;
+    t_released = false;
+    bool ok = fragment_library(k) != NULL || t_released;
+    t_release = false;
+    return ok;
+}
 
 /** @brief The monolithic pipeline for k, which a device without libraries makes at the draw. */
 static VkPipeline monolithic(const nvn_pipe_key *k)
@@ -1335,7 +1378,12 @@ void nvn_pipe_stats(uint64_t *made, uint64_t *made_ns, uint64_t *late, uint64_t 
 void nvn_pipe_held(uint32_t *libraries, uint32_t *graphics, uint32_t *compute)
 {
     pthread_mutex_lock(&P.lock);
-    *libraries = P.vi.n + P.pr.n + P.fs.n + P.fo.n;
+    uint32_t held = P.vi.n + P.fo.n;
+    const table *stage_libs[2] = { &P.pr, &P.fs };
+    for (int i = 0; i < 2; i++)
+        for (uint32_t j = 0; j < stage_libs[i]->cap; j++)
+            held += stage_libs[i]->slot[j] && stage_libs[i]->slot[j]->p;
+    *libraries = held;
     *graphics = P.full.n;
     *compute = P.comp.n + P.mcomp.n;
     pthread_mutex_unlock(&P.lock);

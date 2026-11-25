@@ -209,17 +209,23 @@ TEST(nvn_pipe_libraries_are_made_once_and_linked_by_every_pipeline)
     uint64_t made0, ns0, late0, lns0, made1, ns1, late1, lns1;
     nvn_pipe_stats(&made0, &ns0, &late0, &lns0);
     bool libs = nvn_pipe_uses_libraries();
+    uint32_t libs0, libs1, g0, c0;
+    nvn_pipe_held(&libs0, &g0, &c0);
     if (libs) {
         CHECK(nvn_pipe_warm_vertex(&a));
         CHECK(nvn_pipe_warm_fragment(&a));
         nvn_pipe_stats(&made1, &ns1, &late1, &lns1);
         CHECK_EQ(made1 - made0, 2u);
         made0 = made1;
+        /* the warm-up's stage libraries are in the driver's cache, not held: no memory is kept for 40,000 of them */
+        nvn_pipe_held(&libs1, &g0, &c0);
+        CHECK_EQ(libs1, libs0);
     }
     VkPipeline pa = nvn_pipe_graphics(&a);
     CHECK(pa != NULL);
     nvn_pipe_stats(&made1, &ns1, &late1, &lns1);
-    CHECK_EQ(made1 - made0, libs ? 3u : 1u);
+    /* the two stage libraries are made again from the cache when the first draw needs them */
+    CHECK_EQ(made1 - made0, libs ? 5u : 1u);
     made0 = made1;
     CHECK(nvn_pipe_graphics(&a) == pa);
     nvn_pipe_stats(&made1, &ns1, &late1, &lns1);
