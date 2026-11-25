@@ -23,6 +23,8 @@
  */
 #include "cpu.h"
 
+#include "gdbstub.h"
+
 #include <stdlib.h>
 
 /**
@@ -380,8 +382,52 @@ void rl_gba_run_free(rl_gba_run *r)
     r->k = NULL;
 }
 
+#if defined(RL_DEBUG_STUB)
+/** @brief The GDB server's one thread: the CPU (id 1). */
+static uint32_t gdb_threads(rl_gdb_thread *out, uint32_t max)
+{
+    if (!g_run || !g_run->c)
+        return 0;
+    if (max)
+        out[0] = (rl_gdb_thread){ .id = 1, .ctx = g_run->c, .core = 0, .running = true };
+    return 1;
+}
+
+/**
+ * docgen:region gdb-memory
+ * @brief Guest memory for the GDB server by bus address: reads are peeks (rl_gba_peek, no wait states, no side effect
+ * of an I/O read), writes go through the bus as the CPU's stores do (rl_gba_write).
+ * docgen:end
+ */
+static size_t gdb_read(uint64_t a, uint8_t *dst, size_t n)
+{
+    size_t i = 0;
+    for (; i < n && a + i <= UINT32_MAX && g_run; i++)
+        dst[i] = (uint8_t)rl_gba_peek(g_run->g, (uint32_t)(a + i), 1);
+    return i;
+}
+
+static bool gdb_write(uint64_t a, const uint8_t *src, size_t n)
+{
+    if (!g_run || a + n > (uint64_t)UINT32_MAX + 1)
+        return false;
+    for (size_t i = 0; i < n; i++)
+        rl_gba_write(g_run->g, (uint32_t)(a + i), 1, src[i]);
+    return true;
+}
+
+static const rl_gdb_guest g_gdb_guest = {
+    .threads = gdb_threads, .mem_read = gdb_read, .mem_write = gdb_write, .clocked = true
+};
+
+const rl_gdb_guest *rl_gba_gdb_guest(void) { return &g_gdb_guest; }
+#endif
+
 int rl_gba_run_start(rl_gba_run *r)
 {
+#if defined(RL_DEBUG_STUB)
+    rl_gdb_start(rl_arm32_gdb(), &g_gdb_guest);
+#endif
     rl_sched_run(r->k);
     return rl_arm32_run(r->c, NULL, r->entry);
 }

@@ -21,6 +21,9 @@
 /** @brief The ARMv4T descriptor for rl_core_init (context layout, halfword code granule, little-endian data). */
 RL_RUNTIME_API const rl_cpu_desc *rl_arm32_cpu(void);
 
+/** @brief The registers for the GDB server (core/gdbstub.h), where it is built in (RL_DEBUG_STUB). */
+RL_RUNTIME_API const struct rl_gdb_cpu *rl_arm32_gdb(void);
+
 /** @brief The CPSR of c. */
 RL_RUNTIME_API uint32_t rl_arm32_cpsr(const rl_ctx *c);
 

@@ -140,7 +140,7 @@ static parked *find_parked(const rl_ctx *c)
  * @brief Parks c until the debugger resumes the guest. While stepping, only the stepping thread parks, and it stops
  * the guest. A thread that hit a breakpoint or watchpoint (hit) stops the guest and names the stop.
  */
-static void park(rl_ctx *c, bool exact, int hit, uint64_t pc, uint64_t addr)
+static void park(rl_ctx *c, bool exact, int hit, bool has_pc, uint64_t pc, uint64_t addr)
 {
     pthread_mutex_lock(&G.lock);
     int st = __atomic_load_n(&rl_gdb_stopping, __ATOMIC_ACQUIRE);
@@ -156,7 +156,7 @@ static void park(rl_ctx *c, bool exact, int hit, uint64_t pc, uint64_t addr)
         G.hit_addr = addr;
     }
     __atomic_store_n(&rl_gdb_stopping, 1, __ATOMIC_RELEASE);
-    G.park[G.nparked++] = (parked){ c, exact, hit == HIT_BREAK, pc };
+    G.park[G.nparked++] = (parked){ c, exact, has_pc, pc };
     pthread_cond_broadcast(&G.arrived);
     /* 1 holds every thread; 0 (run) and 2 (step) let it go. */
     while (__atomic_load_n(&rl_gdb_stopping, __ATOMIC_ACQUIRE) == 1)
@@ -167,7 +167,9 @@ static void park(rl_ctx *c, bool exact, int hit, uint64_t pc, uint64_t addr)
     pthread_mutex_unlock(&G.lock);
 }
 
-void rl_gdb_park(rl_ctx *c, bool exact) { park(c, exact, HIT_NONE, 0, 0); }
+void rl_gdb_park(rl_ctx *c, bool exact) { park(c, exact, HIT_NONE, false, 0, 0); }
+
+void rl_gdb_park_at(rl_ctx *c, uint64_t pc) { park(c, true, HIT_NONE, true, pc, 0); }
 
 /** @brief Takes a fresh list of the guest's threads. */
 static void list_threads(void)
@@ -193,7 +195,7 @@ static void stop_all(void)
 {
     __atomic_store_n(&rl_gdb_stopping, 1, __ATOMIC_RELEASE);
     list_threads();
-    for (uint32_t i = 0; i < G.nth; i++)
+    for (uint32_t i = 0; i < G.nth && !G.guest->clocked; i++)
         if (G.th[i].ctx)
             rl_preempt_request(G.th[i].ctx);
     uint64_t until = now_ns() + STOP_WAIT_NS;
@@ -468,6 +470,8 @@ static void threads_xml(const char *args)
         parked *p = find_parked(t->ctx);
         char nm[200] = "", esc[260];
         uint64_t pc = t->ctx && G.cpu->pc ? G.cpu->pc(t->ctx) : 0;
+        if (p && p->has_pc)
+            pc = p->pc;
         name_at(nm, sizeof nm, pc);
         escape_xml(esc, sizeof esc, nm);
         const char *state = p ? (p->exact ? "stopped" : "stopped at a preemption check, registers of its last call")
@@ -485,6 +489,8 @@ static void threads_xml(const char *args)
 /** @brief Reads n bytes of guest memory at a, page by page, stopping at the first page the guest cannot read. */
 static size_t mem_read(uint64_t a, uint8_t *dst, size_t n)
 {
+    if (G.guest->mem_read)
+        return G.guest->mem_read(a, dst, n);
     rl_vm *vm = G.guest->vm;
     size_t done = 0;
     while (done < n) {
@@ -504,6 +510,8 @@ static size_t mem_read(uint64_t a, uint8_t *dst, size_t n)
 
 static bool mem_write(uint64_t a, const uint8_t *src, size_t n)
 {
+    if (G.guest->mem_write)
+        return G.guest->mem_write(a, src, n);
     rl_vm *vm = G.guest->vm;
     if (!rl_vm_contains(vm, a, n))
         return false;
@@ -569,7 +577,7 @@ static void on_trap(int sig, siginfo_t *si, void *uc)
         struct rl_thread *t = rl_thread_current();
         t_watch_hit = 0;
         if (hit && t && t->ctx)
-            park(t->ctx, false, HIT_WATCH, 0, hit);
+            park(t->ctx, false, HIT_WATCH, false, 0, hit);
         return;
     }
     for (int i = 0; i < MAX_BREAKS; i++) {
@@ -579,7 +587,7 @@ static void on_trap(int sig, siginfo_t *si, void *uc)
         u->uc_mcontext.gregs[REG_RIP] = (greg_t)(uintptr_t)b->host;
         /* A lifted function is entered as fn(rl_ctx *c, uint8_t *mem): c is in rdi, and its registers are exact. */
         rl_ctx *c = (rl_ctx *)(uintptr_t)u->uc_mcontext.gregs[REG_RDI];
-        park(c, true, HIT_BREAK, b->guest, 0);
+        park(c, true, HIT_BREAK, true, b->guest, 0);
         if (b->on) {
             poke_code(b->host, b->orig);
             t_reinsert = i + 1;
@@ -667,6 +675,8 @@ static int break_set(uint64_t a, bool on)
 /** @brief Z2 over [a, a + len): protects the pages. 0 or an error number. */
 static int watch_set(uint64_t a, uint64_t len, bool on)
 {
+    if (!G.guest->vm)
+        return 22;
     uint64_t hp = host_page();
     int free_slot = -1;
     for (int i = 0; i < MAX_WATCHES; i++) {
@@ -1079,7 +1089,8 @@ static void *server(void *arg)
 bool rl_gdb_start(const rl_gdb_cpu *cpu, const rl_gdb_guest *guest)
 {
     int64_t port = rl_setting_int("debug.gdb");
-    if (port <= 0 || !cpu || !guest || !guest->threads || !guest->vm || G.listen_fd >= 0)
+    if (port <= 0 || !cpu || !guest || !guest->threads || !(guest->vm || (guest->mem_read && guest->mem_write)) ||
+        G.listen_fd >= 0)
         return false;
     G.cpu = cpu;
     G.guest = guest;

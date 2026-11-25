@@ -324,3 +324,143 @@ TEST(gba_run_code_in_ram_runs_the_unit_the_cpu_fetched)
     CHECK_EQ(rl_gba_cpu_fetch_code(c, 0x03000102u, 1, 0x46C0u), 1);
     CHECK(rl_gba_cpu_variant(c, 0x03000102u, 1) == variant_a);
 }
+
+#include "gdbstub.h"
+
+#if defined(RL_DEBUG_STUB)
+
+#include <relift/settings.h>
+
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+/** @brief Instructions of count_main. */
+#define COUNT_N 3000000u
+
+static struct {
+    uint64_t cycles;
+    uint32_t r0;
+} cnt;
+
+/** @brief Counts r0 to COUNT_N with a sync point per instruction, then records the cycle count and stops. */
+static uint64_t count_main(rl_ctx *c, uint8_t *mem)
+{
+    c->r[0] = 0;
+    while (c->r[0] < COUNT_N) {
+        c->r[0]++;
+        rl_gba_cpu_fetch(c, 0x08000200u, 0);
+        if (c->time.budget <= 0) {
+            int rc = rl_sync(c, mem, 0x08000204u);
+            if (rc)
+                return RL_PENDING;
+        }
+    }
+    cnt.cycles = rl_sched_cycles(rl_gba_run_current()->k);
+    cnt.r0 = c->r[0];
+    return rl_pend_exit_process(c, 0);
+}
+
+/** @brief What the client saw. */
+typedef struct gclient {
+    int port;
+    char xml[64], r0[16], pc[16], if1[8], if2[8], cont[8];
+    bool ok;
+} gclient;
+
+static bool gask(int fd, const char *pkt, char *out, size_t n)
+{
+    char buf[256];
+    unsigned sum = 0;
+    for (const char *q = pkt; *q; q++)
+        sum += (unsigned char)*q;
+    int len = snprintf(buf, sizeof buf, "$%s#%02x", pkt, sum & 0xff);
+    if (send(fd, buf, (size_t)len, 0) != len)
+        return false;
+    char ch;
+    do {
+        if (recv(fd, &ch, 1, 0) != 1)
+            return false;
+    } while (ch != '$');
+    size_t o = 0;
+    for (;;) {
+        if (recv(fd, &ch, 1, 0) != 1)
+            return false;
+        if (ch == '#')
+            break;
+        if (o + 1 < n)
+            out[o++] = ch;
+    }
+    out[o] = 0;
+    char cs[2];
+    return recv(fd, cs, 2, MSG_WAITALL) == 2 && send(fd, "+", 1, 0) == 1;
+}
+
+static void *gclient_run(void *arg)
+{
+    gclient *s = arg;
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in sa = { .sin_family = AF_INET, .sin_port = htons((uint16_t)s->port) };
+    sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    bool up = false;
+    for (int i = 0; i < 300 && !up; i++)
+        up = connect(fd, (struct sockaddr *)&sa, sizeof sa) == 0 || (usleep(10000), false);
+    char r[2048];
+    s->ok = up && gask(fd, "qXfer:features:read:target.xml:0,7ff", r, sizeof r);
+    snprintf(s->xml, sizeof s->xml, "%s", strstr(r, "<architecture>") ? strstr(r, "<architecture>") : "");
+    s->ok = s->ok && gask(fd, "p0", r, sizeof r);
+    snprintf(s->r0, sizeof s->r0, "%s", r);
+    s->ok = s->ok && gask(fd, "pf", r, sizeof r);
+    snprintf(s->pc, sizeof s->pc, "%s", r);
+    s->ok = s->ok && gask(fd, "m4000202,2", r, sizeof r);
+    snprintf(s->if1, sizeof s->if1, "%s", r);
+    s->ok = s->ok && gask(fd, "m4000202,2", r, sizeof r);
+    snprintf(s->if2, sizeof s->if2, "%s", r);
+    s->ok = s->ok && gask(fd, "D", r, sizeof r);
+    snprintf(s->cont, sizeof s->cont, "%s", r);
+    close(fd);
+    return NULL;
+}
+
+TEST(gdb_server_stops_a_gba_run_at_a_sync_point_and_keeps_its_timing)
+{
+    /* A run with no debugger gives the reference cycle count. */
+    CHECK(boot(count_main) == 0);
+    CHECK_EQ(rl_gba_run_start(&run), RL_PENDING);
+    CHECK_EQ(cnt.r0, COUNT_N);
+    uint64_t ref = cnt.cycles;
+    rl_gba_run_free(&run);
+
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in sa = { .sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
+    socklen_t sl = sizeof sa;
+    CHECK(bind(fd, (struct sockaddr *)&sa, sizeof sa) == 0 && getsockname(fd, (struct sockaddr *)&sa, &sl) == 0);
+    close(fd);
+    gclient s = { .port = ntohs(sa.sin_port) };
+    char port[16];
+    snprintf(port, sizeof port, "%d", s.port);
+    rl_settings_declare_runtime();
+    CHECK_EQ(rl_settings_set("debug.gdb", port), RL_SETTING_OK);
+    CHECK(boot(count_main) == 0);
+    pthread_t th;
+    CHECK_EQ(pthread_create(&th, NULL, gclient_run, &s), 0);
+    /* The client attaches while the guest counts, stops it at a sync point, reads and detaches. */
+    CHECK_EQ(rl_gba_run_start(&run), RL_PENDING);
+    pthread_join(th, NULL);
+    CHECK(s.ok);
+    CHECK(strncmp(s.xml, "<architecture>arm</architecture>", 32) == 0);
+    unsigned long r0 = strtoul(s.r0, NULL, 16);
+    uint32_t r0v = (uint32_t)((r0 >> 24) | ((r0 >> 8) & 0xff00u) | ((r0 << 8) & 0xff0000u) | (r0 << 24));
+    CHECK(r0v > 0 && r0v < COUNT_N);
+    CHECK(strcmp(s.pc, "04020008") == 0);
+    CHECK(strcmp(s.if1, s.if2) == 0);
+    CHECK(strcmp(s.cont, "OK") == 0);
+    /* Stopping did not move the guest's clock. */
+    CHECK_EQ(cnt.r0, COUNT_N);
+    CHECK_EQ(cnt.cycles, ref);
+}
+#endif

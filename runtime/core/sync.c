@@ -6,6 +6,7 @@
  * preemption point's entry to the guest layer's scheduler.
  */
 #include "core.h"
+#include "gdbstub.h"
 #include "sched_int.h"
 
 int rl_sched_attach(rl_sched_cpu *c, struct rl_thread *t)
@@ -58,6 +59,11 @@ int rl_sync(rl_ctx *c, uint8_t *mem, uint64_t next)
     rl_sched_cpu *k = ctx_clock(c);
     if (!k)
         return rl_guest_fatal(c, "sched", "sync point reached on a thread without a scheduler clock");
+    /* docgen:region sync-point */
+    /* A sync point is a safe point for the GDB server: the exit's registers are stored and next is the guest pc. A
+     * stop request ends the budget (rl_preempt_request), so the thread parks here at its next sync point. */
+    rl_gdb_point_at(c, next);
+    /* docgen:end */
     for (;;) {
         if (k->clock.time->budget <= 0)
             rl_sched_run(k);

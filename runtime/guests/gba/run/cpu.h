@@ -61,5 +61,7 @@ void rl_gba_run_free(rl_gba_run *r);
 int rl_gba_run_start(rl_gba_run *r);
 /** @brief The run of the calling thread, or NULL. */
 rl_gba_run *rl_gba_run_current(void);
+/** @brief The GBA side of the GDB server (one thread, the bus as memory); rl_gba_run_start starts the server with it. */
+const struct rl_gdb_guest *rl_gba_gdb_guest(void);
 
 #endif

@@ -81,8 +81,20 @@ typedef struct rl_gdb_thread {
 typedef struct rl_gdb_guest {
     /** @brief Fills up to max threads into out and returns how many there are. */
     uint32_t (*threads)(rl_gdb_thread *out, uint32_t max);
-    /** @brief The guest address space, for memory reads and writes. */
+    /** @brief The guest address space, for memory reads and writes, or NULL when mem_read and mem_write are set. */
     struct rl_vm *vm;
+    /**
+     * @brief Reads n bytes at guest address a into dst without side effects (a register read never clears a flag or
+     * pops a queue); returns how many it read from the start. NULL: read vm.
+     */
+    size_t (*mem_read)(uint64_t a, uint8_t *dst, size_t n);
+    /** @brief Writes n bytes at guest address a as the guest's own stores would; false where it cannot. NULL: write vm. */
+    bool (*mem_write)(uint64_t a, const uint8_t *src, size_t n);
+    /**
+     * @brief The guest runs on a cycle clock whose own events bring it to a sync point often (rl_sync): a stop waits
+     * for that and leaves the budget alone, since ending the budget early would move the guest's clock.
+     */
+    bool clocked;
 } rl_gdb_guest;
 
 #if defined(RL_DEBUG_STUB)
@@ -95,11 +107,19 @@ extern RL_RUNTIME_API int rl_gdb_stopping;
 RL_RUNTIME_API bool rl_gdb_start(const rl_gdb_cpu *cpu, const rl_gdb_guest *guest);
 /** @brief Parks the calling guest thread while the debugger holds the guest stopped. exact: c's registers are current. */
 RL_RUNTIME_API void rl_gdb_park(rl_ctx *c, bool exact);
+/** @brief Parks the calling guest thread as rl_gdb_park does, with exact registers and its guest pc at pc. */
+RL_RUNTIME_API void rl_gdb_park_at(rl_ctx *c, uint64_t pc);
 /** @brief A safe point: c's registers are exact when exact is true. Parks while the debugger holds the guest stopped. */
 static inline void rl_gdb_point(rl_ctx *c, bool exact)
 {
     if (__builtin_expect(__atomic_load_n(&rl_gdb_stopping, __ATOMIC_RELAXED), 0))
         rl_gdb_park(c, exact);
+}
+/** @brief A safe point with exact registers whose guest pc is pc (a sync point's next instruction). */
+static inline void rl_gdb_point_at(rl_ctx *c, uint64_t pc)
+{
+    if (__builtin_expect(__atomic_load_n(&rl_gdb_stopping, __ATOMIC_RELAXED), 0))
+        rl_gdb_park_at(c, pc);
 }
 #else
 static inline bool rl_gdb_start(const rl_gdb_cpu *cpu, const rl_gdb_guest *guest)
@@ -112,6 +132,11 @@ static inline void rl_gdb_point(rl_ctx *c, bool exact)
 {
     (void)c;
     (void)exact;
+}
+static inline void rl_gdb_point_at(rl_ctx *c, uint64_t pc)
+{
+    (void)c;
+    (void)pc;
 }
 #endif
 
