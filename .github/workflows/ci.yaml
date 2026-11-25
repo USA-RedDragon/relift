@@ -438,7 +438,10 @@ jobs:
           path: ${{ runner.temp }}/gb-work
           key: gb-corpus-${{ hashFiles('Cargo.lock', 'core/**', 'cpus/sm83/**', 'guests/gb/**', 'relift/src/**', 'runtime/core/**', 'runtime/cpus/sm83/**', 'runtime/guests/gb/**', 'scripts/ci/gb-corpus.sh') }}
 
-      - name: Import, build and run the cases of runtime/guests/gb/devtests/ci_cases.toml
+      - name: Install gdb
+        run: scripts/ci/apt-install.sh gdb gdb-multiarch
+
+      - name: Import, build and run the cases of runtime/guests/gb/devtests/ci_cases.toml, then stop one with gdb
         run: scripts/ci/gb-corpus.sh
 
   z80-sst:

@@ -29,6 +29,7 @@
 #include "exact_int.h"
 #include "crash.h"
 #include "sm83.h"
+#include "gdbstub.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -947,6 +948,10 @@ int rl_gb_sync(rl_ctx *c, uint8_t *mem, uint64_t next, uint32_t info)
     rlgbd_end(G.h, (uint32_t)-c->time.budget);
     G.open = false;
     G.st.lifted++;
+    /* docgen:region gdb-point */
+    /* Between two instructions, the lifted code's registers stored: a safe point for the GDB server at pc. */
+    rl_gdb_point_at(c, pc);
+    /* docgen:end */
     switch (RL_GB_SYNC_KIND(info)) {
     case RL_GB_SYNC_CALL:
         if (enter_frame(RL_GB_SYNC_RET(info), RL_GB_SYNC_BANK(info)) != 0)
@@ -1133,8 +1138,55 @@ static uint64_t interp(rl_ctx *c, uint8_t *mem)
 
 #endif
 
+#if defined(RL_DEBUG_STUB)
+/** @brief The context the GDB server serves. */
+static rl_ctx *g_gdb_ctx;
+
+static uint32_t gdb_threads(rl_gdb_thread *out, uint32_t max)
+{
+    if (!g_gdb_ctx)
+        return 0;
+    if (max)
+        out[0] = (rl_gdb_thread){ .id = 1, .ctx = g_gdb_ctx, .core = 0, .running = true };
+    return 1;
+}
+
+/**
+ * docgen:region gdb-memory
+ * @brief Memory for the GDB server: the CPU's 16-bit bus through the device library's peek (rlgbd_peek, no timing
+ * effect; the runtime reads opcodes with it mid-run), so 0x4000 to 0x7FFF shows the ROM bank mapped now. Writes are
+ * refused: a bus write is timed.
+ * docgen:end
+ */
+static size_t gdb_read(uint64_t tid, uint64_t a, uint8_t *dst, size_t n)
+{
+    (void)tid;
+    size_t i = 0;
+    for (; i < n && a + i <= 0xFFFFu && G.h; i++)
+        dst[i] = rlgbd_peek(G.h, (uint16_t)(a + i));
+    return i;
+}
+
+static bool gdb_write(uint64_t tid, uint64_t a, const uint8_t *src, size_t n)
+{
+    (void)tid;
+    (void)a;
+    (void)src;
+    (void)n;
+    return false;
+}
+
+static const rl_gdb_guest g_gdb_guest = {
+    .threads = gdb_threads, .mem_read = gdb_read, .mem_write = gdb_write, .clocked = true
+};
+#endif
+
 int rl_gbx_run(rl_ctx *c, uint8_t *mem, uint16_t pc)
 {
+#if defined(RL_DEBUG_STUB)
+    g_gdb_ctx = c;
+    rl_gdb_start(rl_sm83_gdb(), &g_gdb_guest);
+#endif
     bool need = true;
     G.cause = RL_GBX_SEEN_START;
     for (;;) {

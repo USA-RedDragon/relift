@@ -15,6 +15,8 @@
 
 /** @brief The SM83 descriptor for rl_core_init. */
 RL_RUNTIME_API const rl_cpu_desc *rl_sm83_cpu(void);
+/** @brief The registers for the GDB server (core/gdbstub.h), where it is built in (RL_DEBUG_STUB). */
+RL_RUNTIME_API const struct rl_gdb_cpu *rl_sm83_gdb(void);
 
 /**
  * @brief Binds thread t to scheduler CPU k (rl_sched_attach) and installs
