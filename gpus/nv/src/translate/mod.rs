@@ -65,7 +65,7 @@ pub use trace::{
 };
 
 use crate::program::{Program, Stage};
-use crate::spirv::{Module, op};
+use crate::spirv::{Module, glsl, op};
 use crate::{CBank, Fields, Inst, Operand, RegMods};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
@@ -905,6 +905,32 @@ impl Ctx {
             u = self.m.emit(op::BITWISE_XOR, ut, &[u, k]);
         }
         Ok(u)
+    }
+
+    /// [`Ctx::fsrc_bits`] for an operand of an instruction the host's own float math runs ([`Math::Native`]): `.abs`
+    /// and `.neg` are `OpFAbs` and `OpFNegate` on the value as a float, which a driver folds into the instruction's
+    /// source modifiers, where integer operations on its bits stay as separate instructions. `native` false is
+    /// `fsrc_bits` as it is.
+    pub fn fsrc_arith(&mut self, o: &Operand, native: bool) -> Res<u32> {
+        if !native {
+            return self.fsrc_bits(o);
+        }
+        let (u, m) = self.raw(o)?;
+        if m.not || m.swz != crate::Swz::None {
+            return bad(format!("float operand mods {o}"));
+        }
+        if !m.abs && !m.neg {
+            return Ok(u);
+        }
+        let f = self.f32t();
+        let mut x = self.as_float(u);
+        if m.abs {
+            x = self.ext(f, glsl::F_ABS, &[x]);
+        }
+        if m.neg {
+            x = self.m.emit(op::F_NEGATE, f, &[x]);
+        }
+        Ok(self.as_bits(x))
     }
 
     pub fn usrc(&mut self, o: &Operand) -> Res<u32> {

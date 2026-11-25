@@ -636,9 +636,13 @@ fn arith(c: &mut Ctx, i: &Inst) -> Res<()> {
     }
     let mode = round_of(i);
     let ftz = i.has("FTZ");
-    let mut args = vec![c.fsrc_bits(&i.ops[1])?, c.fsrc_bits(&i.ops[2])?];
+    let native = c.math == Math::Native;
+    let mut args = vec![
+        c.fsrc_arith(&i.ops[1], native)?,
+        c.fsrc_arith(&i.ops[2], native)?,
+    ];
     if i.mnemonic == "FFMA" {
-        args.push(c.fsrc_bits(&i.ops[3])?);
+        args.push(c.fsrc_arith(&i.ops[3], native)?);
     }
     let scale = [
         ("D2", -1),
@@ -653,7 +657,7 @@ fn arith(c: &mut Ctx, i: &Inst) -> Res<()> {
     .map_or(0, |(_, s)| *s);
     let sat = i.has("SAT");
     let name = i.mnemonic;
-    if c.math == Math::Native && mode == Round::Nearest {
+    if c.math == Math::Native {
         let u = c.shared_pure(format!("native {name} {scale} {sat}"), &args, |c, p| {
             c.native_arith(name, p, scale, sat)
         });
@@ -726,16 +730,26 @@ impl Ctx {
 fn fmnmx(c: &mut Ctx, i: &Inst) -> Res<()> {
     Ctx::mods_ok(i, &["FTZ", "NAN"])?;
     let u = c.u32t();
-    let a = c.fsrc_bits(&i.ops[1])?;
-    let b = c.fsrc_bits(&i.ops[2])?;
+    let native = c.math == Math::Native;
+    let a = c.fsrc_arith(&i.ops[1], native)?;
+    let b = c.fsrc_arith(&i.ops[2], native)?;
     let p = c.pred_operand(&i.ops[3])?;
     let (one, zero) = (c.m.c_u32(1), c.m.c_u32(0));
     let pu = c.select(u, p, one, zero);
     let (ftz, nan) = (i.has("FTZ"), i.has("NAN"));
-    let r = c.shared_pure(format!("FMNMX {ftz} {nan}"), &[a, b, pu], |c, x| {
+    let relax = c.math == Math::Native;
+    let r = c.shared_pure(format!("FMNMX {ftz} {nan} {relax}"), &[a, b, pu], |c, x| {
         let u = c.u32t();
         let (a, b) = (x[0], x[1]);
-        let (lo, hi) = c.fminmax(a, b, ftz);
+        let (lo, hi) = if relax {
+            let f = c.f32t();
+            let (fa, fb) = (c.as_float(a), c.as_float(b));
+            let lo = c.ext(f, glsl::N_MIN, &[fa, fb]);
+            let hi = c.ext(f, glsl::N_MAX, &[fa, fb]);
+            (c.as_bits(lo), c.as_bits(hi))
+        } else {
+            c.fminmax(a, b, ftz)
+        };
         let z = c.m.c_u32(0);
         let b_ = c.boolt();
         let p = c.m.emit(op::I_NOT_EQUAL, b_, &[x[2], z]);
