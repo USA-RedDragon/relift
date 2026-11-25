@@ -64,7 +64,7 @@ if [ -z "$heap" ]; then
     echo "stub-test: the test guest did not start"; cat "$out/serve.log"; kill $pid 2>/dev/null; exit 1
 fi
 "$gdb_bin" -batch -nx -iex "set debuginfod enabled off" -ex "set architecture aarch64" ${GDB_DEBUG:+-ex "set debug remote 1"} \
-    -ex "target remote 127.0.0.1:$port" -ex 'info threads' -ex 'monitor bt' -ex 'p/x $x0' -ex "x/2gx $heap" \
+    -ex "source $here/relift_guest.py" -ex "target remote 127.0.0.1:$port" -ex 'info threads' -ex 'monitor bt' -ex bt -ex 'p/x $x0' -ex "x/2gx $heap" \
     -ex 'set $x2 = 0x42' -ex 'break *0x8001000' -ex continue -ex 'p/x $pc' -ex delete \
     -ex "watch *(long *)($heap + 0x40)" -ex continue -ex continue -ex continue -ex continue -ex delete \
     -ex "set {int}($heap + 16) = 1" -ex detach >"$out/gdb.log" 2>&1 || true
@@ -81,6 +81,7 @@ expect '0x1122334455667788'
 expect '0x99aabbccddeeff00'
 # The test guest stops in the innermost of three nested calls (frame records at heap + 0xf00).
 expect "#2 $(printf '0x%x' $((heap + 0x814)))"
+expect "#2  $(printf '0x%016x' $((heap + 0x814))) in"
 if [ "$(uname -m)" = x86_64 ]; then
     expect 'Breakpoint 1, 0x0000000008001000'
     expect 'atchpoint 2: '
