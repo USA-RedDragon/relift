@@ -244,6 +244,8 @@ static uint32_t reg(const rl_n64 *m, unsigned i)
 
 uint32_t rl_n64_vi_reg(rl_n64 *m, unsigned index) { return reg(m, index); }
 
+uint32_t rl_n64_vi_peek(rl_n64 *m, unsigned i) { return reg(m, i); }
+
 uint32_t rl_n64_vi_read(rl_n64 *m, unsigned i)
 {
     catch_up(m, rl_n64_now(m));

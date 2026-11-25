@@ -457,13 +457,22 @@ static uint32_t gdb_threads(rl_gdb_thread *out, uint32_t max)
     return n;
 }
 
+/** @brief The physical address the CPU's load of a would use, with a 32-bit address sign-extended. */
+static bool gdb_xlat(uint64_t a, bool write, uint64_t *p)
+{
+    if (a <= UINT32_MAX)
+        a = (uint64_t)(int64_t)(int32_t)(uint32_t)a;
+    return g_run && rl_mips_translate(g_run->c, a, write, p) == RL_MIPS_XLAT_OK;
+}
+
 /**
  * docgen:region gdb-memory
  * @brief Memory for the GDB server by the VR4300's virtual address, translated as its loads are (rl_mips_translate,
  * kseg0 and kseg1 directly, the rest through the TLB; a 32-bit address is sign-extended, as gdb in a 32-bit ABI sends
  * it). RDRAM reads as the CPU sees it, its data cache's dirty lines
  * included, with no side effect; writes are the CPU's stores. Other physical addresses (registers, cartridge) are not
- * read yet: their reads catch the RSP up.
+ * the SP, DP, MI, VI, AI, PI, RI and SI registers read by rl_n64_peek, as the devices last ran (no RSP catch-up, so a
+ * value can lag the CPU); the cartridge ROM reads from its image; the PIF bus is refused. Register writes are refused.
  * docgen:end
  */
 static bool gdb_paddr(uint64_t a, bool write, uint32_t *pa)
@@ -488,14 +497,23 @@ static int sp_off(uint64_t a)
 static size_t gdb_read(uint64_t tid, uint64_t a, uint8_t *dst, size_t n)
 {
     size_t i = 0;
-    uint32_t pa;
     if (tid == 2) {
         for (int o; g_run && i < n && (o = sp_off(a + i)) >= 0; i++)
             dst[i] = rl_n64_spmem(g_run->m)[o];
         return i;
     }
-    for (; i < n && gdb_paddr(a + i, false, &pa); i++)
-        rl_n64_rdram_get_cpu(g_run->m, pa, &dst[i], 1);
+    for (; i < n; i++) {
+        uint64_t p, v;
+        if (!gdb_xlat(a + i, false, &p))
+            break;
+        p &= 0x1FFFFFFFu;
+        if (p < RL_N64_RDRAM_SIZE)
+            rl_n64_rdram_get_cpu(g_run->m, (uint32_t)p, &dst[i], 1);
+        else if (rl_n64_peek(g_run->m, (uint32_t)p, 1, &v))
+            dst[i] = (uint8_t)v;
+        else
+            break;
+    }
     return i;
 }
 

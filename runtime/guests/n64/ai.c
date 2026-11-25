@@ -154,13 +154,18 @@ void rl_n64_ai_attach(rl_n64 *m) { m->ai.next = rl_n64_now(m) * 2u; }
 
 void rl_n64_ai_detach(rl_n64 *m) { rl_sched_cancel(m->s, &m->ai.done); }
 
-uint32_t rl_n64_ai_read(rl_n64 *m, unsigned i)
+uint32_t rl_n64_ai_peek(rl_n64 *m, unsigned i)
 {
-    catch_up(m, rl_n64_now(m));
     if (i != 3u)
         return m->ai.len[0] & 0x3FFFFu;
     return (m->ai.count > 1u ? 1u : 0u) | 1u << 20 | 1u << 24 | (m->ai.enable ? 1u : 0u) << 25 |
            (m->ai.count > 0u ? 1u : 0u) << 30 | (m->ai.count > 1u ? 1u : 0u) << 31;
+}
+
+uint32_t rl_n64_ai_read(rl_n64 *m, unsigned i)
+{
+    catch_up(m, rl_n64_now(m));
+    return rl_n64_ai_peek(m, i);
 }
 
 void rl_n64_ai_write(rl_n64 *m, unsigned i, uint32_t v)

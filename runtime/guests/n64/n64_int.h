@@ -411,6 +411,10 @@ void rl_n64_ai_attach(rl_n64 *m);
 /** @brief Removes the AI event from the scheduler. */
 void rl_n64_ai_detach(rl_n64 *m);
 
+/** @brief The AI register read as the DAC last ran, with no catch-up (for a debugger). */
+uint32_t rl_n64_ai_peek(rl_n64 *m, unsigned index);
+/** @brief The byte of the cartridge ROM image at bus address paddr, with no bus or latch change; false outside the image. */
+bool rl_n64_cart_peek(const rl_n64 *m, uint32_t paddr, uint8_t *out);
 /** @brief VI register read (index 0 to 13), with the line counter brought up to now. */
 uint32_t rl_n64_vi_read(rl_n64 *m, unsigned index);
 /** @brief VI register write. */
@@ -426,6 +430,12 @@ void rl_n64_sp_attach(rl_n64 *m);
 void rl_n64_sp_catch_up(rl_n64 *m, uint64_t tick);
 /** @brief A CPU read of the SP registers (0x04040000 to 0x0404001F) or SP_PC at a, now. */
 uint32_t rl_n64_sp_read(rl_n64 *m, uint32_t a);
+/** @brief rl_n64_sp_read as the SP last ran: no RSP slice, no DMA step, the semaphore left alone. */
+uint32_t rl_n64_sp_peek(rl_n64 *m, uint32_t a);
+/** @brief rl_n64_dp_read as the RSP last ran, with no catch-up. */
+uint32_t rl_n64_dp_peek(rl_n64 *m, unsigned i);
+/** @brief The VI register as the line counter last ran, with no catch-up. */
+uint32_t rl_n64_vi_peek(rl_n64 *m, unsigned index);
 /** @brief A CPU write of the SP registers or SP_PC. */
 void rl_n64_sp_write(rl_n64 *m, uint32_t a, uint32_t v);
 /** @brief A CPU read of DP register i (0 to 7), now. */

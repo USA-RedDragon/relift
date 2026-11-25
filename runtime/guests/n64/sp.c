@@ -192,9 +192,8 @@ static uint32_t sp_status(const rl_n64 *m)
 }
 
 /** @brief SP register i (0 to 7) read at RSP cycle at. */
-static uint32_t sp_reg_read(rl_n64 *m, unsigned i, uint64_t at)
+static uint32_t sp_reg_value(rl_n64 *m, unsigned i, bool peek)
 {
-    sp_time(m, at);
     const n64_sp_dma *d = &m->sp.current;
     switch (i & 7u) {
     case 0:
@@ -212,10 +211,17 @@ static uint32_t sp_reg_read(rl_n64 *m, unsigned i, uint64_t at)
         return (m->sp.busy_rd || m->sp.busy_wr) ? 1u : 0u;
     default: {
         uint32_t v = m->sp.semaphore;
-        m->sp.semaphore = 1;
+        if (!peek)
+            m->sp.semaphore = 1;
         return v;
     }
     }
+}
+
+static uint32_t sp_reg_read(rl_n64 *m, unsigned i, uint64_t at)
+{
+    sp_time(m, at);
+    return sp_reg_value(m, i, false);
 }
 
 static void start(rl_n64 *m, uint64_t at)
@@ -475,6 +481,17 @@ void rl_n64_sp_write(rl_n64 *m, uint32_t a, uint32_t v)
     else if ((a & 0xFFFE0u) == 0x40000u)
         sp_reg_write(m, (a >> 2) & 7u, v, at);
 }
+
+uint32_t rl_n64_sp_peek(rl_n64 *m, uint32_t a)
+{
+    if (a == 0x04080000u)
+        return m->sp.pc;
+    if ((a & 0xFFFE0u) == 0x40000u)
+        return sp_reg_value(m, (a >> 2) & 7u, true);
+    return 0;
+}
+
+uint32_t rl_n64_dp_peek(rl_n64 *m, unsigned i) { return dp_reg_read(m, i, m->sp.last); }
 
 uint32_t rl_n64_dp_read(rl_n64 *m, unsigned i) { return dp_reg_read(m, i, sp_time(m, rsp_at(rl_n64_now(m)))); }
 

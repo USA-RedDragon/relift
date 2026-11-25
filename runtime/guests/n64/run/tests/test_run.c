@@ -11,6 +11,7 @@
 #include "cpu.h"
 #include "runner.h"
 
+#include <stddef.h>
 #include <string.h>
 
 /** @brief Whether the n guest bytes of RDRAM at a equal b. */
@@ -335,7 +336,7 @@ TEST(gdb_serve_an_n64_run_for_a_debugger)
 /** @brief What the client saw. */
 typedef struct mclient {
     int port;
-    char xml[64], r8[20], r9[20], pc[20], mem[16], io[8], det[8], threads[512], rpc[20], imem[16];
+    char xml[64], r8[20], r9[20], pc[20], mem[16], io[12], io2[12], spst[12], spst2[12], mi[12], ai[12], ai2[12], dp[12], rom[12], pif[12], det[8], threads[512], rpc[20], imem[16];
     bool ok;
 } mclient;
 
@@ -389,6 +390,24 @@ static void *mclient_run(void *arg)
     snprintf(s->mem, sizeof s->mem, "%s", r);
     s->ok = s->ok && mask(fd, "mffffffffa4400010,4", r, sizeof r);
     snprintf(s->io, sizeof s->io, "%s", r);
+    static const struct {
+        const char *pkt;
+        size_t off;
+    } more[] = {
+        { "mffffffffa4040010,4", offsetof(mclient, spst) },
+        { "mffffffffa4300008,4", offsetof(mclient, mi) },
+        { "mffffffffa4500004,4", offsetof(mclient, ai) },
+        { "mffffffffa4100008,4", offsetof(mclient, dp) },
+        { "mffffffffb0000000,4", offsetof(mclient, rom) },
+        { "mffffffffbfc00000,4", offsetof(mclient, pif) },
+        { "mffffffffa4040010,4", offsetof(mclient, spst2) },
+        { "mffffffffa4500004,4", offsetof(mclient, ai2) },
+        { "mffffffffa4400010,4", offsetof(mclient, io2) },
+    };
+    for (size_t k = 0; k < sizeof more / sizeof more[0]; k++) {
+        s->ok = s->ok && mask(fd, more[k].pkt, r, sizeof r);
+        snprintf((char *)s + more[k].off, 12, "%s", r);
+    }
     s->ok = s->ok && mask(fd, "qXfer:threads:read::0,1ff", r, sizeof r);
     snprintf(s->threads, sizeof s->threads, "%s", r);
     s->ok = s->ok && mask(fd, "Hg2", r, sizeof r) && mask(fd, "p25", r, sizeof r);
@@ -439,7 +458,19 @@ TEST(gdb_server_stops_an_n64_run_at_a_sync_point_and_keeps_its_timing)
     char want[9];
     snprintf(want, sizeof want, "%02x%02x%02x%02x", rom[0x1000], rom[0x1001], rom[0x1002], rom[0x1003]);
     CHECK(strcmp(s.mem, want) == 0);
-    CHECK(strcmp(s.io, "E14") == 0);
+    /* Registers read as peeks: the same twice, no RSP catch-up, the cartridge from its image, the PIF bus refused. */
+    CHECK_EQ(strlen(s.io), 8u);
+    CHECK(strcmp(s.io, s.io2) == 0);
+    CHECK_EQ(strlen(s.spst), 8u);
+    CHECK(strcmp(s.spst, s.spst2) == 0);
+    CHECK_EQ(strlen(s.mi), 8u);
+    CHECK_EQ(strlen(s.ai), 8u);
+    CHECK(strcmp(s.ai, s.ai2) == 0);
+    CHECK_EQ(strlen(s.dp), 8u);
+    char wrom[9];
+    snprintf(wrom, sizeof wrom, "%02x%02x%02x%02x", rom[0], rom[1], rom[2], rom[3]);
+    CHECK(strcmp(s.rom, wrom) == 0);
+    CHECK(strcmp(s.pif, "E14") == 0);
     /* Thread 2, the RSP: its pc in the SP window and IMEM read there. */
     CHECK(strstr(s.threads, "<thread id=\"2\"") != NULL);
     CHECK(strcmp(s.rpc, "0000000004001000") == 0);

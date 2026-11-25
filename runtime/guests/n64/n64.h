@@ -138,6 +138,12 @@ RL_RUNTIME_API uint64_t rl_n64_read(rl_n64 *m, uint32_t paddr, uint32_t size);
  * bus write in flight.
  */
 RL_RUNTIME_API uint32_t rl_n64_read_stall(rl_n64 *m, uint32_t paddr);
+/**
+ * @brief A read for a debugger of size bytes at paddr, with no side effect and no catch-up: the SP, DP, MI, VI, AI, PI,
+ * RI and SI registers answer as the devices last ran (so they may lag the CPU), RDRAM and SP memory as the CPU sees
+ * them, the cartridge ROM from its image (no PI latch change). False for the PIF bus and addresses past the image; *out is then left alone.
+ */
+RL_RUNTIME_API bool rl_n64_peek(rl_n64 *m, uint32_t paddr, uint32_t size, uint64_t *out);
 /** @brief A write of size bytes of the big-endian value at physical address paddr by the CPU now. */
 RL_RUNTIME_API void rl_n64_write(rl_n64 *m, uint32_t paddr, uint32_t size, uint64_t value);
 /** @brief MI_INTR & MI_MASK: the sources whose interrupt is up. */

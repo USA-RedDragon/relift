@@ -297,6 +297,83 @@ static void write_word(rl_n64 *m, uint32_t a, uint32_t v)
         rl_n64_si_bus_write(m, a, v);
 }
 
+/** @brief read_word without a side effect: false where the read has one (cartridge, PIF bus). */
+static bool peek_word(rl_n64 *m, uint32_t a, uint32_t *out)
+{
+    unsigned r = (a >> 2) & 15u;
+    if (a >= 0x03F00000u && a < 0x04000000u)
+        *out = m->rdram_regs[r];
+    else if (a >= 0x04000000u && a < 0x04040000u)
+        *out = ld32(m->spmem + (a & 0x1FFCu));
+    else
+        switch (a >> 20) {
+        case 0x040:
+            *out = rl_n64_sp_peek(m, a);
+            break;
+        case 0x041:
+            *out = rl_n64_dp_peek(m, r & 7u);
+            break;
+        case 0x043:
+            *out = mi_read(m, r);
+            break;
+        case 0x044:
+            *out = rl_n64_vi_peek(m, r);
+            break;
+        case 0x045:
+            *out = rl_n64_ai_peek(m, r & 7u);
+            break;
+        case 0x046:
+            *out = rl_n64_pi_read(m, r);
+            break;
+        case 0x047:
+            *out = m->ri.regs[r & 7u];
+            break;
+        case 0x048:
+            *out = rl_n64_si_read(m, a);
+            break;
+        default:
+            return false;
+        }
+    return true;
+}
+
+bool rl_n64_peek(rl_n64 *m, uint32_t paddr, uint32_t size, uint64_t *out)
+{
+    paddr &= 0x1FFFFFFFu;
+    if (paddr < RL_N64_RDRAM_SIZE) {
+        uint64_t v = 0;
+        for (uint32_t i = 0; i < size; i++)
+            v = v << 8 | rl_n64_cpu_rd8(m, paddr + i);
+        *out = v;
+        return true;
+    }
+    if (paddr >= 0x05000000u && paddr < 0x1FC00000u) {
+        uint64_t v = 0;
+        for (uint32_t i = 0; i < size; i++) {
+            uint8_t b;
+            if (!rl_n64_cart_peek(m, paddr + i, &b))
+                return false;
+            v = v << 8 | b;
+        }
+        *out = v;
+        return true;
+    }
+    uint32_t hi = 0, lo = 0;
+    if (!peek_word(m, paddr & ~3u, &lo))
+        return false;
+    if (size == 8) {
+        if (!peek_word(m, paddr & ~7u, &hi) || !peek_word(m, (paddr & ~7u) + 4u, &lo))
+            return false;
+        *out = (uint64_t)hi << 32 | lo;
+    } else if (size == 4) {
+        *out = lo;
+    } else {
+        unsigned shift = (4u - size - (paddr & 3u)) * 8u;
+        *out = (lo >> shift) & (size == 1 ? 0xFFu : 0xFFFFu);
+    }
+    return true;
+}
+
 uint64_t rl_n64_read(rl_n64 *m, uint32_t paddr, uint32_t size)
 {
     paddr &= 0x1FFFFFFFu;

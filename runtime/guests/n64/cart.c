@@ -157,6 +157,14 @@ void rl_n64_bus_write_half(rl_n64 *m, uint16_t v)
     }
 }
 
+bool rl_n64_cart_peek(const rl_n64 *m, uint32_t paddr, uint8_t *out)
+{
+    if (paddr < ROM_BASE || paddr - ROM_BASE >= m->rom_len)
+        return false;
+    *out = m->rom[paddr - ROM_BASE];
+    return true;
+}
+
 uint32_t rl_n64_cart_read(rl_n64 *m, uint32_t paddr)
 {
     if (m->pi.io_busy) {
