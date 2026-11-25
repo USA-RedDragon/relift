@@ -38,6 +38,8 @@ typedef struct nvn_impl {
             static bool first_##name = true; \
             int64_t t0 = rl_clock_ns(); \
             nvn_async_drain(); \
+            if (nvn_set_log_on() && rl_clock_ns() - t0 > 500000) \
+                rl_log(RL_LOG_INFO, "nvn", "drain by %s waited %.3f ms", #name, (double)(rl_clock_ns() - t0) / 1e6); \
             if (first_##name) { \
                 first_##name = false; \
                 rl_log(RL_LOG_INFO, "nvn", "replay worker: first drain by %s waited %.3f ms", #name, \
@@ -73,8 +75,8 @@ typedef struct nvn_async_entry {
 #define AD(n) { #n, NVN_ASYNC_DRAIN }
 static const nvn_async_entry async_table[] = {
     AD(nvnBootstrapLoader),
-    AD(nvnBufferFinalize), AF(nvnBufferGetAddress), AF(nvnBufferGetMemoryOffset), AF(nvnBufferGetMemoryPool),
-    AF(nvnBufferGetSize), AD(nvnBufferInitialize), AD(nvnBufferFlushMappedRange), AD(nvnBufferInvalidateMappedRange),
+    AF(nvnBufferFinalize), AF(nvnBufferGetAddress), AF(nvnBufferGetMemoryOffset), AF(nvnBufferGetMemoryPool),
+    AF(nvnBufferGetSize), AF(nvnBufferInitialize), AD(nvnBufferFlushMappedRange), AD(nvnBufferInvalidateMappedRange),
     AF(nvnBufferMap), AF(nvnBufferSetDebugLabel),
     AD(nvnDeviceApplyDeferredFinalizes), AD(nvnDeviceFinalize), AQ(nvnDeviceFinalizeCommandHandle),
     AF(nvnDeviceGenerateDebugDomainId), AF(nvnDeviceGetCommandHandleMemorySize),
