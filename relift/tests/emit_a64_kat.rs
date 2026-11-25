@@ -120,7 +120,10 @@ int main(int argc, char **argv)
         fatal = 0;
         rl_arm64_fp_flags_on = 1;
         rl_fp_host_clear();
+        /* what the runtime's bind and MSR FPCR do: the host's FPCR follows the guest's, which lifted code relies on */
+        rl_host_set_fpcr(c.fpcr);
         uint64_t r = cases[rec[0]](&c, mem);
+        rl_host_set_fpcr(0);
         uint32_t fpsr = (c.fpsr | rl_fp_host_flags()) & RL_FPSR_MASK;
         rl_fp_host_clear();
         uint64_t st = (fatal || r != RL_OK) ? 1 : 0;

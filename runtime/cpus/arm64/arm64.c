@@ -45,27 +45,6 @@ void rl_arm64_set_fpcr_const(int on)
 
 int rl_arm64_fpcr_const(void) { return g_fpcr_const; }
 
-void rl_host_set_fpcr(uint32_t fpcr)
-{
-#if defined(__aarch64__)
-    uint64_t v = fpcr & RL_FPCR_GUEST;
-    __asm__ volatile("msr fpcr, %0" ::"r"(v));
-#else
-    (void)fpcr;
-#endif
-}
-
-uint32_t rl_host_get_fpcr(void)
-{
-#if defined(__aarch64__)
-    uint64_t v;
-    __asm__ volatile("mrs %0, fpcr" : "=r"(v));
-    return (uint32_t)v;
-#else
-    return 0;
-#endif
-}
-
 static void ctx_init(rl_ctx *c)
 {
     c->fpcr = RL_FPCR_DEFAULT | (rl_arm64_exact_flags() ? RL_FPCR_EXACT : 0u);

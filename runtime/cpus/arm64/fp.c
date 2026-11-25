@@ -1284,3 +1284,25 @@ uint64_t rl_fp64_muladd_fz(uint64_t addend, uint64_t a, uint64_t b)
     return rl_fp64_muladd(addend, a, b, RL_FPCR_FZ, NULL);
 }
 #endif
+
+/* The host FPCR the guest's runs under: here, beside the FP layer, so the known-answer harness links the shipped functions. */
+void rl_host_set_fpcr(uint32_t fpcr)
+{
+#if defined(__aarch64__)
+    uint64_t v = fpcr & RL_FPCR_GUEST;
+    __asm__ volatile("msr fpcr, %0" ::"r"(v));
+#else
+    (void)fpcr;
+#endif
+}
+
+uint32_t rl_host_get_fpcr(void)
+{
+#if defined(__aarch64__)
+    uint64_t v;
+    __asm__ volatile("mrs %0, fpcr" : "=r"(v));
+    return (uint32_t)v;
+#else
+    return 0;
+#endif
+}
