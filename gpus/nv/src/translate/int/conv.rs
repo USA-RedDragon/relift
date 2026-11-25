@@ -824,6 +824,21 @@ pub(crate) fn i2f_with(c: &mut Ctx, i: &Inst, abs: bool, neg: bool) -> Res<()> {
         };
         let v = if neg { c.ib(op::I_SUB, zero, v) } else { v };
         let v = pick(c, v, m.swz, size, signed)?;
+        if c.math == super::super::Math::Native && !half && mode == 0 {
+            /* Round to nearest even, as every GPU converts: the host's own conversion gives the same bits. */
+            let f = c.f32t();
+            let r = c.m.emit(
+                if signed {
+                    op::CONVERT_S_TO_F
+                } else {
+                    op::CONVERT_U_TO_F
+                },
+                f,
+                &[v],
+            );
+            let r = c.as_bits(r);
+            return c.store_dst(&i.ops[0], r);
+        }
         if signed {
             let n = c.sh(op::SHIFT_RIGHT_LOGICAL, v, 31);
             let isn = c.cmp_k(op::I_EQUAL, n, 1);
@@ -968,6 +983,26 @@ pub(crate) fn frnd(c: &mut Ctx, i: &Inst) -> Res<()> {
     } else {
         if m.swz != Swz::None {
             return bad("FRND source selector");
+        }
+        if c.math == super::super::Math::Native {
+            /* The host's own rounding of the operand as a float, denormals as the device has them. */
+            let f = c.f32t();
+            let mut x = c.as_float(v);
+            if m.abs {
+                x = c.ext(f, glsl::F_ABS, &[x]);
+            }
+            if m.neg {
+                x = c.m.emit(op::F_NEGATE, f, &[x]);
+            }
+            let r = c.ext(f, how, &[x]);
+            let nan = {
+                let t = c.boolt();
+                c.m.emit(op::IS_NAN, t, &[x])
+            };
+            let canon = c.kc(0x7fff_ffff);
+            let rb = c.as_bits(r);
+            let out = c.bpick(nan, canon, rb);
+            return c.store_dst(&i.ops[0], out);
         }
         let b = if m.abs { c.and_k(v, 0x7fff_ffff) } else { v };
         let b = if m.neg {

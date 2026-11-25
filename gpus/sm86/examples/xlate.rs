@@ -62,11 +62,15 @@ fn main() {
         .filter(|a| {
             let flag = a == "--exact-mufu";
             o.exact_mufu |= flag;
+            let native = a == "--native-math";
+            if native {
+                o.math = relift_gpu_nv::translate::Math::Native;
+            }
             let unfused = a == "--no-fused-fma";
             no_fma |= unfused;
             let staged = a == "--hmma-staged";
             hmma_staged |= staged;
-            !flag && !unfused && !staged
+            !flag && !unfused && !staged && !native
         })
         .collect();
     let b = std::fs::read(&args[1]).unwrap_or_else(|e| panic!("{}: {e}", args[1]));

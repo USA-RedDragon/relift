@@ -183,6 +183,9 @@ pub mod glsl {
 #[derive(Default)]
 pub struct Module {
     next: u32,
+    /// Instructions emitted that a driver compiles to work (not types, labels, loads, stores, bitcasts or access chains), for
+    /// RELIFT_OP_ATTR's per-guest-mnemonic count.
+    pub work: u64,
     pub caps: Vec<u32>,
     pub ext: Vec<u32>,
     pub head: Vec<u32>,
@@ -246,6 +249,7 @@ impl Module {
     pub fn new() -> Module {
         Module {
             next: 1,
+            work: 0,
             ..Module::default()
         }
     }
@@ -461,6 +465,7 @@ impl Module {
     }
 
     pub fn emit(&mut self, opcode: u16, ty: u32, args: &[u32]) -> u32 {
+        self.work += u64::from(!matches!(opcode, op::BITCAST | op::LOAD | op::ACCESS_CHAIN));
         if let Some(v) = &mut self.vars {
             v.carried = false;
         }

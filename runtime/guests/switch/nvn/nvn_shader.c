@@ -726,10 +726,41 @@ bool nvn_shader_note(const uint8_t *mem, uint64_t code, char key[65])
     return true;
 }
 
+/**
+ * @brief RELIFT_NVN_SPV_OVERRIDE=<dir>: a file <dir>/<key>.spv replaces that program's translation (a diagnostic, to
+ * measure what a driver makes of another form of the same shader, as with spirv-opt's output).
+ */
+static uint32_t *spv_override(const char *key, size_t *words)
+{
+    const char *d = getenv("RELIFT_NVN_SPV_OVERRIDE");
+    if (!d || !*d)
+        return NULL;
+    char path[1200];
+    snprintf(path, sizeof path, "%s/%.64s.spv", d, key);
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return NULL;
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    uint32_t *w = n > 0 && n % 4 == 0 ? malloc((size_t)n) : NULL;
+    if (w && fread(w, 1, (size_t)n, f) != (size_t)n) {
+        free(w);
+        w = NULL;
+    }
+    fclose(f);
+    if (w)
+        *words = (size_t)n / 4;
+    return w;
+}
+
 uint32_t *nvn_shader_spirv(const char *key, size_t *words)
 {
     const uint8_t *e = spirv_entry(key);
     *words = 0;
+    uint32_t *ov = spv_override(key, words);
+    if (ov)
+        return ov;
     if (!e)
         return NULL;
     uint64_t at = g_spv.at[(size_t)(e - g_spv.head - TABLE_HEAD) / g_spv.entry];

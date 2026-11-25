@@ -888,6 +888,13 @@ fn fswzadd(c: &mut Ctx, i: &Inst) -> Res<()> {
     let x = c.select(u, is2, na, a);
     let x = c.select(u, is3, zero, x);
     let y = c.select(u, is1, nb, b);
-    let r = c.fadd_exact(x, y, mode, ftz);
+    let r = if c.math == Math::Native {
+        let f = c.f32t();
+        let (fx, fy) = (c.as_float(x), c.as_float(y));
+        let r = c.m.emit(op::F_ADD, f, &[fx, fy]);
+        c.as_bits(r)
+    } else {
+        c.fadd_exact(x, y, mode, ftz)
+    };
     c.store_dst(&i.ops[0], r)
 }
