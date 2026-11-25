@@ -686,7 +686,10 @@ static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t l
 static bool slot_settle(replay *r, uint32_t sl)
 {
     uint64_t epoch = nvn_vk_flush_epoch();
-    if (t.tex_epoch[sl] < epoch && !t.bindless_busy && t.bindless_epoch < epoch) {
+    static int always = -1;
+    if (always < 0)
+        always = getenv("RELIFT_NVN_SLOT_WAIT") != NULL;
+    if (!always && t.tex_epoch[sl] < epoch && !t.bindless_busy && t.bindless_epoch < epoch) {
         t.rebind_free++;
         return true;
     }
