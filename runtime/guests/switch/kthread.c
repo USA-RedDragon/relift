@@ -383,6 +383,7 @@ int rl_hos_run_main(uint64_t entry, uint64_t stack_top)
 #if defined(RL_DEBUG_STUB)
     rl_gdb_start(rl_arm64_gdb(), &g_gdb_guest);
 #endif
+    hos_snapshot_register();
     hos_thread *t = hos_current();
     uint32_t h = 0;
     if (!t)

@@ -458,6 +458,30 @@ static bool is_target(const vimg *v)
     return false;
 }
 
+void nvn_trace_arm(const char *dir, uint64_t from)
+{
+    tr.parsed = true;
+    snprintf(tr.dir, sizeof tr.dir, "%s", dir);
+    tr.from = from;
+    tr.frames = tr.done + 1;
+}
+
+void nvn_trace_disarm(void)
+{
+    tr.from = UINT64_MAX;
+    if (tr.out) {
+        fclose(tr.out);
+        tr.out = NULL;
+        pthread_mutex_lock(&ord.lock);
+        if (ord.f)
+            fclose(ord.f);
+        ord.f = NULL;
+        pthread_mutex_unlock(&ord.lock);
+        nvn_trace_active = false;
+        tr.done++;
+    }
+}
+
 void nvn_trace_present(replay *r)
 {
     (void)r;

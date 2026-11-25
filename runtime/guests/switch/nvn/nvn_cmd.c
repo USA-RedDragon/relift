@@ -521,6 +521,20 @@ const nvn_cmdset *nvn_cmdset_of(uint64_t handle)
     return s;
 }
 
+void nvn_cmdsets_held(uint32_t *sets_n, uint64_t *cmds, uint64_t *bytes)
+{
+    *sets_n = 0;
+    *cmds = *bytes = 0;
+    pthread_mutex_lock(&sets.lock);
+    for (uint32_t i = 0; i < sets.n; i++)
+        if (sets.sets[i]) {
+            (*sets_n)++;
+            *cmds += sets.sets[i]->n;
+            *bytes += sizeof(nvn_cmdset) + (uint64_t)sets.sets[i]->n * sizeof(nvn_cmd) + sets.sets[i]->nbytes;
+        }
+    pthread_mutex_unlock(&sets.lock);
+}
+
 void nvn_cmdset_free(uint64_t handle)
 {
     if ((handle & ~0xffffffffull) != HANDLE_TAG)

@@ -645,6 +645,14 @@ static void why_set(char *why, size_t n, const char *fmt, ...)
     va_end(ap);
 }
 
+uint32_t nvn_modules_held(void)
+{
+    pthread_mutex_lock(&g_lock);
+    uint32_t n = g_mods.n;
+    pthread_mutex_unlock(&g_lock);
+    return n;
+}
+
 nvn_module *nvn_module_get(const char key[65], int stage, char *why, size_t why_n)
 {
     pthread_mutex_lock(&g_lock);

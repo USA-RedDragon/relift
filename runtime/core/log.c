@@ -66,6 +66,8 @@ static bool g_level_read;
 #define RING_COLS 320
 static char g_ring[RING_LINES][RING_COLS];
 static size_t g_ring_next;
+static void (*g_tee)(void *user, const char *tag, const char *msg);
+static void *g_tee_user;
 #endif
 
 rl_config *rl_cfg(void) { return &g_cfg; }
@@ -126,6 +128,8 @@ void rl_vlog(int level, const char *tag, const char *fmt, va_list ap)
     if (head > 0 && head < RING_COLS)
         vsnprintf(slot + head, (size_t)(RING_COLS - head), fmt, again);
     va_end(again);
+    if (g_tee && head > 0 && head < RING_COLS)
+        g_tee(g_tee_user, tag, slot + head);
 #endif
     fprintf(stderr, "[relift %s %s] ", names[level & 3], tag);
     vfprintf(stderr, fmt, ap);
@@ -135,6 +139,14 @@ void rl_vlog(int level, const char *tag, const char *fmt, va_list ap)
 }
 
 #if defined(RL_DEBUG_STUB)
+void rl_log_tee(void (*fn)(void *user, const char *tag, const char *msg), void *user)
+{
+    log_lock();
+    g_tee = fn;
+    g_tee_user = user;
+    log_unlock();
+}
+
 size_t rl_log_tail(char *out, size_t size, size_t lines)
 {
     log_lock();

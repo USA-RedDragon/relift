@@ -130,6 +130,8 @@ bool nvn_spirv_stores(const uint32_t *w, size_t n);
  * the program or the driver refuses the module.
  */
 nvn_module *nvn_module_get(const char key[65], int stage, char *why, size_t why_n);
+/** @brief The number of shader modules held (the diagnostic snapshot). */
+uint32_t nvn_modules_held(void);
 
 /**
  * @brief Appends to the n specialization constants in map and vals the ones a

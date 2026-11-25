@@ -661,6 +661,13 @@ typedef struct nvn_trace_cmd {
 /** @brief A frame is being traced (RELIFT_NVN_TRACE). */
 extern bool nvn_trace_active;
 /**
+ * @brief Arms a frame trace of one present from outside the environment (the diagnostic snapshot): the first present
+ * numbered from or later is traced into dir/frame-<present>, as RELIFT_NVN_TRACE=<dir>:<from> does.
+ */
+void nvn_trace_arm(const char *dir, uint64_t from);
+/** @brief Ends what nvn_trace_arm started: closes a trace in progress and traces no more presents. */
+void nvn_trace_disarm(void);
+/**
  * @brief RELIFT_NVN_TRACE_WATCH names a guest range: outside a traced frame each change of it is logged before the
  * command that first sees it (without waiting for the device), inside one it is a trace line.
  */
@@ -992,6 +999,8 @@ void nvn_mirror_drop_readback(void);
  * @brief Bytes uploaded, bytes read back that differed, uploads made, bytes copied back for compares, and pages the
  * written-page bitmap noted, for the stats line.
  */
+/** @brief The mirrors held (the diagnostic snapshot): how many, the guest bytes they cover and the staging bytes their uploads and readbacks hold. */
+void nvn_mirrors_held(uint32_t *n, uint64_t *bytes, uint64_t *staging_bytes);
 void nvn_mirror_stats(uint64_t *up, uint64_t *down, uint64_t *syncs, uint64_t *read, uint64_t *marked);
 /** @brief Stops the game with a report (after flushing what is recorded). Returns RL_PENDING. */
 int nvn_vk_stop(replay *r, const char *fmt, ...) RL_PRINTF(2, 3);
@@ -1520,6 +1529,16 @@ void nvn_gpuprof_sums(double *span_ns, double *parts_ns, double *between_ns);
 bool nvn_gpuprof_total(const char *lab, double *ns, uint64_t *count);
 /** @brief Forgets the profile and reads gpu.profile again at the next use (a settings change, tests). */
 void nvn_gpuprof_reset(void);
+/** @brief Logs the per-present report (timings, GPU profile, batch enders, host Vulkan calls) now, for the presents since the last one. */
+void nvn_vk_report_now(uint64_t total);
+/**
+ * @brief The Switch diagnostic snapshot's step after each present (nvn_snapshot.c), outside the layer's lock: arms the
+ * GPU profile and a frame trace when a snapshot window has begun, reports each present of it, and writes the layer's
+ * files when it is over. One atomic load when no snapshot runs. total is the number of presents so far.
+ */
+void nvn_snapshot_step(uint64_t total);
+/** @brief Registers the layer's snapshot provider (nvn_snapshot.c); once the device is up. */
+void nvn_snapshot_register(void);
 /** @brief The host's monotonic clock in ns, the one the profile's calibrated GPU times are on. */
 int64_t nvn_gpuprof_now(void);
 /** @brief The batch in slot s is handed to the queue (or the submit thread) now. */

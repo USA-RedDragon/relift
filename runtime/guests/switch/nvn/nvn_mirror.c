@@ -757,6 +757,19 @@ void nvn_mirror_drop_readback(void)
     pthread_mutex_unlock(&mi.lock);
 }
 
+void nvn_mirrors_held(uint32_t *n, uint64_t *bytes, uint64_t *staging_bytes)
+{
+    pthread_mutex_lock(&mi.lock);
+    *n = mi.n;
+    *bytes = 0;
+    for (uint32_t i = 0; i < mi.n; i++)
+        *bytes += mi.v[i]->size;
+    *staging_bytes = mi.rb.size;
+    for (uint32_t i = 0; i < mi.nchunks; i++)
+        *staging_bytes += mi.chunks[i].s.size;
+    pthread_mutex_unlock(&mi.lock);
+}
+
 void nvn_mirror_stats(uint64_t *up, uint64_t *down, uint64_t *syncs, uint64_t *read, uint64_t *marked)
 {
     *read = mi.stat_read;

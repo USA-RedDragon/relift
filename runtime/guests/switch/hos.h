@@ -575,6 +575,8 @@ hos_thread *hos_current(void);
 struct rl_gdb_guest;
 /** @brief The guest's side of the GDB server (core/gdbstub.h): its threads and address space. Only with RL_DEBUG_STUB. */
 const struct rl_gdb_guest *hos_gdb_guest(void);
+/** @brief Registers the Switch layer's part of the diagnostic snapshot (core/snapshot.h): the guest threads. */
+void hos_snapshot_register(void);
 /** @brief Locks the kernel. */
 void hos_lock(void);
 /** @brief Unlocks the kernel. */

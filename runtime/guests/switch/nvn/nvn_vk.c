@@ -6886,6 +6886,9 @@ static void log_call_counts(double frames)
     }
 }
 
+/** @brief Set by nvn_vk_report_now: the next present_rate reports at once, whatever the time since the last. */
+static bool rate_forced;
+
 static void present_rate(uint64_t total)
 {
     static uint64_t last_ns, last_total;
@@ -6894,8 +6897,9 @@ static void present_rate(uint64_t total)
         last_ns = now;
         return;
     }
-    if (now - last_ns < PRESENT_RATE_NS)
+    if (now - last_ns < PRESENT_RATE_NS && !rate_forced)
         return;
+    rate_forced = false;
     static struct timespec cpu_prev;
     struct timespec cpu;
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu);
@@ -6975,6 +6979,13 @@ static void present_rate(uint64_t total)
     marked0 = marked;
     last_ns = now;
     last_total = total;
+}
+
+void nvn_vk_report_now(uint64_t total)
+{
+    rate_forced = true;
+    present_rate(total);
+    rate_forced = false;
 }
 
 int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const int32_t crop[4], uint32_t interval)
@@ -7075,6 +7086,7 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const
                rect[2], rect[3]);
     nvn_frame_presented();
     present_rate(n + 1);
+    nvn_snapshot_step(n + 1);
     if (rgb) {
         rl_window_present_rgb(win, rgb, rect[2], rect[3]);
         counted = true;

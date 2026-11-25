@@ -38,6 +38,8 @@
 #define LOG_LINES 500u
 /** @brief How often the snapshot-now file is looked for. */
 #define POLL_NS 500000000ull
+/** @brief How many presents past the window a provider that is not ready is waited for. */
+#define LATE_PRESENTS 60u
 
 typedef struct file_note {
     char name[96];
@@ -441,7 +443,11 @@ void rl_snapshot_present(void)
         for (uint32_t i = 0; i < S.nprov; i++)
             if (S.prov[i].present)
                 S.prov[i].present(S.prov[i].user, S.dir, S.seen);
-        if (S.seen >= S.window)
+        bool done = S.seen >= S.window;
+        for (uint32_t i = 0; done && S.seen < S.window + LATE_PRESENTS && i < S.nprov; i++)
+            if (S.prov[i].ready && !S.prov[i].ready(S.prov[i].user))
+                done = false;
+        if (done)
             end_window();
     }
     pthread_mutex_unlock(&S.lock);

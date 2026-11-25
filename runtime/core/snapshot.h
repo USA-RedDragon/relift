@@ -35,6 +35,11 @@ typedef struct rl_snapshot_provider {
     void (*begin)(void *user, const char *dir, uint32_t presents);
     /** @brief A present of the window finished (index 1 to presents). */
     void (*present)(void *user, const char *dir, uint32_t index);
+    /**
+     * @brief Whether the provider has what it needs from the window: asked at each present once the window's presents are
+     * done, and the window stays open until every provider that has this hook says true (or 60 more presents pass).
+     */
+    bool (*ready)(void *user);
     /** @brief The window is over: write the provider's files into dir (each announced with rl_snapshot_file) and disarm. */
     void (*end)(void *user, const char *dir);
     void *user;

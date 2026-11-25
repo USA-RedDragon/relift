@@ -117,6 +117,8 @@ uint64_t nvn_zero(rl_ctx *c, uint8_t *mem);
 
 /** @brief Frees the command set of handle; any other value does nothing. */
 void nvn_cmdset_free(uint64_t handle);
+/** @brief The command sets held: how many, their commands and their bytes (the diagnostic snapshot). */
+void nvn_cmdsets_held(uint32_t *sets, uint64_t *cmds, uint64_t *bytes);
 
 /** @brief Marks the sync at guest address sync signaled; 0 does nothing. */
 void nvn_sync_signal(uint64_t sync);

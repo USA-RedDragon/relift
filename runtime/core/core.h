@@ -732,6 +732,12 @@ RL_RUNTIME_API void rl_report_info_each(void (*fn)(void *user, const char *key, 
  * with the debug stub only) as text into out, oldest first, and returns the bytes written. Whole lines only.
  */
 RL_RUNTIME_API size_t rl_log_tail(char *out, size_t size, size_t lines);
+/**
+ * @brief While fn is set, every log line that passes the level filter is also handed to it as tag and message (the
+ * diagnostic snapshot sorts a window's profile lines into files). fn runs under the log lock and must not log. NULL
+ * stops it. Development builds with the debug stub only.
+ */
+RL_RUNTIME_API void rl_log_tee(void (*fn)(void *user, const char *tag, const char *msg), void *user);
 /** @brief Adds a module header line and the module range used for `name+0xoff` of any guest address. */
 RL_RUNTIME_API void rl_report_module(const char *name, uint64_t base, uint64_t size, const char *build_id);
 /** @brief Forgets the header lines and modules (tests). */
