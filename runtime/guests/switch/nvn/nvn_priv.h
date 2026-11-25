@@ -607,6 +607,10 @@ void nvn_gate_enter(void);
  * of it taken as one compile's (conservative when several ran).
  */
 void nvn_gate_leave(void);
+/** @brief How long, in ms, a compile that is alone at the gate waits for memory before it runs anyway (default 2000). */
+void nvn_gate_set_lone_wait(uint32_t ms);
+/** @brief How many compiles ran anyway after that wait. */
+uint32_t nvn_gate_lone_runs(void);
 /** @brief The footprint the gate has measured so far, in bytes (0 until a compile ran alone). */
 uint64_t nvn_gate_footprint(void);
 /** @brief The most compiles the gate has seen in flight at once. */

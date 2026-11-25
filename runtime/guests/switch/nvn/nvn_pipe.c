@@ -284,13 +284,19 @@ static VkResult create_graphics(VkGraphicsPipelineCreateInfo *ci, const char *wh
         ci->flags |= VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
     else
         screen_queue();
+    if (!probe)
+        nvn_gate_enter();
     VkResult vr = VK(vkCreateGraphicsPipelines)(g.dev, P.cache, 1, ci, NULL, out);
+    if (!probe)
+        nvn_gate_leave();
     bool compiled = false;
     if (vr == VK_PIPELINE_COMPILE_REQUIRED) {
         ci->flags = flags;
         screen_queue();
+        nvn_gate_enter();
         t0 = rl_clock_ns();
         vr = VK(vkCreateGraphicsPipelines)(g.dev, P.cache, 1, ci, NULL, out);
+        nvn_gate_leave();
         compiled = true;
     }
     /* Late: a compile after the warm-up that a draw waits for; the warm-up's own workers are not late. */
@@ -1261,13 +1267,19 @@ static VkPipeline compute_in(table *t, VkPipelineLayout layout, nvn_shader_id m,
     else
         screen_queue();
     VkPipeline p = NULL;
+    if (!probe)
+        nvn_gate_enter();
     VkResult vr = VK(vkCreateComputePipelines)(g.dev, P.cache, 1, &ci, NULL, &p);
+    if (!probe)
+        nvn_gate_leave();
     bool compiled = false;
     if (vr == VK_PIPELINE_COMPILE_REQUIRED) {
         ci.flags = 0;
         screen_queue();
+        nvn_gate_enter();
         t0 = rl_clock_ns();
         vr = VK(vkCreateComputePipelines)(g.dev, P.cache, 1, &ci, NULL, &p);
+        nvn_gate_leave();
         compiled = true;
     }
     nvn_module_release(m);

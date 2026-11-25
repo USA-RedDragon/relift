@@ -186,6 +186,8 @@ pub struct Module {
     /// Instructions emitted that a driver compiles to work (not types, labels, loads, stores, bitcasts or access chains), for
     /// RELIFT_OP_ATTR's per-guest-mnemonic count.
     pub work: u64,
+    /// Blocks begun (labels emitted), for RELIFT_OP_ATTR.
+    pub blocks: u64,
     pub caps: Vec<u32>,
     pub ext: Vec<u32>,
     pub head: Vec<u32>,
@@ -250,6 +252,7 @@ impl Module {
         Module {
             next: 1,
             work: 0,
+            blocks: 0,
             ..Module::default()
         }
     }
@@ -476,6 +479,7 @@ impl Module {
 
     pub fn emit_void(&mut self, opcode: u16, args: &[u32]) {
         if opcode == op::LABEL {
+            self.blocks += 1;
             self.block = args[0];
         }
         if let Some(v) = &mut self.vars {

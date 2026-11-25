@@ -88,6 +88,7 @@ TEST(nvn_warm_gate_fit_counts_what_running_compiles_will_still_take)
     /* Before a footprint is measured only a first compile runs. */
     CHECK_EQ(nvn_warm_gate_fit(16 * G, 2 * G, 0, 0, 0, 8), 1u);
     CHECK_EQ(nvn_warm_gate_fit(16 * G, 2 * G, 0, 0, 1, 8), 0u);
+    CHECK_EQ(nvn_warm_gate_fit(1 * G, 2 * G, 0, 0, 0, 8), 0u);
     /* 16 GiB free, 2 kept, 3 per compile: four fit. */
     CHECK_EQ(nvn_warm_gate_fit(16 * G, 2 * G, 3 * G, 0, 0, 8), 4u);
     /* Two running that have taken nothing yet still owe 6 GiB: 10 GiB left, three more would be 9. */
@@ -132,13 +133,44 @@ TEST(nvn_warm_gate_keeps_compiles_in_flight_within_the_memory)
     for (int i = 0; i < 2; i++)
         pthread_join(st[i], NULL);
     CHECK(nvn_gate_footprint() >= big);
-    /* With memory short and nothing running, one compile still goes. */
-    gate_avail = 1 * G;
+    /* With memory short and nothing running, a compile waits for memory, then goes on (logged) so the draw is not stalled
+     * for good. */
     gate_avail = 1 * G;
     atomic_store(&gate_over, 0);
     nvn_gate_init(&src, 8, 2 * G);
-    gate_run(&small, 3);
+    nvn_gate_set_lone_wait(60);
+    gate_run(&small, 1);
     CHECK_EQ(atomic_load(&gate_over), 1u);
+    CHECK_EQ(nvn_gate_lone_runs(), 1u);
+    /* Memory that comes back during the wait lets the compile go without the fallback. */
+    gate_avail = 1 * G;
+    nvn_gate_init(&src, 8, 2 * G);
+    nvn_gate_set_lone_wait(2000);
+    pthread_t late;
+    CHECK_EQ(pthread_create(&late, NULL, gate_compile, &small), 0);
+    struct timespec nap = { 0, 80 * 1000 * 1000 };
+    nanosleep(&nap, NULL);
+    CHECK_EQ(atomic_load(&gate_in_flight), 0u);
+    gate_avail = 32 * G;
+    pthread_join(late, NULL);
+    CHECK_EQ(nvn_gate_lone_runs(), 0u);
+    nvn_gate_set_lone_wait(2000);
+}
+
+/** @brief A compile made inside another on one thread (a warm-up item that makes libraries) counts once at the gate. */
+TEST(nvn_warm_gate_counts_a_nested_compile_once)
+{
+    uint64_t G = 1ull << 30;
+    nvn_gate_src src = { fake_avail, fake_peak, fake_rss, fake_reset };
+    gate_avail = 64 * G;
+    atomic_store(&gate_cur, 0);
+    atomic_store(&gate_peak, 0);
+    nvn_gate_init(&src, 1, 0);
+    nvn_gate_enter();
+    nvn_gate_enter(); /* would deadlock with wanted = 1 if it counted */
+    nvn_gate_leave();
+    nvn_gate_leave();
+    CHECK_EQ(nvn_gate_high_water(), 1u);
 }
 
 TEST(nvn_warm_makes_the_rest_of_the_table_after_the_record_in_the_background)

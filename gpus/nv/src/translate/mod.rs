@@ -1034,14 +1034,16 @@ impl Ctx {
     /// One instruction under its guard predicate.
     pub(crate) fn guarded(&mut self, i: &Inst, pc: u64) -> Res<()> {
         let before = self.m.work;
+        let blocks = self.m.blocks;
         let r = self.guarded_inner(i, pc);
         if std::env::var_os("RELIFT_OP_ATTR").is_some() {
             eprintln!(
-                "OPATTR {} {}{} {}",
+                "OPATTR {} {}{} {} {}",
                 i.mnemonic,
                 i.mods.join("."),
                 if i.guard.is_some() { " @" } else { "" },
-                self.m.work - before
+                self.m.work - before,
+                self.m.blocks - blocks
             );
         }
         r

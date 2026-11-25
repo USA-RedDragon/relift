@@ -322,11 +322,13 @@ static struct {
     uint64_t reserve, est, idle_rss;
     /** @brief The most compiles in flight at once since the gate was last idle. */
     uint32_t busy_max;
-} G = { .lock = PTHREAD_MUTEX_INITIALIZER, .cv = PTHREAD_COND_INITIALIZER, .wanted = 0xffffffffu };
+    /** @brief How long a lone compile waits for memory before it runs anyway, and how many ran so. */
+    uint32_t lone_wait_ms, lone_runs;
+} G = { .lock = PTHREAD_MUTEX_INITIALIZER, .cv = PTHREAD_COND_INITIALIZER, .wanted = 0xffffffffu, .lone_wait_ms = 2000 };
 
 uint32_t nvn_warm_gate_fit(uint64_t avail, uint64_t reserve, uint64_t est, uint64_t in_use, uint32_t running, uint32_t wanted)
 {
-    if (running >= wanted)
+    if (running >= wanted || avail < reserve)
         return 0;
     if (!est)
         return running ? 0 : 1;
@@ -347,12 +349,24 @@ void nvn_gate_init(const nvn_gate_src *src, uint32_t wanted, uint64_t reserve)
     G.est = 0;
     G.running = G.high = 0;
     G.busy_max = 0;
+    G.lone_runs = 0;
     pthread_mutex_unlock(&G.lock);
 }
 
+/** @brief The compiles this thread has open at the gate: one made inside another (a warm-up item that makes libraries) is the outer's. */
+static _Thread_local uint32_t t_gate_depth;
+
+void nvn_gate_set_lone_wait(uint32_t ms) { G.lone_wait_ms = ms; }
+
+uint32_t nvn_gate_lone_runs(void) { return G.lone_runs; }
+
 void nvn_gate_enter(void)
 {
+    if (t_gate_depth++)
+        return;
     pthread_mutex_lock(&G.lock);
+    struct timespec until = { 0, 0 };
+    bool timed = false;
     for (;;) {
         uint64_t avail = G.src.avail ? G.src.avail() : 0;
         uint32_t may;
@@ -362,12 +376,42 @@ void nvn_gate_enter(void)
             uint64_t rss = G.src.rss ? G.src.rss() : 0;
             uint64_t in_use = G.running && rss > G.idle_rss ? rss - G.idle_rss : 0;
             may = nvn_warm_gate_fit(avail, G.reserve, G.est, in_use, G.running, G.wanted);
-            /* Nothing running and memory short: the one compile still goes, or the warm-up would stall for good. */
-            if (!may && !G.running)
-                may = 1;
         }
         if (may)
             break;
+        if (!G.running) {
+            /* Nothing runs that could give memory back: wait for it a while, then go on, since the draw (or the
+             * warm-up) that asked would stall for good otherwise. */
+            struct timespec now;
+            clock_gettime(CLOCK_REALTIME, &now);
+            if (!timed) {
+                timed = true;
+                until = now;
+                until.tv_sec += G.lone_wait_ms / 1000;
+                until.tv_nsec += (long)(G.lone_wait_ms % 1000) * 1000000L;
+                if (until.tv_nsec >= 1000000000L) {
+                    until.tv_sec++;
+                    until.tv_nsec -= 1000000000L;
+                }
+            }
+            if (now.tv_sec > until.tv_sec || (now.tv_sec == until.tv_sec && now.tv_nsec >= until.tv_nsec)) {
+                G.lone_runs++;
+                rl_log(RL_LOG_WARN, "nvn",
+                       "a shader compile runs with %llu MiB available (%llu MiB kept free, a compile of this size takes "
+                       "%llu MiB): nothing else is compiling, so waiting longer would stall",
+                       (unsigned long long)(avail >> 20), (unsigned long long)(G.reserve >> 20),
+                       (unsigned long long)(G.est >> 20));
+                break;
+            }
+            struct timespec step = now;
+            step.tv_nsec += 20 * 1000000L;
+            if (step.tv_nsec >= 1000000000L) {
+                step.tv_sec++;
+                step.tv_nsec -= 1000000000L;
+            }
+            pthread_cond_timedwait(&G.cv, &G.lock, &step);
+            continue;
+        }
         pthread_cond_wait(&G.cv, &G.lock);
     }
     if (!G.running) {
@@ -386,6 +430,8 @@ void nvn_gate_enter(void)
 
 void nvn_gate_leave(void)
 {
+    if (--t_gate_depth)
+        return;
     pthread_mutex_lock(&G.lock);
     if (G.src.peak && G.busy_max) {
         uint64_t peak = G.src.peak();
