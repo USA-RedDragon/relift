@@ -161,7 +161,11 @@ fn fp_operations_past_the_guard_use_the_inline_fast_paths() {
             for inline in INLINE {
                 for args in calls(&c, inline) {
                     *seen.entry((name, inline)).or_default() += 1;
-                    if !args.ends_with(", 0u, 0)") {
+                    // A block of the FZ-tolerant set passes its FPCR local (FZ may be set); the others only see FPCR zero.
+                    let zero = args.ends_with(", 0u, 0)");
+                    let local =
+                        relift_cpu_arm64::lift::sail::fz_tolerant(w) && args.ends_with(", r68, 0)");
+                    if !(zero || local) {
                         bad.push(format!(
                             "{name} {w:#010x}: {inline}{args} does not take FPCR zero"
                         ));

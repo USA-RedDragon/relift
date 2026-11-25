@@ -446,7 +446,19 @@ fn tolerant_arithmetic_stays_on_the_fast_path_under_fz_and_leaves_for_other_mode
         0x1e220820,
         0x1f020c20,
         0x1e61c020,
-        0x1e21c020,
+        0x1e21c020, // scalar arithmetic
+        0x4e22d420,
+        0x4e22cc20,
+        0x4f829020,
+        0x6ea1f820,
+        0x6e22dc20, // vector FADD, FMLA, FMUL by element, FSQRT, FMUL
+        0x1e380020,
+        0x9e780020,
+        0x1e220020,
+        0x1e22c020,
+        0x1e624020, // FCVTZS, SCVTF, FCVT
+        0x4e21d820,
+        0x4ea1b820, // vector SCVTF, FCVTZS
     ] {
         let mut s = state();
         assert_eq!(

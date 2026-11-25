@@ -157,3 +157,59 @@ CHECK_MULADD(fz_flags_host_muladd32, rl_fmuladd32, rl_fp32_muladd, uint32_t, pic
 CHECK_SQRT(fz_flags_host_sqrt64, rl_fsqrt64, rl_fp64_sqrt, uint64_t, pick64)
 CHECK_SQRT(fz_flags_host_sqrt32, rl_fsqrt32, rl_fp32_sqrt, uint32_t, pick32)
 
+
+/* Conversions under FZ: float to integer (a denormal input flushes to zero and sets IDC), integer to float, and single/double
+ * conversion (a tiny narrowed result flushes), against the exact layer. */
+static uint64_t fz_pick_cvt(unsigned from)
+{
+    uint64_t r = next();
+    if (r % 4)
+        return from == 32 ? pick32() : pick64();
+    unsigned e = 20 + (unsigned)((r >> 8) % 50);
+    if (from == 32)
+        return ((r >> 16) & 1) << 31 | (uint64_t)(127 + e) << 23 | ((r >> 20) & 0x7FFFFF);
+    return ((r >> 16) & 1) << 63 | (uint64_t)(1023 + e) << 52 | ((r >> 20) & 0xFFFFFFFFFFFFFull);
+}
+
+TEST(fz_flags_host_conversions)
+{
+    static const uint32_t modes[] = { RL_RM_ZERO, RL_RM_FPCR };
+    rl_arm64_set_fp_flags(1);
+    rl_host_set_fpcr(RL_FPCR_FZ);
+    unsigned bad = 0;
+    for (unsigned i = 0; i < N * 3; i++) {
+        unsigned from = 32u << (i & 1), to = 32u << ((i >> 1) & 1);
+        int u = (int)((i >> 2) & 1);
+        uint32_t rm = modes[(i >> 3) % 2];
+        int kind = (int)((i >> 4) % 3);
+        uint64_t a = kind == 1 ? (from == 32 ? (uint64_t)(uint32_t)next() : next()) : fz_pick_cvt(from);
+        uint32_t want = 0;
+        uint64_t ref, got;
+        rl_fp_host_clear();
+        if (kind == 0) {
+            ref = rl_fp_to_fixed(a, from, to, 0, u, rm, RL_FPCR_FZ, &want);
+            rl_fp_host_clear();
+            got = rl_ftoint(a, from, to, u, rm, RL_FPCR_FZ, 0);
+        } else if (kind == 1) {
+            ref = rl_fixed_to_fp(a, from, to, 0, u, RL_RM_FPCR, RL_FPCR_FZ, &want);
+            rl_fp_host_clear();
+            got = rl_inttof(a, from, to, u, RL_RM_FPCR, RL_FPCR_FZ, 0);
+        } else {
+            from = 32u << (i & 1);
+            to = from == 32 ? 64 : 32;
+            ref = rl_fp_convert(a, from, to, RL_RM_FPCR, RL_FPCR_FZ, &want);
+            rl_fp_host_clear();
+            got = rl_fcvt(a, from, to, RL_RM_FPCR, RL_FPCR_FZ, 0);
+        }
+        uint32_t flags = rl_fp_host_flags() & 0x9Fu;
+        if (got != ref || flags != want) {
+            if (bad++ < 5)
+                fprintf(stderr, "  conversion kind %d %u->%u u%d rm %u (%#llx): %#llx flags %#x, exact %#llx flags %#x\n", kind, from, to, u,
+                        rm, (unsigned long long)a, (unsigned long long)got, flags, (unsigned long long)ref, want);
+        }
+    }
+    rl_fp_host_clear();
+    rl_arm64_set_fp_flags(0);
+    rl_host_set_fpcr(0);
+    CHECK_EQ(bad, 0);
+}

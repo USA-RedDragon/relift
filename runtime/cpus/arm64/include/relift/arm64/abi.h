@@ -72,6 +72,8 @@
 #else
 #define RL_FP_FZ_CHECK 0
 #endif
+/** @brief 1 on x86-64, where FZ is the host's default mode plus exact-path checks or the MXCSR flush. */
+#define RL_FP_FZ_X86 (RL_FP_FZ_HOST || RL_FP_FZ_CHECK)
 
 /**
  * @brief Exact-flags mode: a bit of c->fpcr that is RES0 in the architecture
@@ -1257,8 +1259,9 @@ static inline uint64_t rl_ftoint(uint64_t a, unsigned from_bits, unsigned to_bit
                                  uint32_t fpcr, uint32_t *fpsr)
 {
     double x;
-    if (rmode != RL_RM_ZERO || !rl_fp_fast(fpcr, fpsr) || (from_bits != 32 && from_bits != 64) ||
-        (to_bits != 32 && to_bits != 64))
+    if (rmode != RL_RM_ZERO || !rl_fp_fastz(fpcr, fpsr) || (from_bits != 32 && from_bits != 64) ||
+        (to_bits != 32 && to_bits != 64) ||
+        (RL_FP_FZ_X86 && (fpcr & RL_FPCR_FZ) && rl_fz_denorm(from_bits, a)))
         return rl_fp_to_fixed(a, from_bits, to_bits, 0, is_unsigned, rmode, fpcr, fpsr);
     if (from_bits == 32) {
         uint32_t b = (uint32_t)a;
@@ -1291,7 +1294,7 @@ static inline uint64_t rl_ftoint(uint64_t a, unsigned from_bits, unsigned to_bit
 static inline uint64_t rl_inttof(uint64_t a, unsigned from_bits, unsigned to_bits, int is_unsigned, uint32_t rmode,
                                  uint32_t fpcr, uint32_t *fpsr)
 {
-    if (rmode != RL_RM_FPCR || !rl_fp_fast(fpcr, fpsr) || (from_bits != 32 && from_bits != 64) ||
+    if (rmode != RL_RM_FPCR || !rl_fp_fastz(fpcr, fpsr) || (from_bits != 32 && from_bits != 64) ||
         (to_bits != 32 && to_bits != 64))
         return rl_fixed_to_fp(a, from_bits, to_bits, 0, is_unsigned, rmode, fpcr, fpsr);
     if (to_bits == 32) {
@@ -1323,7 +1326,10 @@ static inline uint64_t rl_inttof(uint64_t a, unsigned from_bits, unsigned to_bit
 static inline uint64_t rl_fcvt(uint64_t a, unsigned from_bits, unsigned to_bits, uint32_t rmode, uint32_t fpcr,
                                uint32_t *fpsr)
 {
-    if (rmode != RL_RM_FPCR || !rl_fp_fast(fpcr, fpsr))
+    if (rmode != RL_RM_FPCR || !rl_fp_fastz(fpcr, fpsr))
+        return rl_fp_convert(a, from_bits, to_bits, rmode, fpcr, fpsr);
+    const int fz_ = RL_FP_FZ_X86 && (fpcr & RL_FPCR_FZ) != 0;
+    if (fz_ && rl_fz_denorm(from_bits, a))
         return rl_fp_convert(a, from_bits, to_bits, rmode, fpcr, fpsr);
     if (from_bits == 32 && to_bits == 64) {
         uint32_t b = (uint32_t)a;
@@ -1343,9 +1349,11 @@ static inline uint64_t rl_fcvt(uint64_t a, unsigned from_bits, unsigned to_bits,
         float r;
         uint32_t u;
         memcpy(&d, &a, 8);
+        const uint32_t csr_ = fz_ ? rl_fz_save() : 0;
         r = (float)d;
         memcpy(&u, &r, 4);
-        if (RL_FP_NEEDS_SLOW_(uint32_t, u, r, 1))
+        if ((fz_ && rl_fz_slow(32, 1, (a & 0x7FFFFFFFFFFFFFFFull) ? 0x3F800000u : 0, 0x3F800000u, u) &&
+         (rl_fz_restore(csr_), 1)) || RL_FP_NEEDS_SLOW_(uint32_t, u, r, 1))
             u = (uint32_t)rl_fp_convert(a, from_bits, to_bits, rmode, fpcr, fpsr);
         RL_FP_OPAQUE(u);
         return u;

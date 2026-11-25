@@ -49,7 +49,24 @@ pub fn fz_tolerant(word: u32) -> bool {
     let arith = word & 0xFF20_0C00 == 0x1E20_0800 && matches!((word >> 12) & 15, 0 | 1 | 2 | 3 | 8);
     let sqrt = word & 0xFF3F_FC00 == 0x1E21_C000;
     let fused = word & 0xFF00_0000 == 0x1F00_0000;
-    ftype_sd && (arith || sqrt || fused)
+    // SCVTF, UCVTF (an integer is never denormal or tiny) and FCVTZS, FCVTZU (a denormal operand takes the exact path in
+    // the emitted code), scalar from or to a general register; FCVT between single and double.
+    let int_cvt = word & 0x7F3E_FC00 == 0x1E22_0000 || word & 0x7F3E_FC00 == 0x1E38_0000;
+    let fcvt = word & 0xFFFF_FC00 == 0x1E62_4000 || word & 0xFFFF_FC00 == 0x1E22_C000;
+    let scalar = ftype_sd && (arith || sqrt || fused || int_cvt) || fcvt;
+    // Vector forms, every lane through the same operations: FADD, FSUB, FMUL, FDIV, FMLA, FMLS, FSQRT; FMUL, FMLA, FMLS by
+    // element; SCVTF, UCVTF, FCVTZS, FCVTZU. Not FMULX, FABD, pairwise, estimates or steps.
+    let m = word & 0xBFA0_FC00;
+    let vec = matches!(
+        m,
+        0x0E20_D400 | 0x0EA0_D400 | 0x2E20_DC00 | 0x2E20_FC00 | 0x0E20_CC00 | 0x0EA0_CC00
+    ) || matches!(word & 0xBF80_F400, 0x0F80_9000 | 0x0F80_1000 | 0x0F80_5000)
+        || word & 0xBFBF_FC00 == 0x2EA1_F800
+        || matches!(
+            word & 0xBFBF_FC00,
+            0x0E21_D800 | 0x2E21_D800 | 0x0EA1_B800 | 0x2EA1_B800
+        );
+    scalar || vec
 }
 
 /// The slow-path code of a block whose FPSR flags the host cannot give, in a
