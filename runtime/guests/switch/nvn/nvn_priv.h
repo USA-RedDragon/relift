@@ -115,7 +115,7 @@
 /** @brief Returns 0 from a proc of NVN_ZERO_PROCS. */
 uint64_t nvn_zero(rl_ctx *c, uint8_t *mem);
 
-/** @brief Frees the command set of handle; any other value does nothing. */
+/** @brief Drops the table's hold of the command set of handle (its memory goes with the last run replaying it); any other value does nothing. */
 void nvn_cmdset_free(uint64_t handle);
 /** @brief The command sets held: how many, their commands and their bytes (the diagnostic snapshot). */
 void nvn_cmdsets_held(uint32_t *sets, uint64_t *cmds, uint64_t *bytes);
@@ -1192,6 +1192,16 @@ typedef struct nvn_cmd {
 
 /** @brief The commands of one NVNcommandHandle. */
 typedef struct nvn_cmdset {
+    /**
+     * @brief The holders: the handle table, and every submitted run still replaying it (nvn_cmdset_acquire). The set
+     * is freed when the last lets go.
+     */
+    _Atomic uint32_t refs;
+    /** @brief Where in the table the handle's slot is, and the command memory the set was recorded at (pool, start byte). */
+    uint32_t slot;
+    uint64_t pool, start, buffer;
+    /** @brief Where this set sits in the list of the sets alive. */
+    uint32_t livepos;
     uint32_t n;
     /** @brief Guest bytes the commands pointed at, copied when they were recorded. */
     uint32_t nbytes;
@@ -1226,6 +1236,18 @@ const char *nvn_slot_name(uint32_t slot);
 const char *nvn_cmd_name(uint32_t op);
 /** @brief The command set of handle, or NULL. */
 const nvn_cmdset *nvn_cmdset_of(uint64_t handle);
+/** @brief The command set of handle with one more holder (nvn_cmdset_release it), or NULL. */
+const nvn_cmdset *nvn_cmdset_acquire(uint64_t handle);
+/** @brief One more holder of s, which the caller holds already. */
+void nvn_cmdset_hold(const nvn_cmdset *s);
+/** @brief Gives up one holder of s; the last frees it. NULL does nothing. */
+void nvn_cmdset_release(const nvn_cmdset *s);
+/** @brief Writes into out how the set of handle ended (who recorded over it); false when it did not end so. */
+bool nvn_cmdset_gone_note(uint64_t handle, char *out, size_t n);
+/** @brief Writes into out the buffers and pools holding the most live sets, with their counts and start offsets. */
+void nvn_cmdset_where(char *out, size_t n);
+/** @brief The sets alive now, their bytes, the sets made so far and those ended because a later recording wrote over their bytes. */
+void nvn_cmdset_stats(uint64_t *live, uint64_t *bytes, uint64_t *made, uint64_t *overwritten);
 /** @brief Runs the command set of handle on queue. Returns RL_OK, or RL_PENDING after a stop. */
 int nvn_cmd_submit(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t handle);
 /**

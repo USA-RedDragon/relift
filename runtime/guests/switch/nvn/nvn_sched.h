@@ -27,6 +27,9 @@ typedef struct nvn_sched_item {
     const nvn_cmdset *s;
 } nvn_sched_item;
 
+/** @brief Lets go the command sets the first n items hold: each run of items of one set holds it once (nvn_sched_flatten takes them). */
+void nvn_sched_items_release(const nvn_sched_item *items, uint32_t n);
+
 /** @brief One submitted command set, flattened, and where its replay stands. */
 typedef struct nvn_sched_run {
     uint64_t queue;

@@ -16,6 +16,13 @@ bool nvn_event_wait_met(uint32_t cur, uint32_t mode, uint32_t value)
     return cur == value;
 }
 
+void nvn_sched_items_release(const nvn_sched_item *items, uint32_t n)
+{
+    for (uint32_t i = 0; i < n; i++)
+        if (!i || items[i].s != items[i - 1].s)
+            nvn_cmdset_release(items[i].s);
+}
+
 static bool push(nvn_sched_item **items, uint32_t *n, uint32_t *cap, const nvn_cmd *e, const nvn_cmdset *s)
 {
     if (*n == *cap) {
@@ -26,6 +33,8 @@ static bool push(nvn_sched_item **items, uint32_t *n, uint32_t *cap, const nvn_c
         *items = p;
         *cap = nc;
     }
+    if (!*n || (*items)[*n - 1].s != s)
+        nvn_cmdset_hold(s);
     (*items)[(*n)++] = (nvn_sched_item){ e, s };
     return true;
 }
@@ -51,12 +60,13 @@ static int flatten(const nvn_cmdset *s, nvn_sched_item **items, uint32_t *n, uin
             }
         }
         for (uint32_t k = 0; k < count; k++) {
-            const nvn_cmdset *inner = nvn_cmdset_of(handles[k]);
-            if (!inner || depth > 16) {
+            const nvn_cmdset *inner = depth > 16 ? NULL : nvn_cmdset_acquire(handles[k]);
+            if (!inner) {
                 *bad = handles[k];
                 return 1;
             }
             int rc = flatten(inner, items, n, cap, bad, depth + 1);
+            nvn_cmdset_release(inner);
             if (rc)
                 return rc;
         }
@@ -72,6 +82,7 @@ int nvn_sched_flatten(const nvn_cmdset *s, nvn_sched_item **items, uint32_t *n, 
     *bad = 0;
     int rc = flatten(s, items, n, &cap, bad, 0);
     if (rc) {
+        nvn_sched_items_release(*items, *n);
         free(*items);
         *items = NULL;
         *n = 0;
@@ -109,6 +120,7 @@ void nvn_sched_run_free(nvn_sched_run *r)
 {
     if (!r)
         return;
+    nvn_sched_items_release(r->items, r->n);
     free(r->items);
     free(r);
 }

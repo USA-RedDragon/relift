@@ -6,6 +6,7 @@
 #include "nvn/nvn_sched.h"
 #include "tc.h"
 
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -45,6 +46,7 @@ static nvn_cmdset *make_set(const step *steps, uint32_t n)
 {
     nvn_cmdset *s = calloc(1, sizeof *s + n * sizeof(nvn_cmd));
     s->n = n;
+    atomic_init(&s->refs, 1);
     for (uint32_t i = 0; i < n; i++) {
         nvn_cmd *e = &s->cmds[i];
         e->op = steps[i].op;

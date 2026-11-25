@@ -6118,6 +6118,7 @@ static void finish_runs(nvn_sched_run *done)
         vk_run *u = done->user;
         for (uint32_t i = 0; i < u->r.nsyncs; i++)
             nvn_sync_signal(u->r.syncs[i]);
+        nvn_cmdset_release(u->r.s);
         free(u);
         nvn_sched_run_free(done);
         done = next;
@@ -6167,8 +6168,10 @@ int nvn_vk_run(rl_ctx *c, uint8_t *mem, uint64_t queue, const nvn_cmdset *s)
     nvn_lock();
     replay probe = { .c = c, .mem = mem, .s = s };
     if (nvn_sched_flatten(s, &items, &n, &bad)) {
-        int rc = nvn_vk_stop(&probe, "a call of command handle 0x%llx, which is not a command set relift made",
-                             (unsigned long long)bad);
+        char why[400] = "";
+        nvn_cmdset_gone_note(bad, why, sizeof why);
+        int rc = nvn_vk_stop(&probe, "a call of command handle 0x%llx, which is not a command set relift made%s%s",
+                             (unsigned long long)bad, *why ? ": " : "", why);
         nvn_unlock();
         return rc;
     }
@@ -6179,12 +6182,14 @@ int nvn_vk_run(rl_ctx *c, uint8_t *mem, uint64_t queue, const nvn_cmdset *s)
     nvn_gfx *st = state_of(queue);
     if (!u || !st || !nvn_sched_add(&sched, queue, items, n, u)) {
         free(u);
+        nvn_sched_items_release(items, n);
         free(items);
         nvn_unlock();
         return nvn_vk_fatal(c, st ? "out of memory queueing a submit" : "more than %u queues", MAX_QUEUES);
     }
     static uint64_t submits;
     u->r = (replay){ .c = c, .mem = mem, .s = s, .st = st, .queue = queue, .submit = ++submits };
+    nvn_cmdset_hold(s);
     uint64_t what[1] = { n };
     nvn_trace_order("submit", "nvnQueueSubmitCommands", queue, u->r.submit, 0, what, 1, 0, true);
     nvn_sched_run *done = NULL;
@@ -6974,6 +6979,17 @@ static void present_rate(uint64_t total)
         struct mallinfo2 mi = mallinfo2();
         uint32_t libs, gfx, comp;
         nvn_pipe_held(&libs, &gfx, &comp);
+        uint64_t sets_live, sets_bytes, sets_made, sets_reused;
+        nvn_cmdset_stats(&sets_live, &sets_bytes, &sets_made, &sets_reused);
+        rl_log(RL_LOG_INFO, "nvn", "command sets: %llu alive (%.1f MiB), %llu made, %llu ended as a later recording wrote over their bytes",
+               (unsigned long long)sets_live, (double)sets_bytes / 1048576.0, (unsigned long long)sets_made,
+               (unsigned long long)sets_reused);
+        {
+            char where[900];
+            nvn_cmdset_where(where, sizeof where);
+            if (*where)
+                rl_log(RL_LOG_INFO, "nvn", "command sets held by: %s", where);
+        }
         rl_log(RL_LOG_INFO, "nvn",
                "host heap: %.1f MiB in arenas, %.1f MiB in use, %.1f MiB free but kept, %.1f MiB mapped; pipelines held: "
                "%u libraries, %u graphics, %u compute",

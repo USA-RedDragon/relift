@@ -491,6 +491,103 @@ TEST(nvn_command_buffer_records_and_submits)
     CHECK_EQ(call(c, nvnh_nvnCommandBufferBeginRecording, cb, 0, 0, 0), RL_PENDING);
 }
 
+/** Records one stencil-ref command into buffer cb and returns the set's handle. */
+static uint64_t record_one(rl_ctx *c, uint64_t cb, uint64_t ref)
+{
+    call(c, nvnh_nvnCommandBufferBeginRecording, cb, 0, 0, 0);
+    call(c, nvnh_nvnCommandBufferSetStencilRef, cb, ref, 0x80, 0);
+    call(c, nvnh_nvnCommandBufferEndRecording, cb, 0, 0, 0);
+    return c->x[0];
+}
+
+TEST(nvn_a_command_set_ends_when_a_later_recording_writes_over_its_bytes)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint64_t cb = heap + 0x400, other = heap + 0x500;
+    uint64_t live0, bytes0, made0, over0, live, bytes, made, over;
+    nvn_cmdset_stats(&live0, &bytes0, &made0, &over0);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferInitialize, cb, heap, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferInitialize, other, heap, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferAddCommandMemory, cb, heap, 0x10000, 0x4000), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferAddCommandMemory, other, heap, 0x20000, 0x4000), RET);
+    /* two recordings in one added memory sit one after the other: the second does not write over the first */
+    uint64_t h0 = record_one(c, cb, 1), h1 = record_one(c, cb, 2), h2 = record_one(c, other, 3);
+    CHECK(nvn_cmdset_of(h0) != NULL && nvn_cmdset_of(h1) != NULL && nvn_cmdset_of(h2) != NULL);
+    nvn_cmdset_stats(&live, &bytes, &made, &over);
+    CHECK_EQ(live, live0 + 3);
+    CHECK_EQ(over, over0);
+    /* adding the memory again writes nothing: the sets stay, as a game may still submit them */
+    const nvn_cmdset *inflight = nvn_cmdset_acquire(h0);
+    CHECK(inflight != NULL);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferAddCommandMemory, cb, heap, 0x10000, 0x4000), RET);
+    CHECK(nvn_cmdset_of(h0) != NULL && nvn_cmdset_of(h1) != NULL);
+    /* recording again starts at the memory's start and writes over the first set (one command, 16 bytes), not the second */
+    uint64_t h3 = record_one(c, cb, 7);
+    CHECK(nvn_cmdset_of(h0) == NULL);
+    CHECK(nvn_cmdset_of(h1) != NULL);
+    CHECK(nvn_cmdset_of(h2) != NULL);
+    CHECK(nvn_cmdset_of(h3) != NULL);
+    /* a run in flight keeps what it replays */
+    CHECK_EQ(inflight->n, 1);
+    CHECK_EQ(inflight->cmds[0].x[1], 1);
+    nvn_cmdset_stats(&live, &bytes, &made, &over);
+    CHECK_EQ(over, over0 + 1);
+    CHECK_EQ(live, live0 + 3);
+    nvn_cmdset_release(inflight);
+    /* the next recording writes over the second set */
+    uint64_t h4 = record_one(c, cb, 8);
+    CHECK(nvn_cmdset_of(h1) == NULL);
+    CHECK(nvn_cmdset_of(h4) != NULL);
+}
+
+TEST(nvn_empty_recordings_share_one_set)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint64_t cb = heap + 0x400;
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferInitialize, cb, heap, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferAddCommandMemory, cb, heap, 0x10000, 0x4000), RET);
+    uint64_t live0, bytes0, made0, over0, live, bytes, made, over;
+    nvn_cmdset_stats(&live0, &bytes0, &made0, &over0);
+    uint64_t h[3];
+    for (int i = 0; i < 3; i++) {
+        call(c, nvnh_nvnCommandBufferBeginRecording, cb, 0, 0, 0);
+        call(c, nvnh_nvnCommandBufferEndRecording, cb, 0, 0, 0);
+        h[i] = c->x[0];
+    }
+    nvn_cmdset_stats(&live, &bytes, &made, &over);
+    CHECK_EQ(made, made0 + 3);
+    CHECK_EQ(live, live0);
+    CHECK_EQ(bytes, bytes0);
+    CHECK(h[0] != h[1] && nvn_cmdset_of(h[0]) == nvn_cmdset_of(h[2]));
+    CHECK_EQ(nvn_cmdset_of(h[1])->n, 0);
+    nvn_cmdset_free(h[0]);
+    CHECK(nvn_cmdset_of(h[0]) == NULL && nvn_cmdset_of(h[1]) != NULL);
+}
+
+TEST(nvn_a_set_called_from_another_buffer_is_written_over_only_by_a_recording)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint64_t outer = heap + 0x400, inner = heap + 0x500;
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferInitialize, outer, heap, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferInitialize, inner, heap, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferAddCommandMemory, inner, heap, 0x30000, 0x4000), RET);
+    uint64_t callee = record_one(c, inner, 3);
+    /* the outer buffer is given the same range: no bytes change until it records */
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferAddCommandMemory, outer, heap, 0x30000, 0x4000), RET);
+    CHECK(nvn_cmdset_of(callee) != NULL);
+    /* its recording writes there, over the callee */
+    uint64_t caller = record_one(c, outer, 5);
+    CHECK(nvn_cmdset_of(callee) == NULL);
+    CHECK(nvn_cmdset_of(caller) != NULL);
+    /* a recording in memory elsewhere leaves it */
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferAddCommandMemory, inner, heap, 0x50000, 0x4000), RET);
+    uint64_t apart = record_one(c, inner, 6);
+    CHECK(nvn_cmdset_of(caller) != NULL && nvn_cmdset_of(apart) != NULL);
+}
+
 TEST(nvn_indirect_draws_are_recorded_with_their_arguments)
 {
     rl_ctx *c = t_boot(NULL);

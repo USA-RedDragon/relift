@@ -13,6 +13,7 @@
 #include "nvn_priv.h"
 
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 
 /** @brief Top bits of a command handle relift returns; the low bits index the set table. */
@@ -29,6 +30,8 @@ typedef struct nvn_cmdbuf {
     uint64_t callback, callback_data;
     uint32_t row_stride, image_stride, recording_mode;
     bool recording;
+    /** @brief The bytes of the added command memory the recordings since nvnCommandBufferAddCommandMemory took. */
+    uint64_t consumed;
     /** @brief The commands the last recording ended with; the used-memory getters answer from it after EndRecording. */
     uint32_t ended_n;
     nvn_cmd *cmds;
@@ -41,7 +44,158 @@ static struct {
     pthread_mutex_t lock;
     nvn_cmdset **sets;
     uint32_t n, cap;
+    /** @brief The sets alive, in no order (each knows its place), so a recording finds what it writes over without scanning every set made. */
+    nvn_cmdset **liv;
+    uint32_t nliv, capliv;
+    /** @brief Who wrote over each ended set, by slot: the recording's buffer and first byte; for naming a handle called after. */
+    struct { uint64_t buffer, start; } *tomb;
+    uint64_t live, bytes, made, overwritten;
 } sets = { .lock = PTHREAD_MUTEX_INITIALIZER };
+
+/**
+ * @brief The set of a recording that made no commands: one shared set for all of them. It holds no bytes, so no recording
+ * writes over it and nothing would ever end it; sharing keeps the games' empty recordings (thousands per second of play)
+ * from piling up.
+ */
+static nvn_cmdset g_empty = { .refs = 1u << 30 };
+
+static size_t set_bytes(const nvn_cmdset *s) { return sizeof *s + (size_t)s->n * sizeof(nvn_cmd) + s->nbytes; }
+
+void nvn_cmdset_hold(const nvn_cmdset *s)
+{
+    if (s)
+        atomic_fetch_add(&((nvn_cmdset *)s)->refs, 1);
+}
+
+void nvn_cmdset_release(const nvn_cmdset *cs)
+{
+    nvn_cmdset *s = (nvn_cmdset *)cs;
+    if (s && atomic_fetch_sub(&s->refs, 1) == 1)
+        free(s);
+}
+
+/** @brief Takes the set out of the table (sets.lock held), returning the table's hold for the caller to release. */
+static nvn_cmdset *unlist_locked(uint32_t idx)
+{
+    nvn_cmdset *s = sets.sets[idx];
+    if (s == &g_empty) {
+        sets.sets[idx] = NULL;
+        return NULL;
+    }
+    if (s) {
+        sets.sets[idx] = NULL;
+        sets.liv[s->livepos] = sets.liv[--sets.nliv];
+        sets.liv[s->livepos]->livepos = s->livepos;
+        sets.live--;
+        sets.bytes -= set_bytes(s);
+    }
+    return s;
+}
+
+/**
+ * @brief The recording that made s writes its bytes over the sets whose bytes overlap them, whichever buffer made
+ * them: on the console their handles now name garbage, so they end here (runs still replaying one keep it until they
+ * finish). sets.lock held; the ended sets are returned in *gone for the caller to release after unlocking.
+ */
+static uint32_t overwrite_locked(const nvn_cmdset *s, nvn_cmdset ***gone)
+{
+    uint32_t ngone = 0;
+    uint64_t end = s->start + (uint64_t)s->n * NVN_CMD_BYTES;
+    *gone = NULL;
+    if (!s->pool || !s->n)
+        return 0;
+    for (uint32_t i = 0; i < sets.nliv;) {
+        nvn_cmdset *o = sets.liv[i];
+        if (o != s && o->pool == s->pool && o->start < end && o->start + (uint64_t)o->n * NVN_CMD_BYTES > s->start) {
+            nvn_cmdset **g = realloc(*gone, (ngone + 1) * sizeof **gone);
+            if (!g)
+                return ngone;
+            *gone = g;
+            sets.tomb[o->slot].buffer = s->buffer;
+            sets.tomb[o->slot].start = s->start;
+            (*gone)[ngone++] = unlist_locked(o->slot);
+            sets.overwritten++;
+            continue;
+        }
+        i++;
+    }
+    return ngone;
+}
+
+bool nvn_cmdset_gone_note(uint64_t handle, char *out, size_t n)
+{
+    bool found = false;
+    pthread_mutex_lock(&sets.lock);
+    uint32_t i = HANDLE_INDEX(handle);
+    if (i < sets.n && !sets.sets[i] && sets.tomb[i].start + 1) {
+        snprintf(out, n, "buffer 0x%llx recorded over its bytes at pool offset 0x%llx", (unsigned long long)sets.tomb[i].buffer,
+                 (unsigned long long)sets.tomb[i].start);
+        found = true;
+    } else if (i >= sets.n) {
+        snprintf(out, n, "only %u sets were made", sets.n);
+        found = true;
+    }
+    pthread_mutex_unlock(&sets.lock);
+    return found;
+}
+
+static int by_buffer(const void *a, const void *b)
+{
+    const nvn_cmdset *x = *(nvn_cmdset *const *)a, *y = *(nvn_cmdset *const *)b;
+    return x->buffer != y->buffer ? (x->buffer < y->buffer ? -1 : 1) : x->pool != y->pool ? (x->pool < y->pool ? -1 : 1) : 0;
+}
+
+void nvn_cmdset_where(char *out, size_t n)
+{
+    out[0] = 0;
+    pthread_mutex_lock(&sets.lock);
+    nvn_cmdset **copy = sets.nliv ? malloc(sets.nliv * sizeof *copy) : NULL;
+    if (copy) {
+        memcpy(copy, sets.liv, sets.nliv * sizeof *copy);
+        qsort(copy, sets.nliv, sizeof *copy, by_buffer);
+        struct { uint64_t buffer, pool, lo, hi; uint32_t sets; uint64_t cmds; } top[4] = { { 0 } };
+        for (uint32_t i = 0; i < sets.nliv;) {
+            uint32_t j = i;
+            uint64_t lo = ~0ull, hi = 0, cmds = 0;
+            for (; j < sets.nliv && !by_buffer(&copy[i], &copy[j]); j++) {
+                lo = copy[j]->start < lo ? copy[j]->start : lo;
+                hi = copy[j]->start > hi ? copy[j]->start : hi;
+                cmds += copy[j]->n;
+            }
+            uint32_t cnt = j - i;
+            for (int t = 0; t < 4; t++)
+                if (cnt > top[t].sets) {
+                    for (int m = 3; m > t; m--)
+                        top[m] = top[m - 1];
+                    top[t].buffer = copy[i]->buffer;
+                    top[t].pool = copy[i]->pool;
+                    top[t].lo = lo;
+                    top[t].hi = hi;
+                    top[t].sets = cnt;
+                    top[t].cmds = cmds;
+                    break;
+                }
+            i = j;
+        }
+        size_t at = 0;
+        for (int t = 0; t < 4 && top[t].sets && at < n; t++)
+            at += (size_t)snprintf(out + at, n - at, "%sbuffer 0x%llx pool 0x%llx: %u sets, %llu commands, starts 0x%llx..0x%llx", t ? "; " : "",
+                                   (unsigned long long)top[t].buffer, (unsigned long long)top[t].pool, top[t].sets,
+                                   (unsigned long long)top[t].cmds, (unsigned long long)top[t].lo, (unsigned long long)top[t].hi);
+        free(copy);
+    }
+    pthread_mutex_unlock(&sets.lock);
+}
+
+void nvn_cmdset_stats(uint64_t *live, uint64_t *bytes, uint64_t *made, uint64_t *overwritten)
+{
+    pthread_mutex_lock(&sets.lock);
+    *live = sets.live;
+    *bytes = sets.bytes;
+    *made = sets.made;
+    *overwritten = sets.overwritten;
+    pthread_mutex_unlock(&sets.lock);
+}
 
 static nvn_cmdbuf *cb_of(rl_ctx *c) { return (nvn_cmdbuf *)nvn_obj_get(c->x[0], NVN_CMDBUF); }
 
@@ -194,6 +348,7 @@ uint64_t nvnh_nvnCommandBufferAddCommandMemory(rl_ctx *c, uint8_t *mem)
     b->cmd_pool = c->x[1];
     b->cmd_offset = c->x[2];
     b->cmd_size = c->x[3];
+    b->consumed = 0;
     return nvn_ret(c);
 }
 
@@ -421,17 +576,25 @@ uint64_t nvnh_nvnCommandBufferEndRecording(rl_ctx *c, uint8_t *mem)
     nvn_cmdbuf *b = cb_of(c);
     if (!b)
         return not_cb(c, "nvnCommandBufferEndRecording");
-    nvn_cmdset *s = malloc(sizeof *s + (size_t)b->n * sizeof(nvn_cmd) + b->nbytes);
+    bool empty = !b->n && !b->nbytes;
+    nvn_cmdset *s = empty ? &g_empty : malloc(sizeof *s + (size_t)b->n * sizeof(nvn_cmd) + b->nbytes);
     if (!s)
         return (uint64_t)rl_guest_fatal(c, "nvn", "out of memory for a command set of %u commands", b->n);
-    s->n = b->n;
-    s->nbytes = b->nbytes;
-    s->bytes = (uint8_t *)(s->cmds + b->n);
-    if (b->n)
-        memcpy(s->cmds, b->cmds, (size_t)b->n * sizeof(nvn_cmd));
-    if (b->nbytes)
-        memcpy(s->bytes, b->bytes, b->nbytes);
+    if (!empty) {
+        atomic_init(&s->refs, 1);
+        s->pool = b->cmd_size ? b->cmd_pool : 0;
+        s->start = b->cmd_offset + b->consumed;
+        s->buffer = c->x[0];
+        s->n = b->n;
+        s->nbytes = b->nbytes;
+        s->bytes = (uint8_t *)(s->cmds + b->n);
+        if (b->n)
+            memcpy(s->cmds, b->cmds, (size_t)b->n * sizeof(nvn_cmd));
+        if (b->nbytes)
+            memcpy(s->bytes, b->bytes, b->nbytes);
+    }
     b->recording = false;
+    b->consumed += (uint64_t)b->n * NVN_CMD_BYTES;
     b->ended_n = b->n;
     b->n = 0;
     b->nbytes = 0;
@@ -439,17 +602,49 @@ uint64_t nvnh_nvnCommandBufferEndRecording(rl_ctx *c, uint8_t *mem)
     if (sets.n == sets.cap) {
         uint32_t cap = sets.cap ? sets.cap * 2 : 256;
         nvn_cmdset **ns = realloc(sets.sets, cap * sizeof *ns);
-        if (!ns) {
+        if (ns)
+            sets.sets = ns;
+        void *nt = ns ? realloc(sets.tomb, cap * sizeof *sets.tomb) : NULL;
+        if (nt)
+            sets.tomb = nt;
+        if (!ns || !nt) {
             pthread_mutex_unlock(&sets.lock);
-            free(s);
+            if (!empty)
+                free(s);
             return (uint64_t)rl_guest_fatal(c, "nvn", "out of memory for command sets");
         }
-        sets.sets = ns;
         sets.cap = cap;
+    }
+    if (sets.nliv == sets.capliv) {
+        uint32_t cap = sets.capliv ? sets.capliv * 2 : 256;
+        nvn_cmdset **nl = realloc(sets.liv, cap * sizeof *nl);
+        if (!nl) {
+            pthread_mutex_unlock(&sets.lock);
+            if (!empty)
+                free(s);
+            return (uint64_t)rl_guest_fatal(c, "nvn", "out of memory for command sets");
+        }
+        sets.liv = nl;
+        sets.capliv = cap;
     }
     uint32_t idx = sets.n++;
     sets.sets[idx] = s;
+    sets.tomb[idx].start = ~0ull;
+    nvn_cmdset **gone = NULL;
+    uint32_t ngone = 0;
+    if (!empty) {
+        s->slot = idx;
+        s->livepos = sets.nliv;
+        sets.liv[sets.nliv++] = s;
+        ngone = overwrite_locked(s, &gone);
+        sets.live++;
+        sets.bytes += set_bytes(s);
+    }
+    sets.made++;
     pthread_mutex_unlock(&sets.lock);
+    for (uint32_t i = 0; i < ngone; i++)
+        nvn_cmdset_release(gone[i]);
+    free(gone);
     c->x[0] = HANDLE_TAG | idx;
     return nvn_ret(c);
 }
@@ -535,18 +730,28 @@ void nvn_cmdsets_held(uint32_t *sets_n, uint64_t *cmds, uint64_t *bytes)
     pthread_mutex_unlock(&sets.lock);
 }
 
+const nvn_cmdset *nvn_cmdset_acquire(uint64_t handle)
+{
+    if ((handle & ~0xffffffffull) != HANDLE_TAG)
+        return NULL;
+    pthread_mutex_lock(&sets.lock);
+    nvn_cmdset *s = HANDLE_INDEX(handle) < sets.n ? sets.sets[HANDLE_INDEX(handle)] : NULL;
+    if (s)
+        atomic_fetch_add(&s->refs, 1);
+    pthread_mutex_unlock(&sets.lock);
+    return s;
+}
+
 void nvn_cmdset_free(uint64_t handle)
 {
     if ((handle & ~0xffffffffull) != HANDLE_TAG)
         return;
     nvn_cmdset *s = NULL;
     pthread_mutex_lock(&sets.lock);
-    if (HANDLE_INDEX(handle) < sets.n) {
-        s = sets.sets[HANDLE_INDEX(handle)];
-        sets.sets[HANDLE_INDEX(handle)] = NULL;
-    }
+    if (HANDLE_INDEX(handle) < sets.n)
+        s = unlist_locked(HANDLE_INDEX(handle));
     pthread_mutex_unlock(&sets.lock);
-    free(s);
+    nvn_cmdset_release(s);
 }
 
 static const char *const cmd_names[] = {
@@ -571,7 +776,7 @@ NVN_RECORDED(NVN_RECORDER)
 
 int nvn_cmd_submit(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t handle)
 {
-    const nvn_cmdset *s = nvn_cmdset_of(handle);
+    const nvn_cmdset *s = nvn_cmdset_acquire(handle);
     if (!s)
         return rl_guest_fatal(c, "nvn", "queue 0x%llx: 0x%llx is not a command handle relift made",
                               (unsigned long long)queue, (unsigned long long)handle);
@@ -581,5 +786,7 @@ int nvn_cmd_submit(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t handle)
                    (unsigned long long)s->cmds[i].x[1], (unsigned long long)s->cmds[i].x[2],
                    (unsigned long long)s->cmds[i].x[3], (unsigned long long)s->cmds[i].x[4],
                    (unsigned long long)s->cmds[i].x[5]);
-    return nvn_vk_run(c, mem, queue, s);
+    int rc = nvn_vk_run(c, mem, queue, s);
+    nvn_cmdset_release(s);
+    return rc;
 }
