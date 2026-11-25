@@ -1771,6 +1771,58 @@ fn fragment_alpha_to_coverage_is_a_specialized_mask() {
     );
 }
 
+/// Whether every store to the `gl_SampleMask` output of `words` sits in a
+/// block entered by a conditional branch (so a draw whose constants fold the
+/// branch away stores nothing).
+fn sample_mask_stores_are_conditional(words: &[u32]) -> bool {
+    let mut var = None;
+    let mut k = 5;
+    while k < words.len() {
+        let n = (words[k] >> 16) as usize;
+        // OpDecorate <id> BuiltIn SampleMask
+        if words[k] & 0xffff == 71 && n >= 4 && words[k + 2] == 11 && words[k + 3] == 20 {
+            var = Some(words[k + 1]);
+        }
+        k += n.max(1);
+    }
+    let Some(var) = var else { return true };
+    let (mut pointers, mut stores, mut prev, mut before_label) = (Vec::new(), 0, 0, 0);
+    let mut k = 5;
+    while k < words.len() {
+        let (op, n) = (words[k] & 0xffff, (words[k] >> 16) as usize);
+        if op == 65 && words[k + 3] == var {
+            pointers.push(words[k + 2]);
+        }
+        if op == 248 {
+            before_label = prev;
+        }
+        if op == 62 && pointers.contains(&words[k + 1]) {
+            stores += 1;
+            // OpBranchConditional is 250
+            if before_label != 250 {
+                return false;
+            }
+        }
+        prev = op;
+        k += n.max(1);
+    }
+    stores > 0
+}
+
+#[test]
+fn fragment_alpha_to_coverage_stores_the_mask_only_when_set() {
+    let p = relift_gpu_sm86::program::parse(&flat_alpha_fragment());
+    let lavapipe = Options {
+        host: HostProfile::lavapipe(),
+        ..Options::default()
+    };
+    let s = translate_with(&p, &lavapipe).unwrap_or_else(|e| panic!("{e}"));
+    assert!(
+        sample_mask_stores_are_conditional(&s.spirv),
+        "a store to gl_SampleMask outside a branch on the alpha to coverage constant: the 3090 draws nothing for a program that stores the mask"
+    );
+}
+
 #[test]
 fn fragment_without_alpha_has_no_alpha_test() {
     let mut b = sph(2, 5, &[(6, 0xaa), (18, 0x7)]);

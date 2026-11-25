@@ -778,25 +778,38 @@ impl Ctx {
         let at = self.m.emit(op::I_ADD, u, &[mbase, off]);
         let ptr = self.m.emit(op::ACCESS_CHAIN, pu, &[mvar, at]);
         let mask = self.m.emit(op::LOAD, u, &[ptr]);
-        let none = self.m.spec_op(b, op::I_EQUAL, &[spec, zero]);
         let all = self.m.c_u32(u32::MAX);
-        let mask = self.m.emit(op::SELECT, u, &[none, all, mask]);
         let i = self.m.t_i32();
         let arr = self.m.t_array(i, 1);
         let var = self.builtin(B_SAMPLE_MASK, OUTPUT, arr);
         let pi = self.m.t_ptr(OUTPUT, i);
         let p = self.m.emit(op::ACCESS_CHAIN, pi, &[var, zero]);
-        let prev = if self.iface.writes_sample_mask {
+        let prev_written = self.iface.writes_sample_mask;
+        self.iface.builtins.insert(B_SAMPLE_MASK);
+        // The mask is stored only for a draw that sets `A2C_SPEC`, in a
+        // branch on the constant the host driver folds away: a fragment
+        // program that stores `gl_SampleMask` at all (even all ones) draws
+        // nothing on the RTX 3090 for some programs, so the off path must
+        // not hold the store.
+        let none = self.m.spec_op(b, op::I_EQUAL, &[spec, zero]);
+        let then = self.m.id();
+        let merge = self.m.id();
+        self.m.emit_void(op::SELECTION_MERGE, &[merge, 0]);
+        self.m
+            .emit_void(op::BRANCH_CONDITIONAL, &[none, merge, then]);
+        self.m.emit_void(op::LABEL, &[then]);
+        let prev = if prev_written {
             let v = self.m.emit(op::LOAD, i, &[p]);
             self.m.emit(op::BITCAST, u, &[v])
         } else {
             all
         };
-        self.iface.writes_sample_mask = true;
-        self.iface.builtins.insert(B_SAMPLE_MASK);
         let both = self.m.emit(op::BITWISE_AND, u, &[prev, mask]);
         let v = self.m.emit(op::BITCAST, i, &[both]);
         self.m.emit_void(op::STORE, &[p, v]);
+        self.m.emit_void(op::BRANCH, &[merge]);
+        self.m.emit_void(op::LABEL, &[merge]);
+        self.iface.writes_sample_mask = true;
     }
 
     /// A private array of `words` (of type `t`, given as bits), made once
