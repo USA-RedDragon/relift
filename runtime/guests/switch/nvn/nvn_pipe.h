@@ -115,6 +115,9 @@ VkPipeline nvn_pipe_graphics(const nvn_pipe_key *k);
 int nvn_pipe_last_result(void);
 /** @brief RELIFT_PIPE_STATS=1 or =<fragment key prefixes, comma separated>: the listed programs' pipelines are made whole (no libraries) with statistics capture, and logged once per pipeline. */
 bool nvn_pipe_stats_on(void);
+/** @brief Has the pipeline library of the fragment program with this key made with statistics captured and logged (the compile check's --one); NULL stops. */
+void nvn_pipe_stats_for(const char *fs_key);
+
 /** @brief Whether RELIFT_PIPE_STATS lists the fragment program with key (a prefix match; "1" lists all). */
 bool nvn_pipe_stats_wants(const char *fs_key);
 /** @brief With nvn_pipe_stats_on: logs the driver's executables and statistics of pipeline p once, named by vertex and fragment keys. */

@@ -24,6 +24,7 @@
  */
 #include "nvn_priv.h"
 #include "nvn_module.h"
+#include "nvn_pipe.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -704,6 +705,61 @@ static int self_test(opts *o)
     return bad_named && crash_named && hang_named && good_clean && rc == 1 && rc2 == 1 ? 0 : 1;
 }
 
+/** @brief Reads a field of this process's /proc/self/status in KiB (VmHWM: peak resident memory), 0 when it has none. */
+static uint64_t status_kb(const char *field)
+{
+    FILE *f = fopen("/proc/self/status", "r");
+    char line[256];
+    uint64_t v = 0;
+    size_t n = strlen(field);
+    while (f && fgets(line, sizeof line, f))
+        if (!strncmp(line, field, n) && line[n] == ':')
+            v = strtoull(line + n + 1, NULL, 10);
+    if (f)
+        fclose(f);
+    return v;
+}
+
+/**
+ * @brief --one KEY: makes the one program whose key starts with KEY in this process, and prints its compile time and
+ * this process's peak resident memory (VmHWM); with RELIFT_PIPE_STATS set to the key, the driver's own statistics of
+ * its pipeline library (instruction counts) are logged too. The measure of one shader's cost to a driver.
+ */
+static int run_one(opts *o, const char *prefix)
+{
+    char tp[1300], dir[1300], wk[PATH_MAX], dk[PATH_MAX];
+    if (!o->dir)
+        return 2;
+    snprintf(tp, sizeof tp, "%s/table.rlspv", o->dir);
+    if (!is_file(tp)) {
+        snprintf(dir, sizeof dir, "%s/shaders", o->dir);
+        o->dir = dir;
+    }
+    mkdir(o->work, 0777);
+    if (realpath(o->work, wk))
+        o->work = wk;
+    if (realpath(o->dir, dk))
+        o->dir = dk;
+    set_env(o);
+    nvn_texset_layout_only();
+    char key[65], why[300];
+    for (uint32_t i = 0; nvn_shader_key_at(i, key); i++) {
+        if (strncmp(key, prefix, strlen(prefix)))
+            continue;
+        uint64_t before = status_kb("VmHWM");
+        nvn_pipe_stats_for(key);
+        double t0 = now_s();
+        bool ok = nvn_warm_check(key, why, sizeof why);
+        double dt = now_s() - t0;
+        printf("one %s index %u: %s in %.3f s, peak resident %llu MiB (%llu MiB before it), now %llu MiB\n", key, i,
+               ok ? "made" : why, dt, (unsigned long long)(status_kb("VmHWM") / 1024),
+               (unsigned long long)(before / 1024), (unsigned long long)(status_kb("VmRSS") / 1024));
+        return ok ? 0 : 1;
+    }
+    fprintf(stderr, "no program with key %s\n", prefix);
+    return 2;
+}
+
 /** @brief Parses a number option; exits with a usage error when it is not one. */
 static uint32_t number(const char *name, const char *v, uint32_t lo, uint32_t hi)
 {
@@ -748,6 +804,7 @@ int main(int argc, char **argv)
     opts o = { .chunk = 64, .jobs = 4, .threads = 1, .timeout = 180, .work = "compile-check-work", .reserve_mb = reserve_mb };
     char dir[1300];
     bool selftest = false;
+    const char *one = NULL;
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
         bool has = i + 1 < argc;
@@ -767,6 +824,8 @@ int main(int argc, char **argv)
             o.reserve_mb = number(a, argv[++i], 0, 1u << 20);
         else if (!strcmp(a, "--self-test"))
             selftest = true;
+        else if (!strcmp(a, "--one") && has)
+            one = argv[++i];
         else if (a[0] != '-' && !o.dir)
             o.dir = a;
         else {
@@ -779,6 +838,8 @@ int main(int argc, char **argv)
     }
     if (selftest)
         return self_test(&o);
+    if (one)
+        return run_one(&o, one);
     if (!o.dir) {
         fprintf(stderr, "usage: %s TABLE_DIR [--device DEVICE_JSON] [--chunk N] [--jobs N] [--threads N] [--timeout S] "
                         "[--reserve-mb M] [--work DIR]\n", argv[0]);

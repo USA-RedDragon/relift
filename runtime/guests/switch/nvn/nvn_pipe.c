@@ -737,6 +737,11 @@ static void fo_of(const nvn_pipe_key *k, fo_key *o)
     memcpy(o->blend, k->blend, k->ncolor * sizeof o->blend[0]);
 }
 
+/** @brief The fragment program whose library the compile check records statistics of (nvn_pipe_stats_for), or NULL. */
+static const char *g_stats_fragment;
+
+void nvn_pipe_stats_for(const char *fs_key) { g_stats_fragment = fs_key; }
+
 /** @brief The library of kind bits for k (flags is one VkGraphicsPipelineLibraryFlagBitsEXT), made or waited for. */
 static VkPipeline library(table *t, const void *key, size_t len, VkGraphicsPipelineLibraryFlagsEXT part, const nvn_pipe_key *k,
                           const char *what)
@@ -796,10 +801,16 @@ static VkPipeline library(table *t, const void *key, size_t len, VkGraphicsPipel
         ci.pMultisampleState = &s.ms;
         ci.pDynamicState = &s.dy;
     }
+    const char *stat_fs = g_stats_fragment;
+    bool stats = g.pipe_exec && stat_fs && part == VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT;
+    if (stats)
+        ci.flags |= PIPELINE_CAPTURE_STATISTICS;
     VkPipeline p = NULL;
     if (create_graphics(&ci, what, &p) != VK_SUCCESS)
         p = NULL;
     release_modules(&s);
+    if (stats && p)
+        nvn_pipe_stats_log(p, NULL, stat_fs);
     if (p && t_release &&
         (part == VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT ||
          part == VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT)) {
