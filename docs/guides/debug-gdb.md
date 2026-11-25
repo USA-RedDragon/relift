@@ -8,10 +8,10 @@ The output below is real. It comes from a dev build of a hand-assembled Switch t
 
 | Tool | Sees | Stops | Works on |
 |---|---|---|---|
-| The GDB server (`debug.gdb`) | guest threads, guest registers (A64), guest memory by guest address, lifted functions by guest address | the guest, at a safe point | Switch and Switch 2 programs (the Switch layer lists the threads); every host but Windows and iOS |
+| The GDB server (`debug.gdb`) | guest threads, guest registers (A64, or ARMv4T on the Game Boy Advance), guest memory by guest address, lifted functions by guest address | the guest, at a safe point | Switch, Switch 2 and Game Boy Advance programs; every host but Windows and iOS |
 | gdb on the host process | the lifted C (`-gline-tables-only`), the runtime, host threads and their stacks | everything, including the server | every guest and host gdb runs on |
 
-The server is in the runtime of dev builds (`relift run`, `relift build --dev`), of desktop builds with `package.appimage = "never"`, and of APKs signed with the debug key. It is never in a player package: an AppImage, a signed macOS app, an iOS app, or an APK signed with the project's own key (`package.android-keystore`) is built with `RL_NO_DEBUG_STUB`. It listens only when `debug.gdb` names a port. Game Boy, Game Boy Advance, Nintendo 64 and Nintendo DS programs do not start the server today: `rl_gdb_start` is called only by the Switch layer (`guests/switch/kthread.c`). For those guests use gdb on the host process (below).
+The server is in the runtime of dev builds (`relift run`, `relift build --dev`), of desktop builds with `package.appimage = "never"`, and of APKs signed with the debug key. It is never in a player package: an AppImage, a signed macOS app, an iOS app, or an APK signed with the project's own key (`package.android-keystore`) is built with `RL_NO_DEBUG_STUB`. It listens only when `debug.gdb` names a port. Game Boy, Nintendo 64 and Nintendo DS programs do not start the server today: `rl_gdb_start` is called by the Switch layer (`guests/switch/kthread.c`) and the Game Boy Advance run (`guests/gba/run/cpu.c`) only. For those guests use gdb on the host process (below).
 
 ## Start a game with the server
 
@@ -69,6 +69,24 @@ no lifted function holds 0x1234
 `nest` is the module, `+0xa00` the function's offset from the module's base, and the last word the function's host name. Unnamed functions are `fn_<hex offset>`; a function with a symbol in the guest binary carries it as an Itanium name in the `guest` namespace (`_ZN5guest4main3fooEv` is `guest::main::foo()`, [the ABI](../abi.md) section 11). Load `relift_frames.py` in a gdb that talks to the host process to see those names demangled; the server's answers show the raw name.
 
 gdb sends the text after `monitor` as typed and does not evaluate it, so the server reads registers by the names in its target description itself. A gdb expression such as `$x30 & ~0xf` or a convenience variable is not understood; print it with `p/x` and pass the number.
+
+## A Game Boy Advance program
+
+The server speaks gdb's `arm` target for a Game Boy Advance program, which a plain `gdb` knows. There is one thread, the CPU, and it stops at its next sync point, where every register is exact and `pc` is the next instruction. This is the runtime's GBA test, counting in a loop:
+
+```text
+$ gdb -ex 'set architecture arm' -ex 'target remote :2345'
+0x08000204 in ?? ()
+(gdb) info threads
+  Id   Target Id                            Frame 
+* 1    Thread 1 "1" (stopped; pc 0x8000204) 0x08000204 in ?? ()
+(gdb) p/x $r5
+$1 = 0x55
+(gdb) x/2hx 0x04000200
+0x4000200:	Cannot access memory at address 0x4000200
+```
+
+Registers are the current mode's `r0` to `r12`, `sp`, `lr`, `pc` and `cpsr`. Memory is the bus by address, read without wait states or side effects; a write goes through the bus as the CPU's store would. The I/O registers at `0x04000000` cannot be read from gdb, because a device answers a read only after catching up to the CPU's cycle. A stop does not move the guest's clock: the server waits for the CPU's own next sync point instead of ending its cycle budget, and the test `gdb_server_stops_a_gba_run_at_a_sync_point_and_keeps_its_timing` checks that a run stopped halfway ends on the same cycle as one never stopped. Breakpoints, watchpoints, `monitor bt` and `relift_guest.py` are for Switch programs only.
 
 ## Breakpoints
 
@@ -213,6 +231,6 @@ The packets the server answers, its limits, the monitor commands and the registe
 
 ## Not available
 
-- No server for the cartridge guests, as above.
+- No server for Game Boy, Nintendo 64 and Nintendo DS programs, and no GBA I/O register reads, as above.
 - Breakpoints and write watchpoints are x86-64 Linux only. On other hosts the server answers registers, memory and threads, and gdb reports the breakpoint as unsupported.
 - No breakpoint at a guest address that is not a function entry, and none at a function clang inlined.

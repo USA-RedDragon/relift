@@ -432,6 +432,29 @@ typedef struct rl_gdb_cpu {
 ```
 <!-- /docgen:code -->
 
+<!-- docgen:code file=runtime/core/gdbstub.h symbol=rl_gdb_guest -->
+```c
+typedef struct rl_gdb_guest {
+    /** @brief Fills up to max threads into out and returns how many there are. */
+    uint32_t (*threads)(rl_gdb_thread *out, uint32_t max);
+    /** @brief The guest address space, for memory reads and writes, or NULL when mem_read and mem_write are set. */
+    struct rl_vm *vm;
+    /**
+     * @brief Reads n bytes at guest address a into dst without side effects (a register read never clears a flag or
+     * pops a queue); returns how many it read from the start. NULL: read vm.
+     */
+    size_t (*mem_read)(uint64_t a, uint8_t *dst, size_t n);
+    /** @brief Writes n bytes at guest address a as the guest's own stores would; false where it cannot. NULL: write vm. */
+    bool (*mem_write)(uint64_t a, const uint8_t *src, size_t n);
+    /**
+     * @brief The guest runs on a cycle clock whose own events bring it to a sync point often (rl_sync): a stop waits
+     * for that and leaves the budget alone, since ending the budget early would move the guest's clock.
+     */
+    bool clocked;
+} rl_gdb_guest;
+```
+<!-- /docgen:code -->
+
 The Switch layer fills the thread list from its live threads, with the guest
 thread id as the gdb thread id and the core it holds:
 
@@ -457,7 +480,34 @@ static uint32_t gdb_threads(rl_gdb_thread *out, uint32_t max)
 ```
 <!-- /docgen:code -->
 
+## Clocked guests
+
+A guest that runs on a cycle clock (the Game Boy Advance) sets `clocked` in
+its `rl_gdb_guest`, and a stop then leaves the cycle budget alone. Its safe
+point is the sync point:
+
+<!-- docgen:code file=runtime/core/sync.c region=sync-point -->
+```c
+/* A sync point is a safe point for the GDB server: the exit's registers are stored and next is the guest pc. A
+ * stop request ends the budget (rl_preempt_request), so the thread parks here at its next sync point. */
+rl_gdb_point_at(c, next);
+```
+<!-- /docgen:code -->
+
+Its memory comes from the guest's own callbacks:
+
+<!-- docgen:code file=runtime/guests/gba/run/cpu.c region=gdb-memory -->
+```c
+* @brief Guest memory for the GDB server by bus address: reads are peeks (rl_gba_peek, no wait states, no side
+* effect), writes go through the bus as the CPU's stores do (rl_gba_write). The I/O registers (0x04000000 to
+* 0x04FFFFFF) are not readable: a device answers a read only after catching up to the CPU's cycle, which a debugger
+* must not cause, so a read there answers an error.
+```
+<!-- /docgen:code -->
+
 ## Registers
+
+### A64
 
 <!-- docgen:code file=runtime/cpus/arm64/gdb.c region=registers -->
 ```c
@@ -472,10 +522,23 @@ static uint32_t gdb_threads(rl_gdb_thread *out, uint32_t max)
 ```
 <!-- /docgen:code -->
 
+### ARMv4T
+
+<!-- docgen:code file=runtime/cpus/arm32/gdb.c region=registers -->
+```c
+* @brief The ARMv4T registers for the GDB server (core/gdbstub.h), as gdb's arm
+* target names them: r0 to r12 (0 to 12), sp (13), lr (14), pc (15) and cpsr
+* (16), 32 bits each, the current mode's bank. pc is the guest address the
+* thread resumes at where it parked at a sync point. Writing cpsr changes mode
+* as an MSR would (rl_arm32_set_cpsr).
+```
+<!-- /docgen:code -->
+
 ## Tests
 
 `make -C runtime gdb-test` runs the frame filter test and the server test
 (`runtime/tools/gdb/stub-test.sh`) with a real gdb; the server test also
 checks `bt` with `relift_guest.py`, `monitor bt` and `monitor sym` with
-registers. The server's own tests are
+registers, then runs gdb's `arm` target against a GBA run
+(`gba_run_tests`, which also has the timing test). The server's own tests are
 in `runtime/guests/switch/tests/test_gdb.c`.
