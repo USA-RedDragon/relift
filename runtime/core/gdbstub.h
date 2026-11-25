@@ -34,6 +34,14 @@
 #define RL_DEBUG_STUB 1
 #endif
 
+/** @brief One guest call frame of a backtrace: its pc, and the sp and frame pointer it runs with. */
+typedef struct rl_gdb_frame {
+    uint64_t pc, sp, fp;
+} rl_gdb_frame;
+
+/** @brief Reads n bytes of guest memory at a into dst; false when the guest cannot read them. */
+typedef bool (*rl_gdb_read_fn)(uint64_t a, void *dst, size_t n);
+
 /** @brief A CPU layer's registers as gdb numbers them, described by its target XML. */
 typedef struct rl_gdb_cpu {
     /** @brief The target description (target.xml), naming the architecture and every register in gdb's order. */
@@ -50,6 +58,11 @@ typedef struct rl_gdb_cpu {
     uint64_t (*pc)(const rl_ctx *c);
     /** @brief The number of the pc register (8 bytes), which a breakpoint stop reports as the function's address. */
     uint32_t pc_reg;
+    /**
+     * @brief Fills out with the guest call frames of a stopped context whose pc is pc, innermost first, at most max,
+     * reading guest memory with read; returns how many. NULL where the CPU keeps no frame chain.
+     */
+    uint32_t (*frames)(const rl_ctx *c, uint64_t pc, rl_gdb_frame *out, uint32_t max, rl_gdb_read_fn read);
 } rl_gdb_cpu;
 
 /** @brief One guest thread as the guest layer reports it. */

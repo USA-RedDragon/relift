@@ -15,6 +15,7 @@
 
 #include <string.h>
 
+#include "crash.h"
 #include "gdbstub.h"
 
 #if defined(RL_DEBUG_STUB)
@@ -135,6 +136,44 @@ static void reg_write(rl_ctx *c, uint32_t n, const uint8_t *in)
 
 static uint64_t pc_of(const rl_ctx *c) { return c->pc; }
 
+/** @brief The guest entry of the lifted function that holds a, or 1 (never an entry) when none does. */
+static uint64_t fn_of(uint64_t a)
+{
+    rl_fn_hit h;
+    return rl_fn_find_guest(a, &h) && h.fn ? h.fn->fn_addr : 1;
+}
+
+/**
+ * docgen:region frames
+ * @brief The guest backtrace: the AAPCS64 frame-record chain in guest memory. Each function that keeps a record
+ * stores its caller's x29 and its return address as a pair at x29, so [x29] is the caller's record and [x29 + 8]
+ * where the caller resumes. The first step is the one guess: a thread stopped at a function's entry, or in a leaf
+ * that keeps no record, still has its return address in x30, and x30 then lies outside the function that holds pc
+ * (a function that already called something holds a return address into itself there). So the caller is x30 when
+ * x30 is in another lifted function and the record at x29 does not already name it, else [x29 + 8]. The walk ends
+ * at a zero or unreadable record, a record that is not above the last one, or a zero return address.
+ * docgen:end
+ */
+static uint32_t frames(const rl_ctx *c, uint64_t pc, rl_gdb_frame *out, uint32_t max, rl_gdb_read_fn read)
+{
+    if (!max)
+        return 0;
+    uint32_t n = 0;
+    uint64_t fp = c->x[29], rec[2];
+    out[n++] = (rl_gdb_frame){ pc, c->sp, fp };
+    bool have = fp && !(fp & 7) && read(fp, rec, sizeof rec);
+    uint64_t lr = c->x[30];
+    if (n < max && lr && fn_of(lr) != 1 && fn_of(lr) != fn_of(pc) && !(have && rec[1] == lr))
+        out[n++] = (rl_gdb_frame){ lr, c->sp, fp };
+    while (n < max && have && rec[1]) {
+        uint64_t prev = fp;
+        out[n++] = (rl_gdb_frame){ rec[1], fp + 16, rec[0] };
+        fp = rec[0];
+        have = fp > prev && !(fp & 7) && read(fp, rec, sizeof rec);
+    }
+    return n;
+}
+
 static const rl_gdb_cpu g_gdb = {
     .target_xml = g_xml,
     .nregs = NREGS,
@@ -143,6 +182,7 @@ static const rl_gdb_cpu g_gdb = {
     .reg_write = reg_write,
     .pc = pc_of,
     .pc_reg = 32,
+    .frames = frames,
 };
 
 const rl_gdb_cpu *rl_arm64_gdb(void) { return &g_gdb; }

@@ -191,8 +191,23 @@ TEST(gdb_serve_for_a_debugger)
     rl_st64(m, heap, 0x1122334455667788ull);
     rl_st64(m, heap + 8, 0x99aabbccddeeff00ull);
     c->x[0] = 0x0123456789abcdefull;
-    c->x[29] = 0;
     c->sp = heap + 0x1000;
+    /* Three nested calls, outer to inner at heap + 0x800, + 0x900 and + 0xa00 (nops), stopped in the innermost: its
+     * frame record at x29 holds the middle one's frame pointer and its return address into the middle one, and so on
+     * out to the outer function, whose record ends the chain with zeros. */
+    for (uint64_t a = 0x800; a < 0xb00; a += 4)
+        rl_st32(m, heap + a, 0xd503201fu);
+    uint64_t fp_inner = heap + 0xf00, fp_mid = heap + 0xf40, fp_outer = heap + 0xf80;
+    rl_st64(m, fp_inner, fp_mid);
+    rl_st64(m, fp_inner + 8, heap + 0x914);
+    rl_st64(m, fp_mid, fp_outer);
+    rl_st64(m, fp_mid + 8, heap + 0x814);
+    rl_st64(m, fp_outer, 0);
+    rl_st64(m, fp_outer + 8, 0);
+    c->x[29] = fp_inner;
+    c->x[30] = heap + 0x914;
+    c->sp = heap + 0xec0;
+    c->pc = heap + 0xa08;
 #if defined(__linux__) && defined(__x86_64__)
     /* A lifted function at guest 0x8001000 runs each round, then a store to heap + 0x40: a breakpoint and a watch. */
     static rl_fn_info info[1];
@@ -465,5 +480,77 @@ TEST(gdb_server_continues_after_both_threads_hit_a_write_watch)
 
 TEST(gdb_server_steps_over_hits_of_two_threads) { continue_after_watch_hits(true, WRITER_MAIN | WRITER_B); }
 #endif
+
+/** @brief Guest memory of the frame-walk tests: 0x100 bytes at guest 0x9000. */
+static uint64_t g_stack[32];
+
+static bool stack_read(uint64_t a, void *dst, size_t n)
+{
+    if (a < 0x9000 || a + n > 0x9000 + sizeof g_stack)
+        return false;
+    memcpy(dst, (uint8_t *)g_stack + (a - 0x9000), n);
+    return true;
+}
+
+/** @brief A stand-in host function for the frame-walk map. */
+static uint64_t bt_fn(rl_ctx *c, uint8_t *mem)
+{
+    (void)c;
+    (void)mem;
+    return RL_OK;
+}
+
+/** @brief Registers outer, mid and inner at guest 0x7000000, + 0x100 and + 0x200, 0x100 bytes each. */
+static void bt_map(void)
+{
+    static rl_fn_info info[3];
+    for (int i = 0; i < 3; i++)
+        info[i] = (rl_fn_info){ .guest_addr = 0x7000000 + 0x100u * (uint64_t)i,
+                                .fn_addr = 0x7000000 + 0x100u * (uint64_t)i,
+                                .guest_size = 0x100,
+                                .fn = bt_fn,
+                                .host_sym = i == 0 ? "outer" : i == 1 ? "mid" : "inner" };
+    static rl_fn_map map = { RL_FN_MAP_VERSION, 3, info, "bt", "bt-0", 0x7000000, NULL, NULL };
+    const rl_fn_map *maps[] = { &map };
+    CHECK_EQ(rl_fn_maps_register(maps, 1), 0);
+}
+
+TEST(gdb_frames_follow_the_frame_records_from_inside_a_function)
+{
+    bt_map();
+    /* Stopped in inner after its prologue: x30 holds a return address into inner itself, from an earlier call. */
+    memset(g_stack, 0, sizeof g_stack);
+    g_stack[0] = 0x9040, g_stack[1] = 0x7000114; /* inner's record at 0x9000: mid's record, back into mid */
+    g_stack[8] = 0x9080, g_stack[9] = 0x7000014; /* mid's record at 0x9040: outer's record, back into outer */
+    rl_ctx c;
+    memset(&c, 0, sizeof c);
+    c.x[29] = 0x9000, c.x[30] = 0x7000230, c.sp = 0x8ff0;
+    rl_gdb_frame f[8];
+    uint32_t n = rl_arm64_gdb()->frames(&c, 0x7000240, f, 8, stack_read);
+    CHECK_EQ(n, 3u);
+    CHECK_EQ(f[0].pc, 0x7000240ull);
+    CHECK_EQ(f[1].pc, 0x7000114ull);
+    CHECK_EQ(f[1].sp, 0x9010ull);
+    CHECK_EQ(f[1].fp, 0x9040ull);
+    CHECK_EQ(f[2].pc, 0x7000014ull);
+    CHECK_EQ(f[2].fp, 0x9080ull);
+}
+
+TEST(gdb_frames_take_the_return_address_from_x30_at_a_function_entry)
+{
+    bt_map();
+    /* Stopped at inner's entry: no record of its own yet, x29 is mid's, x30 the return into mid. */
+    memset(g_stack, 0, sizeof g_stack);
+    g_stack[8] = 0x9080, g_stack[9] = 0x7000014; /* mid's record at 0x9040 */
+    rl_ctx c;
+    memset(&c, 0, sizeof c);
+    c.x[29] = 0x9040, c.x[30] = 0x7000114, c.sp = 0x9030;
+    rl_gdb_frame f[8];
+    uint32_t n = rl_arm64_gdb()->frames(&c, 0x7000200, f, 8, stack_read);
+    CHECK_EQ(n, 3u);
+    CHECK_EQ(f[1].pc, 0x7000114ull);
+    CHECK_EQ(f[1].sp, 0x9030ull);
+    CHECK_EQ(f[2].pc, 0x7000014ull);
+}
 
 #endif

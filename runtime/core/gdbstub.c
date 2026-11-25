@@ -60,6 +60,8 @@ int rl_gdb_stopping;
 /** @brief Most breakpoints and watchpoints. */
 #define MAX_BREAKS 64
 #define MAX_WATCHES 16
+/** @brief Most guest frames a backtrace walks. */
+#define MAX_FRAMES 64
 
 /** @brief A parked thread: its context, whether its registers are exact, and the guest pc a breakpoint stopped it at. */
 typedef struct parked {
@@ -730,6 +732,23 @@ static void z_packet(const char *p)
 }
 #endif
 
+static void reg_read(rl_ctx *c, uint32_t r, uint8_t *out);
+
+/** @brief Reads guest memory for a frame walk: every byte or nothing. */
+static bool frame_read(uint64_t a, void *dst, size_t n) { return mem_read(a, dst, n) == n; }
+
+/** @brief The guest call frames of thread t, innermost first, with the pc gdb reads for it; 0 without a walk. */
+static uint32_t walk(rl_gdb_thread *t, rl_gdb_frame *out, uint32_t max)
+{
+    if (!t || !t->ctx || !G.cpu->frames)
+        return 0;
+    uint8_t pcb[8];
+    uint64_t pc;
+    reg_read(t->ctx, G.cpu->pc_reg, pcb);
+    memcpy(&pc, pcb, 8);
+    return G.cpu->frames(t->ctx, pc, out, max, frame_read);
+}
+
 static void monitor(const char *hex)
 {
     char cmd[256];
@@ -749,8 +768,21 @@ static void monitor(const char *hex)
         if (!name_at(nm, sizeof nm, a))
             snprintf(nm, sizeof nm, "no lifted function holds 0x%llx", (unsigned long long)a);
         snprintf(text, sizeof text, "%s\n", nm);
+    } else if (strcmp(cmd, "bt") == 0) {
+        rl_gdb_frame f[MAX_FRAMES];
+        uint32_t nf = walk(thread_by_id(G.cur), f, MAX_FRAMES);
+        size_t o = 0;
+        text[0] = 0;
+        if (!nf)
+            snprintf(text, sizeof text, "no guest frames for this thread\n");
+        for (uint32_t i = 0; i < nf && o + 80 < sizeof text; i++) {
+            char nm[200] = "";
+            name_at(nm, sizeof nm, f[i].pc);
+            o += (size_t)snprintf(text + o, sizeof text - o, "#%u 0x%llx %s\n", i, (unsigned long long)f[i].pc,
+                                  nm[0] ? nm : "(no lifted function)");
+        }
     } else {
-        snprintf(text, sizeof text, "relift monitor commands: sym <guest address>\n");
+        snprintf(text, sizeof text, "relift monitor commands: sym <guest address>, bt\n");
     }
     G.out[0] = 'O';
     to_hex(G.out + 1, (const uint8_t *)text, strlen(text));
@@ -849,6 +881,17 @@ static void serve(void)
             reply("1");
         } else if ((a = after(p, "qRcmd,"))) {
             monitor(a);
+        } else if ((a = after(p, "qRelift.frames:"))) {
+            /* The guest backtrace of one thread for tools/gdb/relift_guest.py: pc,sp,fp per frame, innermost first. */
+            rl_gdb_frame f[MAX_FRAMES];
+            uint32_t n = walk(thread_by_id(parse_hex(&a)), f, MAX_FRAMES);
+            size_t o = 0;
+            G.out[0] = 0;
+            for (uint32_t i = 0; i < n; i++)
+                o += (size_t)snprintf(G.out + o, sizeof G.out - o, "%s%llx,%llx,%llx", i ? ";" : "",
+                                      (unsigned long long)f[i].pc, (unsigned long long)f[i].sp,
+                                      (unsigned long long)f[i].fp);
+            reply(n ? G.out : "E01");
         } else if (strcmp(p, "?") == 0) {
             stop_reply(5);
         } else if (p[0] == 'H' && (p[1] == 'g' || p[1] == 'c')) {
