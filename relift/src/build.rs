@@ -1368,12 +1368,38 @@ pub(crate) fn project_out(settings: &Settings) -> Result<(String, PathBuf), BoxE
         .unwrap_or_else(|| "project".into());
     let root = cache_root(settings)?;
     std::fs::create_dir_all(&root)?;
-    let out = crate::paths::canonical(root)?
-        .join("projects")
-        .join(&name)
-        .join("build")
-        .join("host");
+    let root = crate::paths::canonical(root)?;
+    check_project_dir(&root, &name)?;
+    let out = root.join("projects").join(&name).join("build").join("host");
     Ok((name, out))
+}
+
+/// Refuses a project that would start cold beside a cache that holds exactly one other project: the
+/// folder name is the project name, so a copy of a built project in a folder with another name finds
+/// nothing of its build and would lift, emit and compile everything again. The error names that
+/// other project and the two ways out.
+pub(crate) fn check_project_dir(root: &Path, name: &str) -> Result<(), BoxError> {
+    let projects = root.join("projects");
+    if projects.join(name).exists() {
+        return Ok(());
+    }
+    let others: Vec<String> = match std::fs::read_dir(&projects) {
+        Ok(rd) => rd
+            .filter_map(Result::ok)
+            .filter(|e| e.path().is_dir())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect(),
+        Err(_) => return Ok(()),
+    };
+    match others.as_slice() {
+        [one] => Err(format!(
+            "the project folder is named `{name}`, but the cache holds a project `{one}` and none of that name, \
+             so this would build everything again from nothing; rename the folder to `{one}` to use that build, \
+             or run `relift import` here to start `{name}` on purpose"
+        )
+        .into()),
+        _ => Ok(()),
+    }
 }
 
 /// Whether `nso` names the shared font service pl:u in its read-only data,
@@ -2742,5 +2768,40 @@ mod debug_stub_tests {
             "never",
             Path::new("release.jks")
         ));
+    }
+}
+
+#[cfg(test)]
+mod project_dir_tests {
+    use super::check_project_dir;
+
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("relift-projdir-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("projects")).unwrap();
+        d
+    }
+
+    #[test]
+    fn a_folder_named_otherwise_than_the_one_cached_project_is_refused_with_both_names() {
+        let root = scratch("one");
+        std::fs::create_dir_all(root.join("projects").join("oot")).unwrap();
+        let e = check_project_dir(&root, "relink").unwrap_err().to_string();
+        assert!(
+            e.contains("`relink`") && e.contains("`oot`") && e.contains("rename the folder"),
+            "{e}"
+        );
+        assert!(check_project_dir(&root, "oot").is_ok());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_first_project_or_one_of_several_starts_without_a_refusal() {
+        let root = scratch("many");
+        assert!(check_project_dir(&root, "new").is_ok());
+        std::fs::create_dir_all(root.join("projects").join("a")).unwrap();
+        std::fs::create_dir_all(root.join("projects").join("b")).unwrap();
+        assert!(check_project_dir(&root, "c").is_ok());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
