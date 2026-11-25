@@ -106,6 +106,8 @@ static struct {
     uint32_t ring_high;
     /** @brief The bind now being made reads its handle from a bank (nvn_texset_bind, nvn_texset_separate_texture): it may take a ring slot. */
     bool dynamic;
+    /** @brief nvn_texset_sync_registered is binding: its binds are not uses of the slots. */
+    bool syncing;
     /** @brief The kind of each texture id's bound view (its format's sampled type). */
     uint32_t *tex_kind;
     uint8_t (*tex_view)[17];
@@ -725,6 +727,8 @@ static bool slot_settle(replay *r, uint32_t sl)
 
 static void slot_busy(uint32_t sl)
 {
+    if (t.syncing)
+        return;
     if (t.tex_epoch[sl] != SLOT_BUSY)
         t.bound[t.nbound++] = sl;
     t.tex_epoch[sl] = SLOT_BUSY;
@@ -1237,9 +1241,9 @@ static int refresh_synced(replay *r, uint32_t id)
     return rc;
 }
 
-int nvn_texset_sync_registered(replay *r)
+/** @brief nvn_texset_sync_registered's work, see there. */
+static int sync_registered_body(replay *r)
 {
-    t.bindless_busy = true;
     if (!make_whole())
         return nvn_vk_stop(r, "cannot make the texture set");
     uint32_t ids[256], n;
@@ -1328,6 +1332,18 @@ int nvn_texset_sync_registered(replay *r)
         return RL_PENDING;
     t.seen_written = g.write_stamp;
     return RL_OK;
+}
+
+int nvn_texset_sync_registered(replay *r)
+{
+    /* The slots this rewrites are read only by work recorded before it: the binds are not uses (the programs that read
+     * handles from memory are, once they are recorded: bindless_busy until the next draw is in its batch). */
+    t.syncing = true;
+    int rc = sync_registered_body(r);
+    t.syncing = false;
+    if (rc == RL_OK)
+        t.bindless_busy = true;
+    return rc;
 }
 
 int nvn_texset_bind_words(replay *r, const uint8_t *bytes, uint32_t size, uint32_t offset, bool indexed)
