@@ -11,6 +11,7 @@
  * asks for it, and that slot's function stops the game with the name.
  */
 #include "nvn_priv.h"
+#include "nvn_async.h"
 
 #include <pthread.h>
 #include <stdlib.h>
@@ -25,11 +26,36 @@ typedef struct nvn_impl {
     const char *name;
     rl_fn fn;
     nvn_stats_kind kind;
+    /** @brief The same proc behind a drain of the replay worker (nvn_async.h), for the procs that may see what replay changes. */
+    rl_fn drained;
 } nvn_impl;
 
-#define NVN_ENTRY(name) { #name, nvnh_##name, NVN_STATS_IMPL },
+/** @brief Drains the replay worker, then runs the proc: every proc not on the async whitelist is made this way. */
+#define NVN_DRAIN_WRAP(name) \
+    static uint64_t drained_##name(rl_ctx *c, uint8_t *mem) \
+    { \
+        nvn_async_drain(); \
+        return nvnh_##name(c, mem); \
+    }
+#define NVN_DRAIN_WRAP_RECORDED(op, name) NVN_DRAIN_WRAP(name)
+NVN_PROCS(NVN_DRAIN_WRAP)
+NVN_RECORDED(NVN_DRAIN_WRAP_RECORDED)
+#undef NVN_DRAIN_WRAP_RECORDED
+
+/**
+ * @brief Whether a proc runs on the game's thread without waiting for the replay worker: recording a command buffer
+ * touches only that buffer, and a submit, present or queue sync is queued behind the worker's items.
+ */
+static bool async_whitelisted(const char *name)
+{
+    return !strncmp(name, "nvnCommandBuffer", 16) || !strcmp(name, "nvnQueueSubmitCommands") ||
+           !strcmp(name, "nvnQueuePresentTexture") || !strcmp(name, "nvnQueueFenceSync") ||
+           !strcmp(name, "nvnQueueWaitSync");
+}
+
+#define NVN_ENTRY(name) { #name, nvnh_##name, NVN_STATS_IMPL, drained_##name },
 #define NVN_ENTRY_RECORDED(op, name) NVN_ENTRY(name)
-#define NVN_ENTRY_ZERO(name) { #name, nvn_zero, NVN_STATS_ZERO },
+#define NVN_ENTRY_ZERO(name) { #name, nvn_zero, NVN_STATS_ZERO, nvn_zero },
 static const nvn_impl impls[] = { NVN_PROCS(NVN_ENTRY) NVN_RECORDED(NVN_ENTRY_RECORDED) NVN_ZERO_PROCS(NVN_ENTRY_ZERO) };
 #undef NVN_ENTRY_ZERO
 #undef NVN_ENTRY_RECORDED
@@ -458,8 +484,10 @@ static int hook_start(void *user, uint64_t *code_free)
         nvn.sorted[i] = &impls[i];
     qsort(nvn.sorted, N_IMPLS, sizeof nvn.sorted[0], by_name);
     bool count = nvn_stats_on();
+    bool async = nvn_async_enabled();
     for (uint32_t i = 0; i < RL_NVN_SLOTS; i++) {
-        slot_fns[i] = i < N_IMPLS ? nvn.sorted[i]->fn : misses[i];
+        slot_fns[i] = i < N_IMPLS ? (async && !async_whitelisted(nvn.sorted[i]->name) ? nvn.sorted[i]->drained : nvn.sorted[i]->fn)
+                                  : misses[i];
         nvn.entries[i] = (rl_fn_entry){ nvn.base + 4u * (uint64_t)i, 4, RL_FN_OVERRIDE, count ? counts[i] : slot_fns[i] };
     }
     nvn.used = N_IMPLS;
