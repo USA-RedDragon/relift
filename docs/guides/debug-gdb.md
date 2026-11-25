@@ -86,7 +86,7 @@ $1 = 0x4210
 0x150:	0x3e	0x42	0x06	0x13	0x0c	0x18	0xfd
 ```
 
-Memory is the CPU's 16-bit bus as the device library sees it, read without timing effects, so `0x4000` to `0x7fff` shows the ROM bank mapped now. Register writes go into the stopped CPU, and gdb sends them when it resumes. Memory writes (video RAM, cartridge RAM, work RAM, OAM and high RAM) charge no cycles; writes to ROM and mapper registers, the I/O registers (`0xff00` to `0xff7f`) and `0xffff` are refused with an error, because the guest's own write there acts at a cycle. The script also writes `bc` and a work RAM byte, which the cart reads after the program runs on, and checks that a run stopped this way ends on the same frame and instruction count as one never stopped, and that nothing was interpreted.
+Memory is the CPU's 16-bit bus as the device library sees it, read without timing effects, so `0x4000` to `0x7fff` shows the ROM bank mapped now. Register writes go into the stopped CPU, and gdb sends them when it resumes. Memory writes (video RAM, cartridge RAM, work RAM, OAM and high RAM) charge no cycles; writes to ROM and mapper registers, the I/O registers (`0xff00` to `0xff7f`) and `0xffff` are refused with an error, because the guest's own write there acts at a cycle. The script also writes `bc` and a work RAM byte, which the cart reads after the program runs on, and checks that the run ends on the same frame and instruction count as a run of a second cart that makes the same writes itself, and that nothing was interpreted. The frame hash does not show registers or work RAM; the values read back after the writes do.
 
 ## A Game Boy Advance program
 
