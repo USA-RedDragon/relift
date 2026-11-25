@@ -29,6 +29,8 @@
  */
 #include "cpu.h"
 
+#include "gdbstub.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -393,8 +395,70 @@ void rl_n64_run_free(rl_n64_run *r)
     r->k = NULL;
 }
 
+#if defined(RL_DEBUG_STUB)
+/** @brief The GDB server's thread: the VR4300 (id 1). */
+static uint32_t gdb_threads(rl_gdb_thread *out, uint32_t max)
+{
+    if (!g_run || !g_run->c)
+        return 0;
+    if (max)
+        out[0] = (rl_gdb_thread){ .id = 1, .ctx = g_run->c, .core = 0, .running = true };
+    return 1;
+}
+
+/**
+ * docgen:region gdb-memory
+ * @brief Memory for the GDB server by the VR4300's virtual address, translated as its loads are (rl_mips_translate,
+ * kseg0 and kseg1 directly, the rest through the TLB; a 32-bit address is sign-extended, as gdb in a 32-bit ABI sends
+ * it). RDRAM reads as the CPU sees it, its data cache's dirty lines
+ * included, with no side effect; writes are the CPU's stores. Other physical addresses (registers, cartridge) are not
+ * read yet: their reads catch the RSP up.
+ * docgen:end
+ */
+static bool gdb_paddr(uint64_t a, bool write, uint32_t *pa)
+{
+    uint64_t p;
+    /* gdb in a 32-bit ABI sends 0x80000000 for kseg0, where the CPU's 64-bit address is its sign extension. */
+    if (a <= UINT32_MAX)
+        a = (uint64_t)(int64_t)(int32_t)(uint32_t)a;
+    if (!g_run || rl_mips_translate(g_run->c, a, write, &p) != RL_MIPS_XLAT_OK || (p & 0x1FFFFFFFu) >= RL_N64_RDRAM_SIZE)
+        return false;
+    *pa = (uint32_t)(p & 0x1FFFFFFFu);
+    return true;
+}
+
+static size_t gdb_read(uint64_t tid, uint64_t a, uint8_t *dst, size_t n)
+{
+    (void)tid;
+    size_t i = 0;
+    uint32_t pa;
+    for (; i < n && gdb_paddr(a + i, false, &pa); i++)
+        rl_n64_rdram_get_cpu(g_run->m, pa, &dst[i], 1);
+    return i;
+}
+
+static bool gdb_write(uint64_t tid, uint64_t a, const uint8_t *src, size_t n)
+{
+    (void)tid;
+    uint32_t pa;
+    for (size_t i = 0; i < n; i++) {
+        if (!gdb_paddr(a + i, true, &pa))
+            return false;
+        rl_n64_write(g_run->m, pa, 1, src[i]);
+    }
+    return true;
+}
+
+static const rl_gdb_guest g_gdb_guest = {
+    .threads = gdb_threads, .mem_read = gdb_read, .mem_write = gdb_write, .clocked = true
+};
+#endif
+
 int rl_n64_run_start(rl_n64_run *r)
 {
+#if defined(RL_DEBUG_STUB)
+    rl_gdb_start(rl_mips_gdb(), &g_gdb_guest);
+#endif
     rl_sched_run(r->k);
     return rl_mips_run(r->c, rl_n64_rdram(r->m), r->entry);
 }

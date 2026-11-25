@@ -53,6 +53,9 @@ typedef enum rl_mips_xlat {
     RL_MIPS_XLAT_MODIFIED,
 } rl_mips_xlat;
 
+/** @brief The registers for the GDB server (core/gdbstub.h), where it is built in (RL_DEBUG_STUB). */
+RL_RUNTIME_API const struct rl_gdb_cpu *rl_mips_gdb(void);
+
 /**
  * @brief Translates vaddr for a load (write false) or store in the current
  * mode (KSU, EXL, ERL, and KX, SX or UX for 64-bit addressing): kseg0 and

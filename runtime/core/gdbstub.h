@@ -50,14 +50,16 @@ typedef struct rl_gdb_cpu {
     uint32_t nregs;
     /** @brief Bytes of register n. */
     uint32_t (*reg_size)(uint32_t n);
-    /** @brief Writes register n of c to out, little-endian, reg_size(n) bytes. */
+    /** @brief Writes register n of c to out, reg_size(n) bytes in the target's byte order (big_endian). */
     void (*reg_read)(const rl_ctx *c, uint32_t n, uint8_t *out);
-    /** @brief Sets register n of c from in, little-endian, reg_size(n) bytes. */
+    /** @brief Sets register n of c from in, reg_size(n) bytes in the target's byte order. */
     void (*reg_write)(rl_ctx *c, uint32_t n, const uint8_t *in);
     /** @brief The guest pc of a stopped context, for stop replies and thread names. */
     uint64_t (*pc)(const rl_ctx *c);
     /** @brief The number of the pc register (8 bytes), which a breakpoint stop reports as the function's address. */
     uint32_t pc_reg;
+    /** @brief Registers go over the wire big-endian (a big-endian guest), else little-endian. */
+    bool big_endian;
     /**
      * @brief Fills out with the guest call frames of a stopped context whose pc is pc, innermost first, at most max,
      * reading guest memory with read; returns how many. NULL where the CPU keeps no frame chain.

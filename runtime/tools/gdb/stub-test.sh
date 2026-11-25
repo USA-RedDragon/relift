@@ -6,7 +6,8 @@
 # bt with relift_guest.py), names $pc and x30 - 4 with monitor sym, reads x0 and
 # guest memory, writes x2, stops at a breakpoint and a write watchpoint
 # (x86-64 hosts), writes a word, and detaches; then the same for a GBA run
-# (gba_run_tests gdb_serve_a_gba_run_for_a_debugger) with gdb's arm target.
+# (gba_run_tests gdb_serve_a_gba_run_for_a_debugger) with gdb's arm target,
+# and an N64 run (n64_run_tests) with gdb's mips target.
 #
 #   sh tools/gdb/stub-test.sh [build dir]    (from runtime/, after make)
 #
@@ -117,5 +118,26 @@ if [ -x "$gba" ] && "$gdb_bin" -batch -nx -ex "set architecture arm" >/dev/null 
     done
     [ $grc -eq 0 ] || { echo "stub-test: the GBA run failed ($grc)"; cat "$out/gba-serve.log"; fail=1; }
     [ $fail -eq 0 ] || { cat "$out/gba-gdb.log"; exit 1; }
+fi
+# The N64: gdb's mips target (big-endian), one thread at a sync point, RDRAM by kseg0 address. The run counts until
+# gdb writes 1 to the word at 0x80002000.
+n64=$build/n64_run_tests
+if [ -x "$n64" ] && "$gdb_bin" -batch -nx -ex "set architecture mips:4300" >/dev/null 2>&1; then
+    RELIFT_VIDEO=headless RELIFT_GDB_TEST_PORT=$((port + 2)) "$n64" gdb_serve_an_n64_run_for_a_debugger >"$out/n64-serve.log" 2>&1 &
+    npid=$!
+    for _ in $(seq 1 200); do
+        grep -q 'gdb-serve: n64' "$out/n64-serve.log" && break
+        sleep 0.05
+    done
+    "$gdb_bin" -batch -nx -iex "set debuginfod enabled off" -ex "set endian big" \
+        -ex "target remote 127.0.0.1:$((port + 2))" -ex 'info threads' -ex 'p/x $t1' -ex 'p/x $pc' \
+        -ex 'x/wx 0x80002004' -ex 'set {int}0x80002000 = 1' -ex detach >"$out/n64-gdb.log" 2>&1 || true
+    nrc=0
+    wait $npid || nrc=$?
+    for want in 'Thread 1 ' '= 0x99' '= 0x80001004' '0x80002004:.0x12345678'; do
+        grep -q "$want" "$out/n64-gdb.log" || { echo "stub-test: the N64 session lacks: $want"; fail=1; }
+    done
+    [ $nrc -eq 0 ] || { echo "stub-test: the N64 run failed ($nrc)"; cat "$out/n64-serve.log"; fail=1; }
+    [ $fail -eq 0 ] || { cat "$out/n64-gdb.log"; exit 1; }
 fi
 echo "stub-test: ok"

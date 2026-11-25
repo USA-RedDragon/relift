@@ -260,3 +260,177 @@ TEST(n64_run_starts_the_boot_code_in_dmem)
     CHECK_EQ(hs.boots, 1);
     CHECK_EQ(rl_n64_get_stats(mach)->mismatches, 1u);
 }
+
+#include "gdbstub.h"
+
+#if defined(RL_DEBUG_STUB)
+#include <relift/settings.h>
+
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+/** @brief Rounds of count_fn. */
+#define COUNT_N 3000000u
+
+static struct {
+    uint64_t cycles;
+    bool wait_for_debugger;
+} cs;
+
+/** @brief Counts r8 with a sync point per round at 0x80001004, to COUNT_N or until RDRAM 0x2000 holds 1. */
+static uint64_t count_fn(rl_ctx *c, uint8_t *mem)
+{
+    c->r[8] = 0;
+    c->r[9] = 0x99;
+    for (;;) {
+        if (cs.wait_for_debugger) {
+            uint8_t b[4];
+            rl_n64_rdram_get_cpu(c->machine, 0x2000, b, 4);
+            if (b[3] == 1)
+                break;
+        } else if (c->r[8] >= COUNT_N) {
+            break;
+        }
+        c->r[8]++;
+        c->time.budget -= 2;
+        if (c->time.budget <= 0) {
+            int rc = rl_sync(c, mem, K0(0x1004));
+            if (rc)
+                return (uint64_t)rc;
+        }
+    }
+    cs.cycles = rl_sched_cycles(run.k);
+    return RL_OK;
+}
+
+static const rl_fn_entry fns_count[] = {
+    {K0(0x1000), 8, RL_FN_RANGE, count_fn},
+};
+
+/**
+ * @brief For tools/gdb/stub-test.sh: with RELIFT_GDB_TEST_PORT set, serves an N64 run that counts until the debugger
+ * writes 1 to the word at 0x80002000; without it, passes at once.
+ */
+TEST(gdb_serve_an_n64_run_for_a_debugger)
+{
+    const char *port = getenv("RELIFT_GDB_TEST_PORT");
+    if (!port)
+        return;
+    rl_settings_declare_runtime();
+    CHECK_EQ(rl_settings_set("debug.gdb", port), RL_SETTING_OK);
+    CHECK(boot(fns_count, 1) == 0);
+    cs.wait_for_debugger = true;
+    static const uint8_t word[4] = { 0x12, 0x34, 0x56, 0x78 };
+    rl_n64_rdram_put(mach, 0x2004, word, 4);
+    fprintf(stderr, "gdb-serve: n64\n");
+    rl_n64_run_start(&run);
+    cs.wait_for_debugger = false;
+}
+
+/** @brief What the client saw. */
+typedef struct mclient {
+    int port;
+    char xml[64], r8[20], r9[20], pc[20], mem[16], io[8], det[8];
+    bool ok;
+} mclient;
+
+static bool mask(int fd, const char *pkt, char *out, size_t n)
+{
+    char buf[256];
+    unsigned sum = 0;
+    for (const char *q = pkt; *q; q++)
+        sum += (unsigned char)*q;
+    int len = snprintf(buf, sizeof buf, "$%s#%02x", pkt, sum & 0xff);
+    if (send(fd, buf, (size_t)len, 0) != len)
+        return false;
+    char ch;
+    do {
+        if (recv(fd, &ch, 1, 0) != 1)
+            return false;
+    } while (ch != '$');
+    size_t o = 0;
+    for (;;) {
+        if (recv(fd, &ch, 1, 0) != 1)
+            return false;
+        if (ch == '#')
+            break;
+        if (o + 1 < n)
+            out[o++] = ch;
+    }
+    out[o] = 0;
+    char cs2[2];
+    return recv(fd, cs2, 2, MSG_WAITALL) == 2 && send(fd, "+", 1, 0) == 1;
+}
+
+static void *mclient_run(void *arg)
+{
+    mclient *s = arg;
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in sa = { .sin_family = AF_INET, .sin_port = htons((uint16_t)s->port) };
+    sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    bool up = false;
+    for (int i = 0; i < 300 && !up; i++)
+        up = connect(fd, (struct sockaddr *)&sa, sizeof sa) == 0 || (usleep(10000), false);
+    char r[4096];
+    s->ok = up && mask(fd, "qXfer:features:read:target.xml:0,fff", r, sizeof r);
+    snprintf(s->xml, sizeof s->xml, "%s", strstr(r, "<architecture>") ? strstr(r, "<architecture>") : "");
+    s->ok = s->ok && mask(fd, "p8", r, sizeof r);
+    snprintf(s->r8, sizeof s->r8, "%s", r);
+    s->ok = s->ok && mask(fd, "p9", r, sizeof r);
+    snprintf(s->r9, sizeof s->r9, "%s", r);
+    s->ok = s->ok && mask(fd, "p25", r, sizeof r);
+    snprintf(s->pc, sizeof s->pc, "%s", r);
+    s->ok = s->ok && mask(fd, "mffffffff80001000,4", r, sizeof r);
+    snprintf(s->mem, sizeof s->mem, "%s", r);
+    s->ok = s->ok && mask(fd, "mffffffffa4400010,4", r, sizeof r);
+    snprintf(s->io, sizeof s->io, "%s", r);
+    s->ok = s->ok && mask(fd, "D", r, sizeof r);
+    snprintf(s->det, sizeof s->det, "%s", r);
+    close(fd);
+    return NULL;
+}
+
+TEST(gdb_server_stops_an_n64_run_at_a_sync_point_and_keeps_its_timing)
+{
+    CHECK(boot(fns_count, 1) == 0);
+    rl_n64_run_start(&run);
+    uint64_t ref = cs.cycles;
+    CHECK(ref > 0);
+
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in sa = { .sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
+    socklen_t sl = sizeof sa;
+    CHECK(bind(fd, (struct sockaddr *)&sa, sizeof sa) == 0 && getsockname(fd, (struct sockaddr *)&sa, &sl) == 0);
+    close(fd);
+    static mclient s;
+    s.port = ntohs(sa.sin_port);
+    char port[16];
+    snprintf(port, sizeof port, "%d", s.port);
+    rl_settings_declare_runtime();
+    CHECK_EQ(rl_settings_set("debug.gdb", port), RL_SETTING_OK);
+    CHECK(boot(fns_count, 1) == 0);
+    pthread_t th;
+    CHECK_EQ(pthread_create(&th, NULL, mclient_run, &s), 0);
+    rl_n64_run_start(&run);
+    pthread_join(th, NULL);
+    CHECK(s.ok);
+    CHECK(strncmp(s.xml, "<architecture>mips:4300</architecture>", 38) == 0);
+    /* Registers big-endian: r8 counts, r9 is 0x99, pc is the sync point's next. */
+    unsigned long long r8 = strtoull(s.r8, NULL, 16);
+    CHECK(r8 > 0 && r8 < COUNT_N);
+    CHECK(strcmp(s.r9, "0000000000000099") == 0);
+    CHECK(strcmp(s.pc, "ffffffff80001004") == 0);
+    /* RDRAM through kseg0 holds the code bytes the cartridge boot copied there. */
+    char want[9];
+    snprintf(want, sizeof want, "%02x%02x%02x%02x", rom[0x1000], rom[0x1001], rom[0x1002], rom[0x1003]);
+    CHECK(strcmp(s.mem, want) == 0);
+    CHECK(strcmp(s.io, "E14") == 0);
+    CHECK(strcmp(s.det, "OK") == 0);
+    CHECK_EQ(cs.cycles, ref);
+}
+#endif

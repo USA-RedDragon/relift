@@ -903,6 +903,13 @@ static bool run_until_interrupt(rl_ctx *step)
     }
 }
 
+/** @brief Writes v as a register of w bytes in the target's byte order. */
+static void put_reg(uint8_t *out, uint64_t v, uint32_t w)
+{
+    for (uint32_t i = 0; i < w; i++)
+        out[G.cpu->big_endian ? w - 1 - i : i] = (uint8_t)(v >> (8 * i));
+}
+
 /** @brief Reads register r of c: the guest pc of a breakpoint stop where the thread stopped at one. */
 static void reg_read(rl_ctx *c, uint32_t r, uint8_t *out)
 {
@@ -911,10 +918,10 @@ static void reg_read(rl_ctx *c, uint32_t r, uint8_t *out)
     parked *p = find_parked(c);
     uint32_t w = G.cpu->reg_size(r) < 8 ? G.cpu->reg_size(r) : 8;
     if (p && p->has_pc && r == G.cpu->pc_reg)
-        memcpy(out, &p->pc, w);
+        put_reg(out, p->pc, w);
     for (uint32_t i = 0; !p && r == G.cpu->pc_reg && i < G.nth; i++)
         if (G.th[i].ctx == c && G.th[i].has_pc)
-            memcpy(out, &G.th[i].pc, w);
+            put_reg(out, G.th[i].pc, w);
     pthread_mutex_unlock(&G.lock);
 }
 

@@ -646,7 +646,7 @@ vk-present: $(VK_PRESENT)
 charter:
 	$(PYTHON) charter/check.py
 
-gdb-test: $(SWITCH_TESTS)
+gdb-test: $(SWITCH_TESTS) $(GBAR_TESTS) $(N64R_TESTS)
 	CC="$(CC)" sh tools/gdb/test.sh $(BUILD)
 	sh tools/gdb/stub-test.sh $(BUILD)
 
