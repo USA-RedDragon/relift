@@ -597,7 +597,7 @@ static bool check_case(nvn_tex_desc d, uint32_t seed)
  */
 static bool check_packed_case(nvn_tex_desc d, uint32_t seed)
 {
-    if (!nvn_tex_layout(&d))
+    if (!nvn_tex_layout_block(&d, d.block_h))
         return false;
     uint32_t bpb, bw, bh;
     nvn_tex_format(d.format, &bpb, &bw, &bh);
@@ -719,6 +719,9 @@ int nvn_untile_check(uint32_t seed)
         { .target = 1, .format = 75, .width = 256, .height = 256, .levels = 9 },
         { .target = 4, .format = 75, .width = 64, .height = 32, .depth = 3, .levels = 2 },
         { .target = 1, .format = 70, .width = 200, .height = 40, .levels = 1, .flags = 1u << 4 },
+        { .target = 4, .format = 77, .width = 3056, .height = 868, .depth = 3, .levels = 1, .block_h = 4 },
+        { .target = 4, .format = 77, .width = 3056, .height = 868, .depth = 3, .levels = 1, .block_h = 16 },
+        { .target = 4, .format = 77, .width = 3056, .height = 868, .depth = 3, .levels = 1 },
     };
     for (uint32_t i = 0; i < sizeof packed / sizeof packed[0]; i++)
         if (!check_packed_case(packed[i], seed + 50 + i))

@@ -3730,8 +3730,45 @@ static bool upload(replay *r, vimg *v)
     return ok;
 }
 
+/**
+ * @brief RELIFT_NVN_DUMP_UPLOAD=format:width:height:path writes the guest bytes of the first image of that format and size
+ * that is uploaded to path (raw), with its layout in path.txt, so the layout can be checked offline.
+ */
+static void dump_upload(replay *r, const vimg *v)
+{
+    static int on = -1;
+    static uint32_t fmt, w, h;
+    static char path[480];
+    static bool done;
+    if (on < 0) {
+        const char *e = getenv("RELIFT_NVN_DUMP_UPLOAD");
+        on = e && sscanf(e, "%u:%u:%u:%479s", &fmt, &w, &h, path) == 4;
+    }
+    if (!on || done || v->d.format != fmt || v->d.width != w || v->d.height != h || v->d.target == NVN_TARGET_BUFFER)
+        return;
+    done = true;
+    FILE *f = fopen(path, "wb");
+    if (!f)
+        return;
+    fwrite(r->mem + v->storage, 1, v->d.size, f);
+    fclose(f);
+    char meta[500 + 16];
+    snprintf(meta, sizeof meta, "%s.txt", path);
+    f = fopen(meta, "w");
+    if (f) {
+        fprintf(f, "storage 0x%llx size %llu format %u %ux%ux%u target %u levels %u block_h %u block_d %u layer_stride %llu level0 %llu stride %u generation %u\n",
+                (unsigned long long)v->storage, (unsigned long long)v->d.size, v->d.format, v->d.width, v->d.height, v->d.depth,
+                v->d.target, v->d.levels, v->d.block_h, v->d.block_d, (unsigned long long)v->d.layer_stride,
+                (unsigned long long)v->d.level_offset[0], (unsigned)v->d.stride, nvn_generation());
+        fclose(f);
+    }
+    rl_log(RL_LOG_INFO, "imgwatch", "dumped the %llu guest bytes of image 0x%llx to %s", (unsigned long long)v->d.size,
+           (unsigned long long)v->storage, path);
+}
+
 static bool upload_body(replay *r, vimg *v)
 {
+    dump_upload(r, v);
     const nvn_tex_desc *d = &v->d;
     /* A move on the GPU reads the pool after what the device wrote there (the batches run in order, with a barrier
      * before the move), so only the CPU's read of the bytes waits for them; a mirrored pool's bytes are the CPU's. */

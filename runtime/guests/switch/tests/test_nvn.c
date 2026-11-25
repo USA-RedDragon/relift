@@ -1741,6 +1741,70 @@ TEST(nvn_a_staging_buffer_kept_for_its_batch_serves_the_copy_without_a_wait)
     CHECK_EQ(nvn_vk_keep_check(), 0);
 }
 
+/**
+ * The block-linear address of block (bx, by) of layer k of a BC7 array (16-byte blocks) of wb x hb blocks, computed from the
+ * console's rules alone: GOBs of 64 bytes by 8 rows, laid out gob_h GOBs tall per block, the blocks in rows across the
+ * width, the layer stride the layer's size rounded to a whole block. in_gob is the in-GOB offset of byte x of row y.
+ */
+static uint64_t independent_address(uint32_t bx, uint32_t by, uint32_t k, uint32_t wb, uint32_t hb, uint32_t gob_h,
+                                    uint32_t (*in_gob)(uint32_t, uint32_t))
+{
+    uint64_t gobs_wide = ((uint64_t)wb * 16 + 63) / 64;
+    uint64_t gob_rows = (hb + 7) / 8;
+    uint64_t block_rows = (gob_rows + gob_h - 1) / gob_h;
+    uint64_t layer_bytes = block_rows * gobs_wide * 512ull * gob_h;
+    uint64_t stride = (layer_bytes + 512ull * gob_h - 1) / (512ull * gob_h) * 512ull * gob_h;
+    uint64_t xbyte = (uint64_t)bx * 16;
+    uint64_t block = (by / 8) / gob_h * gobs_wide + xbyte / 64;
+    return stride * k + block * 512ull * gob_h + ((by / 8) % gob_h) * 512ull + in_gob((uint32_t)(xbyte % 64), by % 8);
+}
+
+TEST(nvn_a_three_layer_bc7_array_of_the_rock_size_lands_where_the_console_puts_it)
+{
+    static const uint32_t heights[] = { 4, 16 };
+    for (uint32_t hi = 0; hi < 2; hi++) {
+        nvn_tex_desc d = { .target = 4, .format = 77, .width = 3056, .height = 868, .depth = 3, .levels = 1 };
+        CHECK(nvn_tex_layout_block(&d, heights[hi]));
+        uint32_t wb = 764, hb = 217;
+        CHECK_EQ(d.block_h, heights[hi]);
+        /* the layer stride and size are the layer rounded up to the block, three of them */
+        uint64_t want_stride = independent_address(0, 0, 1, wb, hb, heights[hi], nvn_gob_offset);
+        CHECK_EQ(d.layer_stride, want_stride);
+        CHECK_EQ(d.size, want_stride * 3);
+        uint8_t *store = calloc(1, d.size);
+        CHECK(store != NULL);
+        if (!store)
+            return;
+        /* write every block (its own marker) through relift's copy, read it back through the independent address */
+        uint32_t bad = 0, lost = 0;
+        uint8_t *row = malloc((size_t)wb * 16);
+        for (uint32_t k = 0; k < 3; k++)
+            for (uint32_t by = 0; by < hb; by++) {
+                for (uint32_t bx = 0; bx < wb; bx++) {
+                    uint32_t id = (k * hb + by) * wb + bx + 1;
+                    memset(row + bx * 16, 0, 16);
+                    memcpy(row + bx * 16, &id, 4);
+                    row[bx * 16 + 15] = (uint8_t)(id * 7);
+                }
+                nvn_region rg = { 0, (int32_t)(by * 4), 0, 3056, 4, 1 };
+                lost += !nvn_tex_copy(&d, store, 0, k, &rg, row, true);
+            }
+        for (uint32_t k = 0; k < 3; k++)
+            for (uint32_t by = 0; by < hb; by++)
+                for (uint32_t bx = 0; bx < wb; bx++) {
+                    uint32_t id = (k * hb + by) * wb + bx + 1, got;
+                    /* the console keeps each 16-byte block whole, in one line of its GOB */
+                    uint64_t at = independent_address(bx, by, k, wb, hb, heights[hi], nvn_gob_offset);
+                    memcpy(&got, store + at, 4);
+                    bad += got != id || store[at + 15] != (uint8_t)(id * 7);
+                }
+        CHECK_EQ(lost, 0u);
+        CHECK_EQ(bad, 0u);
+        free(row);
+        free(store);
+    }
+}
+
 TEST(nvn_gpu_texel_moves_match_the_cpu_layout_both_ways)
 {
     nvn_probes p;
