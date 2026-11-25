@@ -266,7 +266,7 @@ void nvn_warm_key(nvn_pipe_key *k, const nvn_module *m, uint32_t stage)
     memset(&st, 0, sizeof st);
     nvn_gfx_init(&st);
     memset(k, 0, sizeof *k);
-    k->mods[stage] = m->m;
+    k->mods[stage] = m->id;
     nvn_module_default_spec(m, &k->nspec[stage], k->spec_map[stage], k->spec[stage]);
     if (stage == 1 && m->alpha_test && k->nspec[stage] < NVN_MAX_SPECS) {
         k->spec_map[stage][k->nspec[stage]] = (VkSpecializationMapEntry){ ALPHA_FUNC_SPEC, 4 * k->nspec[stage], 4 };
@@ -314,7 +314,7 @@ static bool warm_program(const char *key, int stage, const uint32_t wg[3])
         nvn_module_default_spec(m, &n, map, vals);
         nvn_spec_sort(&n, map, vals);
         rl_log(RL_LOG_DEBUG, "nvn", "warm-up: compute program %s, workgroup %ux%ux%u", key, wg[0], wg[1], wg[2]);
-        VkPipeline p = nvn_pipe_compute(m->m, n, map, vals);
+        VkPipeline p = nvn_pipe_compute(m->id, n, map, vals);
         rl_log(RL_LOG_DEBUG, "nvn", "warm-up: compute program %s %s", key, p ? "made" : "refused");
         if (p)
             return true;
@@ -391,7 +391,7 @@ static bool make_recorded(const nvn_pipe_rec *rec)
         uint32_t vals[NVN_MAX_SPECS], n = rec->k.nspec[0];
         memcpy(map, rec->k.spec_map[0], n * sizeof map[0]);
         memcpy(vals, rec->k.spec[0], n * sizeof vals[0]);
-        if (nvn_pipe_compute(m->m, n, map, vals))
+        if (nvn_pipe_compute(m->id, n, map, vals))
             return true;
         fail_why(nvn_pipe_why());
         return false;
@@ -407,7 +407,7 @@ static bool make_recorded(const nvn_pipe_rec *rec)
             fail_why(stage_why);
             return false;
         }
-        k.mods[s] = mods[s]->m;
+        k.mods[s] = mods[s]->id;
     }
     if (mods[0] && !nvn_module_link(mods, k.mods)) {
         fail_why("the pre-raster and fragment programs could not be linked");

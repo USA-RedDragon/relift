@@ -384,6 +384,8 @@ typedef struct state {
     VkPipelineShaderStageCreateInfo stages[NVN_STAGES];
     VkSpecializationInfo si[NVN_STAGES];
     uint32_t ns;
+    /** @brief The stages whose module handles fill_state acquired until release_modules. */
+    nvn_shader_id held[NVN_STAGES];
     VkPipelineVertexInputStateCreateInfo vi;
     VkPipelineInputAssemblyStateCreateInfo ia;
     VkPipelineTessellationStateCreateInfo ts;
@@ -476,8 +478,30 @@ static void dyn_states(state *s, bool bounds, bool palette)
                                                 .pDynamicStates = s->dyn };
 }
 
-static void fill_state(state *s, const nvn_pipe_key *k)
+/** @brief Drops the module handles s holds: the modules are destroyed when no other pipeline creation holds them. */
+static void release_modules(state *s)
 {
+    for (uint32_t i = 0; i < NVN_STAGES; i++)
+        if (s->held[i]) {
+            nvn_module_release(s->held[i]);
+            s->held[i] = 0;
+        }
+}
+
+/** @brief Fills s for k, holding the module handle of every stage; false (nothing held) when one cannot be made. */
+static bool fill_state(state *s, const nvn_pipe_key *k)
+{
+    memset(s->held, 0, sizeof s->held);
+    VkShaderModule handle[NVN_STAGES] = { NULL };
+    for (uint32_t i = 0; i < NVN_STAGES; i++)
+        if (k->mods[i] && stage_bits[i]) {
+            handle[i] = nvn_module_acquire(k->mods[i]);
+            if (!handle[i]) {
+                release_modules(s);
+                return false;
+            }
+            s->held[i] = k->mods[i];
+        }
     s->ns = 0;
     for (uint32_t i = 0; i < NVN_STAGES; i++)
         if (k->mods[i] && stage_bits[i]) {
@@ -485,7 +509,7 @@ static void fill_state(state *s, const nvn_pipe_key *k)
             s->stages[s->ns++] = (VkPipelineShaderStageCreateInfo){
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                 .stage = stage_bits[i],
-                .module = k->mods[i],
+                .module = handle[i],
                 .pName = "main",
                 .pSpecializationInfo = k->nspec[i] ? &s->si[i] : NULL
             };
@@ -605,6 +629,7 @@ static void fill_state(state *s, const nvn_pipe_key *k)
         s->ri.pNext = &s->counts;
     }
     s->ri_view = (VkPipelineRenderingCreateInfo){ .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
+    return true;
 }
 
 /** @brief The key bytes of each library kind: what the driver compiles in. */
@@ -615,7 +640,7 @@ typedef struct vi_key {
 } vi_key;
 
 typedef struct stage_key {
-    VkShaderModule m;
+    nvn_shader_id m;
     uint32_t nspec;
     VkSpecializationMapEntry map[NVN_MAX_SPECS];
     uint32_t val[NVN_MAX_SPECS];
@@ -709,8 +734,20 @@ static VkPipeline library(table *t, const void *key, size_t len, VkGraphicsPipel
         return NULL;
     if (!mine)
         return e->p;
+    bool stages = part == VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT ||
+                  part == VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT;
+    nvn_pipe_key blank;
+    const nvn_pipe_key *use = k;
+    if (!stages) {
+        blank = *k;
+        memset(blank.mods, 0, sizeof blank.mods);
+        use = &blank;
+    }
     state s;
-    fill_state(&s, k);
+    if (!fill_state(&s, use)) {
+        finish(e, NULL);
+        return NULL;
+    }
     dyn_states(&s, part == VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT && k->depth_bounds,
                part == VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT && k->shading_rate);
     VkGraphicsPipelineLibraryCreateInfoEXT lib = { .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT,
@@ -749,6 +786,7 @@ static VkPipeline library(table *t, const void *key, size_t len, VkGraphicsPipel
     VkPipeline p = NULL;
     if (create_graphics(&ci, what, &p) != VK_SUCCESS)
         p = NULL;
+    release_modules(&s);
     finish(e, p);
     return p;
 }
@@ -784,7 +822,7 @@ static struct {
 
 static VkPipeline vertex_library(const nvn_pipe_key *k);
 static VkPipeline fragment_library(const nvn_pipe_key *k);
-static VkPipeline compute_in(table *t, VkPipelineLayout layout, VkShaderModule m, uint32_t n,
+static VkPipeline compute_in(table *t, VkPipelineLayout layout, nvn_shader_id m, uint32_t n,
                              const VkSpecializationMapEntry *map, const uint32_t *vals);
 
 /** @brief The exact-kind worker: makes the queued libraries and compute pipelines, newest first, off the game's threads. */
@@ -841,7 +879,7 @@ static void exact_queue(const exact_job *j)
 static VkPipeline vertex_library(const nvn_pipe_key *k)
 {
     nvn_pipe_key v = *k;
-    v.mods[1] = NULL;
+    v.mods[1] = 0;
     stage_key sk;
     stage_of(&v, 0, &sk);
     return library(&P.pr, &sk, sizeof sk, VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT, k,
@@ -851,7 +889,7 @@ static VkPipeline vertex_library(const nvn_pipe_key *k)
 static VkPipeline fragment_library(const nvn_pipe_key *k)
 {
     nvn_pipe_key f = *k;
-    f.mods[0] = NULL;
+    f.mods[0] = 0;
     stage_key sk;
     stage_of(&f, 1, &sk);
     return library(&P.fs, &sk, sizeof sk, VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT, &f, "fragment library");
@@ -865,7 +903,8 @@ bool nvn_pipe_warm_fragment(const nvn_pipe_key *k) { return P.gpl && fragment_li
 static VkPipeline monolithic(const nvn_pipe_key *k)
 {
     state s;
-    fill_state(&s, k);
+    if (!fill_state(&s, k))
+        return NULL;
     VkGraphicsPipelineCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
                                         .pNext = &s.ri,
                                         .stageCount = s.ns,
@@ -884,7 +923,8 @@ static VkPipeline monolithic(const nvn_pipe_key *k)
         ci.flags |= PIPELINE_CAPTURE_STATISTICS;
     VkPipeline p = NULL;
     if (create_graphics(&ci, k->mesh_mode ? "mesh pipeline" : "pipeline", &p) != VK_SUCCESS)
-        return NULL;
+        p = NULL;
+    release_modules(&s);
     return p;
 }
 
@@ -1063,7 +1103,7 @@ VkPipeline nvn_pipe_graphics(const nvn_pipe_key *k)
                       "vertex input library");
     for (uint32_t s = 0; s < 2; s++) {
         nvn_pipe_key part = *k;
-        part.mods[1 - s] = NULL;
+        part.mods[1 - s] = 0;
         stage_key sk;
         stage_of(&part, s, &sk);
         VkPipeline have = peek(s ? &P.fs : &P.pr, &sk, sizeof sk);
@@ -1098,7 +1138,7 @@ VkPipeline nvn_pipe_graphics(const nvn_pipe_key *k)
 }
 
 /** @brief The compute pipeline of m with n specialization constants in layout, kept in t. */
-static VkPipeline compute_in(table *t, VkPipelineLayout layout, VkShaderModule m, uint32_t n,
+static VkPipeline compute_in(table *t, VkPipelineLayout layout, nvn_shader_id m, uint32_t n,
                              const VkSpecializationMapEntry *map, const uint32_t *vals)
 {
     maybe_save();
@@ -1112,11 +1152,16 @@ static VkPipeline compute_in(table *t, VkPipelineLayout layout, VkShaderModule m
     entry *e = claim(t, &sk, sizeof sk, &mine);
     if (!e || !mine)
         return e ? e->p : NULL;
+    VkShaderModule handle = nvn_module_acquire(m);
+    if (!handle) {
+        finish(e, NULL);
+        return NULL;
+    }
     VkSpecializationInfo si = { n, map, 4u * n, vals };
     VkComputePipelineCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
                                        .stage = { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                                                   .stage = VK_SHADER_STAGE_COMPUTE_BIT,
-                                                  .module = m,
+                                                  .module = handle,
                                                   .pName = "main",
                                                   .pSpecializationInfo = &si },
                                        .layout = layout };
@@ -1136,6 +1181,7 @@ static VkPipeline compute_in(table *t, VkPipelineLayout layout, VkShaderModule m
         vr = VK(vkCreateComputePipelines)(g.dev, P.cache, 1, &ci, NULL, &p);
         compiled = true;
     }
+    nvn_module_release(m);
     bool late = compiled && !t_quiet;
     uint64_t dt = rl_clock_ns() - t0;
     t_last_result = vr;
@@ -1167,7 +1213,7 @@ static VkPipeline compute_in(table *t, VkPipelineLayout layout, VkShaderModule m
  * @brief The compute pipeline of m in t: the exact one when it is made; while it is not (after warm-up), the one that
  * reads its texture kinds at run time, with the exact one queued for the exact-kind worker.
  */
-static VkPipeline compute_exact_or_run_time(table *t, VkPipelineLayout layout, VkShaderModule m, uint32_t n,
+static VkPipeline compute_exact_or_run_time(table *t, VkPipelineLayout layout, nvn_shader_id m, uint32_t n,
                                             const VkSpecializationMapEntry *map, const uint32_t *vals)
 {
     stage_key sk;
@@ -1188,12 +1234,12 @@ static VkPipeline compute_exact_or_run_time(table *t, VkPipelineLayout layout, V
     return compute_in(t, layout, m, n, map, rt);
 }
 
-VkPipeline nvn_pipe_compute(VkShaderModule m, uint32_t n, const VkSpecializationMapEntry *map, const uint32_t *vals)
+VkPipeline nvn_pipe_compute(nvn_shader_id m, uint32_t n, const VkSpecializationMapEntry *map, const uint32_t *vals)
 {
     return compute_exact_or_run_time(&P.comp, P.clayout, m, n, map, vals);
 }
 
-VkPipeline nvn_pipe_mesh_compute(VkShaderModule m, uint32_t n, const VkSpecializationMapEntry *map, const uint32_t *vals)
+VkPipeline nvn_pipe_mesh_compute(nvn_shader_id m, uint32_t n, const VkSpecializationMapEntry *map, const uint32_t *vals)
 {
     return compute_in(&P.mcomp, P.mlayout, m, n, map, vals);
 }
@@ -1270,6 +1316,7 @@ const nvn_pipe_rec *nvn_pipe_recorded_at(uint32_t i) { return i < P.nold ? &P.ol
 void nvn_pipe_warmed(void)
 {
     P.warmed = true;
+    nvn_module_release_idle();
     nvn_pipe_save();
 }
 

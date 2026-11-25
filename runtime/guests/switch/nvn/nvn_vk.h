@@ -13,6 +13,13 @@
 #include <pthread.h>
 
 /**
+ * @brief The stable identity of a shader module: a program's module, or one of its variants, keeps its id for the run
+ * though its VkShaderModule handle is destroyed after pipelines are made from it and remade when one is needed again.
+ * 0 is none (nvn_module_acquire gives the handle of an id).
+ */
+typedef uint64_t nvn_shader_id;
+
+/**
  * @brief Whether the layer counts its host Vulkan calls by command (set with the GPU profile, setting gpu.profile),
  * and the counts since the start: nvn_vk_calls by vkg_cmd, the NVN commands replayed and the draws made.
  */

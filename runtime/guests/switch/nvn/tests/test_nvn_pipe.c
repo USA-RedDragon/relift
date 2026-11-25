@@ -153,8 +153,8 @@ static VkShaderModule make_module(const uint32_t *code, size_t bytes)
 static void make_key(nvn_pipe_key *k, VkShaderModule vs, VkShaderModule fs, VkFormat fmt, uint32_t stride)
 {
     memset(k, 0, sizeof *k);
-    k->mods[0] = vs;
-    k->mods[1] = fs;
+    k->mods[0] = nvn_module_wrap(vs);
+    k->mods[1] = nvn_module_wrap(fs);
     k->topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     k->nattr = 1;
     k->nbind = 1;
@@ -334,7 +334,7 @@ TEST(nvn_pipe_a_pipeline_with_a_geometry_program_is_made_whole_once)
     CHECK(vs && fs && gs);
     nvn_pipe_key k;
     make_key(&k, vs, fs, VK_FORMAT_R8G8B8A8_UNORM, 16);
-    k.mods[2] = gs;
+    k.mods[2] = nvn_module_wrap(gs);
     uint64_t made0, ns0, late0, lns0, made1, ns1, late1, lns1;
     nvn_pipe_stats(&made0, &ns0, &late0, &lns0);
     VkPipeline p = nvn_pipe_graphics(&k);
@@ -516,7 +516,7 @@ TEST(nvn_pipe_records_what_the_game_made_and_reads_it_back_on_the_same_device)
     CHECK(vs && fs);
     nvn_pipe_key k;
     make_key(&k, vs, fs, VK_FORMAT_R8G8B8A8_UNORM, 16);
-    k.mods[0] = k.mods[1] = NULL;
+    k.mods[0] = k.mods[1] = 0;
     const char *keys[5] = { "vertex-program", "fragment-program", NULL, NULL, NULL };
     nvn_pipe_record_graphics(keys, &k);
     nvn_pipe_record_graphics(keys, &k);
@@ -537,7 +537,7 @@ TEST(nvn_pipe_records_what_the_game_made_and_reads_it_back_on_the_same_device)
         CHECK_EQ(a->kind, NVN_REC_GRAPHICS);
         CHECK(!strcmp(a->keys[0], "vertex-program") && !strcmp(a->keys[1], "fragment-program"));
         CHECK_EQ(a->k.nattr, 1u);
-        CHECK(a->k.mods[0] == NULL && a->k.mods[1] == NULL);
+        CHECK(a->k.mods[0] == 0 && a->k.mods[1] == 0);
         CHECK_EQ(b->kind, NVN_REC_COMPUTE);
         CHECK(!strcmp(b->keys[5], "compute-program"));
         CHECK_EQ(b->k.spec[0][0], 7u);
@@ -577,7 +577,7 @@ TEST(nvn_the_warm_up_makes_the_libraries_a_first_draw_links)
     nvn_gfx_init(&st);
     static nvn_module m;
     memset(&m, 0, sizeof m);
-    m.m = (VkShaderModule)(uintptr_t)0x1234;
+    m.id = 0x1234u << 4;
     m.alpha_test = true;
     nvn_pipe_key k;
     nvn_warm_key(&k, &m, 1u);
@@ -591,7 +591,7 @@ TEST(nvn_the_warm_up_makes_the_libraries_a_first_draw_links)
     m.alpha_test = false;
     nvn_warm_key(&k, &m, 0u);
     CHECK_EQ(k.nspec[0u], 0u);
-    CHECK(k.mods[0u] == m.m);
+    CHECK(k.mods[0u] == m.id);
 }
 
 static nvn_pipe_key g_other_key;

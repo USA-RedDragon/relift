@@ -8,6 +8,7 @@
 
 #include <pthread.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -303,45 +304,93 @@ const nvn_module *nvn_module_last_stage(nvn_module *const mods[5])
     return mods[2] ? mods[2] : mods[4] ? mods[4] : mods[0];
 }
 
-VkShaderModule nvn_module_fragment_for(const nvn_module *vert, nvn_module *frag)
+static _Atomic uint64_t g_made;
+
+uint64_t nvn_module_handles_made(void) { return g_made; }
+
+/** @brief The VkShaderModule of SPIR-V w (n words), checked; NULL when the driver refuses it. */
+static VkShaderModule make_handle(const uint32_t *w, size_t n, const char *what)
 {
-    uint32_t missing = frag->inputs & ~vert->outputs;
-    if (!missing)
-        return frag->m;
-    pthread_mutex_lock(&g_lock);
-    for (uint32_t i = 0; i < frag->nvariants; i++)
-        if (frag->variants[i].mask == missing) {
-            VkShaderModule have = frag->variants[i].m;
-            pthread_mutex_unlock(&g_lock);
-            return have;
-        }
-    bool full = frag->nvariants == 8;
-    pthread_mutex_unlock(&g_lock);
-    size_t n, dn;
-    uint32_t *w = full ? NULL : nvn_shader_spirv(frag->key, &n);
+    VkShaderModuleCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+                                    .codeSize = n * 4,
+                                    .pCode = w };
+    VkShaderModule m = NULL;
+    rl_spirv_check(w, n, what);
+    if (VK(vkCreateShaderModule)(g.dev, &ci, NULL, &m) != VK_SUCCESS)
+        m = NULL;
+    else
+        g_made++;
+    return m;
+}
+
+/**
+ * @brief The SPIR-V of module m's variant for mask (n words in *out_n): a vertex program with the outputs in mask
+ * added, a fragment program with the inputs in mask demoted; NULL when it cannot be made.
+ */
+static uint32_t *variant_spirv(const nvn_module *m, uint32_t mask, size_t *out_n)
+{
+    size_t n;
+    uint32_t *w = nvn_shader_spirv(m->key, &n);
     if (!w)
         return NULL;
     nvn_module scratch;
     memset(&scratch, 0, sizeof scratch);
-    uint32_t *dw = patch_spirv(w, n, frag->stage, &scratch) ? nvn_spirv_demote_inputs(w, n, missing, &dn) : NULL;
+    uint32_t *dw = NULL;
+    if (patch_spirv(w, n, m->stage, &scratch))
+        dw = m->stage == (int)NVN_STAGE_VERTEX ? nvn_spirv_add_outputs(w, n, mask, out_n)
+                                               : nvn_spirv_demote_inputs(w, n, mask, out_n);
     free(w);
+    return dw;
+}
+
+/**
+ * @brief The id of m's variant for mask, made the first time (its handle stays live, unheld, until a pipeline creation
+ * uses and releases it); 0 when it cannot be made or m has all eight.
+ */
+static nvn_shader_id variant_for(nvn_module *m, uint32_t mask)
+{
+    pthread_mutex_lock(&g_lock);
+    for (uint32_t i = 0; i < m->nvariants; i++)
+        if (m->variants[i].mask == mask) {
+            nvn_shader_id id = m->id | (i + 1);
+            pthread_mutex_unlock(&g_lock);
+            return id;
+        }
+    bool full = m->nvariants == 8;
+    pthread_mutex_unlock(&g_lock);
+    size_t dn;
+    uint32_t *dw = full ? NULL : variant_spirv(m, mask, &dn);
     if (!dw)
-        return NULL;
-    VkShaderModuleCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-                                    .codeSize = dn * 4,
-                                    .pCode = dw };
-    VkShaderModule m = NULL;
-    rl_spirv_check(dw, dn, "a fragment program with demoted inputs");
-    if (VK(vkCreateShaderModule)(g.dev, &ci, NULL, &m) != VK_SUCCESS)
-        m = NULL;
+        return 0;
+    VkShaderModule h = make_handle(dw, dn, m->stage == (int)NVN_STAGE_VERTEX
+                                               ? "a vertex program with outputs added for its fragment program"
+                                               : "a fragment program with demoted inputs");
     free(dw);
-    if (m) {
-        pthread_mutex_lock(&g_lock);
-        frag->variants[frag->nvariants].mask = missing;
-        frag->variants[frag->nvariants++].m = m;
-        pthread_mutex_unlock(&g_lock);
+    if (!h)
+        return 0;
+    nvn_shader_id id = 0;
+    bool spare = true;
+    pthread_mutex_lock(&g_lock);
+    for (uint32_t i = 0; i < m->nvariants; i++)
+        if (m->variants[i].mask == mask)
+            id = m->id | (i + 1);
+    if (!id && m->nvariants < 8) {
+        m->variants[m->nvariants].mask = mask;
+        m->variants[m->nvariants].handle = h;
+        id = m->id | (m->nvariants + 1);
+        m->nvariants++;
+        spare = false;
     }
-    return m;
+    pthread_mutex_unlock(&g_lock);
+    if (spare)
+        VK(vkDestroyShaderModule)(g.dev, h, NULL);
+    return id;
+}
+
+nvn_shader_id nvn_module_fragment_for(const nvn_module *vert, nvn_module *frag)
+{
+    uint32_t missing = frag->inputs & ~vert->outputs;
+    return missing ? variant_for(frag, missing) : frag->id;
 }
 
 
@@ -502,64 +551,29 @@ static bool float_inputs(nvn_module *frag)
     return known == 2;
 }
 
-VkShaderModule nvn_module_vertex_for(nvn_module *vert, nvn_module *frag)
+nvn_shader_id nvn_module_vertex_for(nvn_module *vert, nvn_module *frag)
 {
     uint32_t missing = frag->inputs & ~vert->outputs;
     if (!missing)
-        return vert->m;
+        return vert->id;
     if (vert->stage != (int)NVN_STAGE_VERTEX || !float_inputs(frag))
-        return NULL;
-    pthread_mutex_lock(&g_lock);
-    for (uint32_t i = 0; i < vert->nvariants; i++)
-        if (vert->variants[i].mask == missing) {
-            VkShaderModule have = vert->variants[i].m;
-            pthread_mutex_unlock(&g_lock);
-            return have;
-        }
-    bool full = vert->nvariants == 8;
-    pthread_mutex_unlock(&g_lock);
-    size_t n, dn;
-    uint32_t *w = full ? NULL : nvn_shader_spirv(vert->key, &n);
-    if (!w)
-        return NULL;
-    nvn_module scratch;
-    memset(&scratch, 0, sizeof scratch);
-    uint32_t *dw = patch_spirv(w, n, vert->stage, &scratch) ? nvn_spirv_add_outputs(w, n, missing, &dn) : NULL;
-    free(w);
-    if (!dw)
-        return NULL;
-    VkShaderModuleCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-                                    .codeSize = dn * 4,
-                                    .pCode = dw };
-    VkShaderModule m = NULL;
-    rl_spirv_check(dw, dn, "a vertex program with outputs added for its fragment program");
-    if (VK(vkCreateShaderModule)(g.dev, &ci, NULL, &m) != VK_SUCCESS)
-        m = NULL;
-    free(dw);
-    if (m) {
-        pthread_mutex_lock(&g_lock);
-        if (vert->nvariants < 8) {
-            vert->variants[vert->nvariants].mask = missing;
-            vert->variants[vert->nvariants++].m = m;
-        }
-        pthread_mutex_unlock(&g_lock);
-    }
-    return m;
+        return 0;
+    return variant_for(vert, missing);
 }
 
-bool nvn_module_link(nvn_module *const mods[5], VkShaderModule out[5])
+bool nvn_module_link(nvn_module *const mods[5], nvn_shader_id out[5])
 {
     if (!mods[1])
         return true;
     if (mods[0] && !mods[2] && !mods[3] && !mods[4]) {
-        VkShaderModule v = nvn_module_vertex_for(mods[0], mods[1]);
+        nvn_shader_id v = nvn_module_vertex_for(mods[0], mods[1]);
         if (v) {
             out[0] = v;
-            out[1] = mods[1]->m;
+            out[1] = mods[1]->id;
             return true;
         }
     }
-    return (out[1] = nvn_module_fragment_for(nvn_module_last_stage(mods), mods[1])) != NULL;
+    return (out[1] = nvn_module_fragment_for(nvn_module_last_stage(mods), mods[1])) != 0;
 }
 
 bool nvn_spirv_stage(const uint32_t *w, size_t n, int *stage)
@@ -582,7 +596,27 @@ bool nvn_spirv_stage(const uint32_t *w, size_t n, int *stage)
 static struct {
     nvn_module **slot;
     uint32_t cap, n;
+    /** @brief Every module by serial minus one, wrapped ones too. */
+    nvn_module **ser;
+    uint32_t nser, capser;
 } g_mods;
+
+/** @brief Gives m its serial and id and lists it by serial; false when memory runs out; g_lock held. */
+static bool register_locked(nvn_module *m)
+{
+    if (g_mods.nser == g_mods.capser) {
+        uint32_t cap = g_mods.capser ? g_mods.capser * 2 : 1024;
+        nvn_module **s = realloc(g_mods.ser, cap * sizeof *s);
+        if (!s)
+            return false;
+        g_mods.ser = s;
+        g_mods.capser = cap;
+    }
+    g_mods.ser[g_mods.nser++] = m;
+    m->serial = g_mods.nser;
+    m->id = (nvn_shader_id)m->serial << 4;
+    return true;
+}
 
 static uint32_t key_hash(const char *key)
 {
@@ -624,6 +658,8 @@ static bool insert_locked(nvn_module *m)
         g_mods.slot = slot;
         g_mods.cap = cap;
     }
+    if (!register_locked(m))
+        return false;
     uint32_t j = key_hash(m->key) & (g_mods.cap - 1);
     while (g_mods.slot[j])
         j = (j + 1) & (g_mods.cap - 1);
@@ -743,36 +779,170 @@ nvn_module *nvn_module_get(const char key[65], int stage, char *why, size_t why_
         why_set(why, why_n, "translation %s is not SPIR-V", key);
         return NULL;
     }
-    VkShaderModuleCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-                                    .codeSize = n * 4,
-                                    .pCode = w };
-    rl_spirv_check(w, n, key);
-    VkResult vr = VK(vkCreateShaderModule)(g.dev, &ci, NULL, &m->m);
+    m->handle = make_handle(w, n, key);
     free(w);
-    if (vr != VK_SUCCESS) {
+    if (!m->handle) {
         free(m->recs);
         free(m);
-        why_set(why, why_n, "vkCreateShaderModule failed for %s (%d)", key, (int)vr);
+        why_set(why, why_n, "vkCreateShaderModule failed for %s", key);
         return NULL;
     }
     pthread_mutex_lock(&g_lock);
     have = find_locked(key, stage);
     bool ok = have || insert_locked(m);
     pthread_mutex_unlock(&g_lock);
-    if (have) {
-        VK(vkDestroyShaderModule)(g.dev, m->m, NULL);
+    if (have || !ok) {
+        VK(vkDestroyShaderModule)(g.dev, m->handle, NULL);
         free(m->recs);
         free(m);
-        return have;
-    }
-    if (!ok) {
-        VK(vkDestroyShaderModule)(g.dev, m->m, NULL);
-        free(m->recs);
-        free(m);
+        if (have)
+            return have;
         why_set(why, why_n, "out of memory making module %s", key);
         return NULL;
     }
     return m;
+}
+
+/** @brief Module id's handle slot and holders; g_lock held. NULL when id names no module or variant. */
+static nvn_module *slot_locked(nvn_shader_id id, VkShaderModule **h, uint32_t **refs, uint32_t *mask)
+{
+    uint64_t serial = id >> 4, slot = id & 15;
+    if (!serial || serial > g_mods.nser)
+        return NULL;
+    nvn_module *m = g_mods.ser[serial - 1];
+    if (slot > m->nvariants)
+        return NULL;
+    *h = slot ? &m->variants[slot - 1].handle : &m->handle;
+    *refs = slot ? &m->variants[slot - 1].refs : &m->refs;
+    *mask = slot ? m->variants[slot - 1].mask : 0;
+    return m;
+}
+
+VkShaderModule nvn_module_acquire(nvn_shader_id id)
+{
+    VkShaderModule *h;
+    uint32_t *refs, mask;
+    pthread_mutex_lock(&g_lock);
+    nvn_module *m = slot_locked(id, &h, &refs, &mask);
+    if (!m) {
+        pthread_mutex_unlock(&g_lock);
+        return NULL;
+    }
+    if (*h) {
+        ++*refs;
+        VkShaderModule have = *h;
+        pthread_mutex_unlock(&g_lock);
+        return have;
+    }
+    pthread_mutex_unlock(&g_lock);
+    VkShaderModule made = NULL;
+    size_t n;
+    uint32_t *w = (id & 15) ? variant_spirv(m, mask, &n) : NULL;
+    if (!(id & 15)) {
+        uint32_t *base = nvn_shader_spirv(m->key, &n);
+        nvn_module scratch;
+        memset(&scratch, 0, sizeof scratch);
+        if (base && patch_spirv(base, n, m->stage, &scratch))
+            w = base;
+        else
+            free(base);
+    }
+    if (w) {
+        made = make_handle(w, n, m->key);
+        free(w);
+    }
+    if (!made) {
+        rl_log(RL_LOG_ERROR, "nvn", "cannot make the shader module of program %s again", m->key);
+        return NULL;
+    }
+    pthread_mutex_lock(&g_lock);
+    VkShaderModule have = *h;
+    if (!have)
+        *h = made;
+    ++*refs;
+    have = *h;
+    pthread_mutex_unlock(&g_lock);
+    if (have != made)
+        VK(vkDestroyShaderModule)(g.dev, made, NULL);
+    return have;
+}
+
+void nvn_module_release(nvn_shader_id id)
+{
+    VkShaderModule *h;
+    uint32_t *refs, mask;
+    pthread_mutex_lock(&g_lock);
+    nvn_module *m = slot_locked(id, &h, &refs, &mask);
+    VkShaderModule gone = NULL;
+    if (m && *refs && !--*refs && !m->external) {
+        gone = *h;
+        *h = NULL;
+    }
+    pthread_mutex_unlock(&g_lock);
+    if (gone)
+        VK(vkDestroyShaderModule)(g.dev, gone, NULL);
+}
+
+void nvn_module_release_idle(void)
+{
+    pthread_mutex_lock(&g_lock);
+    for (uint32_t i = 0; i < g_mods.nser; i++) {
+        nvn_module *m = g_mods.ser[i];
+        if (m->external)
+            continue;
+        if (m->handle && !m->refs) {
+            VK(vkDestroyShaderModule)(g.dev, m->handle, NULL);
+            m->handle = NULL;
+        }
+        for (uint32_t v = 0; v < m->nvariants; v++)
+            if (m->variants[v].handle && !m->variants[v].refs) {
+                VK(vkDestroyShaderModule)(g.dev, m->variants[v].handle, NULL);
+                m->variants[v].handle = NULL;
+            }
+    }
+    pthread_mutex_unlock(&g_lock);
+}
+
+uint32_t nvn_module_live_handles(void)
+{
+    uint32_t live = 0;
+    pthread_mutex_lock(&g_lock);
+    for (uint32_t i = 0; i < g_mods.nser; i++) {
+        nvn_module *m = g_mods.ser[i];
+        if (m->external)
+            continue;
+        live += m->handle != NULL;
+        for (uint32_t v = 0; v < m->nvariants; v++)
+            live += m->variants[v].handle != NULL;
+    }
+    pthread_mutex_unlock(&g_lock);
+    return live;
+}
+
+nvn_shader_id nvn_module_wrap(VkShaderModule handle)
+{
+    pthread_mutex_lock(&g_lock);
+    for (uint32_t i = 0; i < g_mods.nser; i++)
+        if (g_mods.ser[i]->external && g_mods.ser[i]->handle == handle) {
+            nvn_shader_id id = g_mods.ser[i]->id;
+            pthread_mutex_unlock(&g_lock);
+            return id;
+        }
+    pthread_mutex_unlock(&g_lock);
+    nvn_module *m = calloc(1, sizeof *m);
+    if (!m)
+        return 0;
+    m->stage = -1;
+    m->handle = handle;
+    m->external = true;
+    pthread_mutex_lock(&g_lock);
+    bool ok = register_locked(m);
+    pthread_mutex_unlock(&g_lock);
+    if (!ok) {
+        free(m);
+        return 0;
+    }
+    return m->id;
 }
 
 void nvn_module_default_spec(const nvn_module *m, uint32_t *n, VkSpecializationMapEntry *map, uint32_t *vals)

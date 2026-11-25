@@ -27,7 +27,16 @@
 typedef struct nvn_module {
     char key[65];
     int stage;
-    VkShaderModule m;
+    /** @brief Its stable identity (nvn_shader_id), set when the module is entered in the table. */
+    nvn_shader_id id;
+    /** @brief The index in the table by serial, from 1; the id is the serial shifted left four bits. */
+    uint32_t serial;
+    /** @brief The live VkShaderModule, or NULL while none is made; nvn_module_acquire and nvn_module_release own it. */
+    VkShaderModule handle;
+    /** @brief The acquirers of handle; at zero the last release destroys it. */
+    uint32_t refs;
+    /** @brief The handle was made by the caller (nvn_module_wrap) and is never destroyed or remade. */
+    bool external;
     /** @brief User banks (bit n: c[3 + n]) and driver banks (bit n: c[n]) the program reads. */
     uint32_t user, driver;
     /** @brief Input locations (vertex attributes) the program reads. */
@@ -97,7 +106,8 @@ typedef struct nvn_module {
      */
     struct {
         uint32_t mask;
-        VkShaderModule m;
+        VkShaderModule handle;
+        uint32_t refs;
     } variants[8];
     uint32_t nvariants;
     /** @brief For a fragment program: 0 not checked yet, 1 some input is not a 32-bit float scalar or vector, 2 all are. */
@@ -153,7 +163,7 @@ const nvn_module *nvn_module_last_stage(nvn_module *const mods[5]);
  * a variant of frag with the unwritten inputs demoted to the constants the
  * vertex stage leaves. NULL when it cannot be made.
  */
-VkShaderModule nvn_module_fragment_for(const nvn_module *vert, nvn_module *frag);
+nvn_shader_id nvn_module_fragment_for(const nvn_module *vert, nvn_module *frag);
 /**
  * @brief A copy of the SPIR-V w (n words) in which every Input variable at a location in mask is a Private variable
  * initialized to UNWRITTEN_VARYING (see nvn_priv.h), with no location. The host driver needs every fragment input
@@ -179,14 +189,39 @@ uint32_t *nvn_spirv_add_outputs(const uint32_t *w, size_t n, uint32_t mask, size
  * keeps its own module and the library the warm-up made of it. NULL when vert is not a vertex program, an input of
  * frag is not a float, or the variant cannot be made.
  */
-VkShaderModule nvn_module_vertex_for(nvn_module *vert, nvn_module *frag);
+nvn_shader_id nvn_module_vertex_for(nvn_module *vert, nvn_module *frag);
 /**
  * @brief Sets out[0] and out[1] (the vertex and fragment modules) of a draw with programs mods so every fragment input
  * has an output: a vertex program alone before the fragment one gets the outputs it lacks (nvn_module_vertex_for);
  * otherwise, or when that cannot be made, the fragment program gets its inputs demoted (nvn_module_fragment_for).
  * False when neither can be made.
  */
-bool nvn_module_link(nvn_module *const mods[5], VkShaderModule out[5]);
+bool nvn_module_link(nvn_module *const mods[5], nvn_shader_id out[5]);
+
+/**
+ * @brief The VkShaderModule of module id, made again from the build's shader table when it was destroyed, with one
+ * more holder. Pair every call with nvn_module_release once the pipelines needing the handle exist. NULL when id is
+ * unknown or the driver refuses the module. Safe from any thread.
+ */
+VkShaderModule nvn_module_acquire(nvn_shader_id id);
+
+/** @brief Drops one holder of module id's handle; the last one destroys it (the id stays valid). */
+void nvn_module_release(nvn_shader_id id);
+
+/** @brief Destroys every handle no pipeline creation holds: the ones made for a module and never used. */
+void nvn_module_release_idle(void);
+
+/** @brief The VkShaderModule handles live now (made and not yet destroyed), for the memory a run holds and for tests. */
+uint32_t nvn_module_live_handles(void);
+
+/** @brief The VkShaderModules made so far, first makes and remakes together. */
+uint64_t nvn_module_handles_made(void);
+
+/**
+ * @brief An id for a VkShaderModule the caller made (a test's, or a layer's own): the module is never destroyed or
+ * remade here, and the same handle always gets the same id. 0 when memory runs out.
+ */
+nvn_shader_id nvn_module_wrap(VkShaderModule m);
 
 
 /**

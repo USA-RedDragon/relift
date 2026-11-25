@@ -1826,7 +1826,7 @@ static int prepare_stage(replay *r, pipe_key *k, module **mods, uint32_t s, uint
     if (trc != RL_OK)
         return trc;
     nvn_spec_sort(&k->nspec[s], k->spec_map[s], k->spec[s]);
-    k->mods[s] = mods[s]->m;
+    k->mods[s] = mods[s]->id;
     return RL_OK;
 }
 
@@ -2270,7 +2270,7 @@ static int draw_mesh_compute(replay *r, module *const *mods, pipe_key *k, const 
     if (mi->topology < 1 || mi->topology > 3)
         return nvn_vk_stop(r, "mesh program %s has output topology %u", mesh->key, mi->topology);
     kg.topology = list[mi->topology];
-    kg.mods[0] = vert->m;
+    kg.mods[0] = vert->id;
     kg.nspec[1] = k->nspec[1];
     memcpy(kg.spec_map[1], k->spec_map[1], sizeof kg.spec_map[1]);
     memcpy(kg.spec[1], k->spec[1], sizeof kg.spec[1]);
@@ -2529,7 +2529,7 @@ static VkPipeline mesh_pass_pipeline(replay *r, const module *m, uint32_t n, con
     memcpy(sv, vals, n * sizeof sv[0]);
     nvn_spec_sort(&n, sm, sv);
     nvn_core_leave();
-    VkPipeline p = nvn_pipe_mesh_compute(m->m, n, sm, sv);
+    VkPipeline p = nvn_pipe_mesh_compute(m->id, n, sm, sv);
     if (!p)
         nvn_vk_stop(r, "the host driver cannot make a compute pipeline for %s", m->key);
     return p;
@@ -3062,7 +3062,7 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
     if ((rc = bind_user_textures(r, m, NVN_STAGE_COMPUTE, &n, map, vals)) != RL_OK)
         return rc;
     nvn_spec_sort(&n, map, vals);
-    VkPipeline p = nvn_pipe_compute(m->m, n, map, vals);
+    VkPipeline p = nvn_pipe_compute(m->id, n, map, vals);
     if (!p)
         return nvn_vk_stop(r, "the host driver cannot make a compute pipeline for %s: %s", m->key, nvn_pipe_why());
     nvn_pipe_record_compute(m->key, n, map, vals);
@@ -3191,7 +3191,7 @@ int nvn_cuda_dispatch(replay *r, const char *key, const uint8_t *params, uint32_
     if ((rc = bind_handle_sources(r, m, NVN_STAGE_COMPUTE, c0, sizeof c0)) != RL_OK)
         return rc;
     nvn_spec_sort(&n, map, vals);
-    VkPipeline p = nvn_pipe_compute(m->m, n, map, vals);
+    VkPipeline p = nvn_pipe_compute(m->id, n, map, vals);
     if (!p)
         return nvn_vk_stop(r, "the host driver cannot make a compute pipeline for CUDA kernel %s", m->key);
     nvn_pipe_record_compute(m->key, n, map, vals);

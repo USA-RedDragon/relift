@@ -20,7 +20,8 @@
 
 /** @brief Everything a graphics pipeline is made from. All of it is zero before a draw fills it in. */
 typedef struct nvn_pipe_key {
-    VkShaderModule mods[NVN_STAGES];
+    /** @brief Each stage's module by stable id (nvn_shader_id); the handle is made only while a pipeline is created. */
+    nvn_shader_id mods[NVN_STAGES];
     /** @brief 1 for a native task and mesh pipeline (no vertex input), 2 for the compute back end's draw of a mesh program (the mesh pass layout). */
     uint32_t mesh_mode;
     uint32_t topology;
@@ -125,11 +126,11 @@ bool nvn_pipe_warm_vertex(const nvn_pipe_key *k);
 /** @brief Makes (or waits for) the fragment library of k->mods[1] with k's specialization constants; false without libraries. */
 bool nvn_pipe_warm_fragment(const nvn_pipe_key *k);
 
-/** @brief The compute pipeline of module m with n specialization constants (sorted by id). NULL when the driver refuses. */
-VkPipeline nvn_pipe_compute(VkShaderModule m, uint32_t n, const VkSpecializationMapEntry *map, const uint32_t *vals);
+/** @brief The compute pipeline of module id m with n specialization constants (sorted by id). NULL when the driver refuses. */
+VkPipeline nvn_pipe_compute(nvn_shader_id m, uint32_t n, const VkSpecializationMapEntry *map, const uint32_t *vals);
 
-/** @brief The compute pipeline of mesh pass module m in the mesh pass layout, with n specialization constants (sorted by id). NULL when the driver refuses. */
-VkPipeline nvn_pipe_mesh_compute(VkShaderModule m, uint32_t n, const VkSpecializationMapEntry *map, const uint32_t *vals);
+/** @brief The compute pipeline of mesh pass module id m in the mesh pass layout, with n specialization constants (sorted by id). NULL when the driver refuses. */
+VkPipeline nvn_pipe_mesh_compute(nvn_shader_id m, uint32_t n, const VkSpecializationMapEntry *map, const uint32_t *vals);
 
 /** @brief Sets the dynamic state of graphics pipelines that k's pipeline leaves to the command buffer. */
 void nvn_pipe_set_dynamic(VkCommandBuffer cb, const nvn_pipe_key *k);

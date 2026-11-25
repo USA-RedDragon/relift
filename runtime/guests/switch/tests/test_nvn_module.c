@@ -4,6 +4,7 @@
  * interface records.
  */
 #include "nvn/nvn_module.h"
+#include "nvn/nvn_pipe.h"
 #include "nvn/nvn_priv.h"
 #include "nvn/nvn_vk.h"
 #include "tc.h"
@@ -120,6 +121,62 @@ TEST(nvn_programs_that_read_handles_from_registers_say_so)
     CHECK(reg->register_handles);
     CHECK(!bound->register_handles);
     CHECK_EQ(bound->nrecs, 1u);
+    nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
+}
+
+TEST(nvn_module_handles_are_destroyed_after_their_pipelines_and_remade_on_demand)
+{
+    char dir[PATH_MAX];
+    CHECK(make_scratch(dir));
+    CHECK(write_handle_tables(dir));
+    setenv("RELIFT_NVN_SHADERS", dir, 1);
+    if (!nvn_vk_ready()) {
+        CHECK(!getenv("RELIFT_VK_REQUIRE"));
+        printf("  skipped: no host Vulkan device\n");
+        nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
+        return;
+    }
+    CHECK(nvn_draw_layouts());
+    char key[65], why[256] = "";
+    nvn_module *m[2] = { NULL, NULL };
+    for (int e = 0; e < 2; e++) {
+        for (int i = 0; i < 32; i++)
+            snprintf(key + 2 * i, 3, "%02x", 0xa0 + 0x10 * e + i);
+        m[e] = nvn_module_get(key, (int)NVN_STAGE_COMPUTE, why, sizeof why);
+        CHECK(m[e] != NULL);
+    }
+    if (!m[0] || !m[1]) {
+        nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
+        return;
+    }
+    CHECK(m[0]->id && m[1]->id && m[0]->id != m[1]->id);
+    /* a module nobody used holds a handle until the idle sweep */
+    nvn_module_release_idle();
+    CHECK_EQ(nvn_module_live_handles(), 0u);
+    /* holders share one handle; the last release destroys it, the id stays */
+    VkShaderModule h = nvn_module_acquire(m[0]->id);
+    CHECK(h != NULL);
+    CHECK(nvn_module_acquire(m[0]->id) == h);
+    CHECK_EQ(nvn_module_live_handles(), 1u);
+    nvn_module_release(m[0]->id);
+    CHECK_EQ(nvn_module_live_handles(), 1u);
+    nvn_module_release(m[0]->id);
+    CHECK_EQ(nvn_module_live_handles(), 0u);
+    /* a module the table still names is made again from its SPIR-V when a pipeline needs it */
+    uint64_t made = nvn_module_handles_made();
+    VkSpecializationMapEntry map[1] = { { 0, 0, 4 } };
+    uint32_t vals[1] = { 1 };
+    VkPipeline p = nvn_pipe_compute(m[0]->id, 1, map, vals);
+    CHECK(p != NULL);
+    CHECK_EQ(nvn_module_handles_made(), made + 1);
+    CHECK_EQ(nvn_module_live_handles(), 0u);
+    /* the pipeline exists: asking again makes no module */
+    CHECK(nvn_pipe_compute(m[0]->id, 1, map, vals) == p);
+    CHECK_EQ(nvn_module_handles_made(), made + 1);
+    CHECK_EQ(nvn_module_live_handles(), 0u);
+    /* a second program leaves none live either */
+    CHECK(nvn_pipe_compute(m[1]->id, 1, map, vals) != NULL);
+    CHECK_EQ(nvn_module_live_handles(), 0u);
     nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
 }
 
