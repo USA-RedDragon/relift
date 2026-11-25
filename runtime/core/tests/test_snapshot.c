@@ -13,6 +13,7 @@
 #include <relift/settings.h>
 
 #include <dirent.h>
+#include <ftw.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,11 +52,31 @@ static void guest_end(void *user, const char *dir)
     g_ends++;
 }
 
+static int remove_entry(const char *path, const struct stat *st, int type, struct FTW *ftw)
+{
+    (void)st;
+    (void)type;
+    (void)ftw;
+    return remove(path);
+}
+
+/** @brief Deletes the scratch folder at path, if any. */
+static void remove_tree(const char *path)
+{
+    nftw(path, remove_entry, 8, FTW_DEPTH | FTW_PHYS);
+}
+
+/**
+ * @brief Makes a fresh scratch folder named relift-snapshot-scratch under the build folder (git-ignored, never the
+ * RAM-backed temp dir). Each test runs in its own process and leaves by _exit, so the folder is removed here, at the
+ * start of the next setup, instead of at exit; at most one stays behind.
+ */
 static void setup(void)
 {
-    const char *tmp = getenv("TMPDIR");
-    snprintf(g_root, sizeof g_root, "%s/relift-snapshot-XXXXXX", tmp && *tmp ? tmp : ".");
-    if (!mkdtemp(g_root))
+    mkdir("build", 0777);
+    snprintf(g_root, sizeof g_root, "build/relift-snapshot-scratch");
+    remove_tree(g_root);
+    if (mkdir(g_root, 0777) != 0)
         g_root[0] = 0;
     rl_settings_declare_runtime();
     rl_snapshot_set_root(g_root);
