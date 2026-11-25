@@ -1556,6 +1556,8 @@ void nvn_vk_report_now(uint64_t total);
 void nvn_snapshot_step(uint64_t total);
 /** @brief Registers the layer's snapshot provider (nvn_snapshot.c); once the device is up. */
 void nvn_snapshot_register(void);
+/** @brief The snapshot's phase (nvn_snapshot.c): 0 idle, 1 requested, 2 warm-up present (profile on), 3 reporting, 4 done. */
+int nvn_snapshot_phase(void);
 /** @brief The host's monotonic clock in ns, the one the profile's calibrated GPU times are on. */
 int64_t nvn_gpuprof_now(void);
 /** @brief The batch in slot s is handed to the queue (or the submit thread) now. */

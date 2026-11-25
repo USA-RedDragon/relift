@@ -8,8 +8,9 @@
  *
  * The core's window counts presents where a guest hands one to the presenter, inside this layer's own present; the
  * layer's work needs to run outside its lock, so the hooks only note the request and the step (nvn_snapshot_step,
- * called at the end of nvn_present) does the work: it arms at the first present after the trigger, reports each
- * present of the window, and finishes after the last one. The provider's ready hook keeps the window open until then.
+ * called at the end of nvn_present) does the work: it turns the profile on at the first present after the trigger,
+ * arms the trace and the report at the next (so no reported present has batches recorded without the profile),
+ * reports each present of the window, and finishes after the last one. The provider's ready hook keeps the window open until then.
  */
 #include "gdbstub.h"
 #include "nvn_vk.h"
@@ -31,7 +32,7 @@
 #include <malloc.h>
 #endif
 
-enum { SN_IDLE, SN_REQUESTED, SN_RUNNING, SN_DONE };
+enum { SN_IDLE, SN_REQUESTED, SN_WARM, SN_RUNNING, SN_DONE };
 
 static struct {
     _Atomic int state;
@@ -179,14 +180,14 @@ static void write_holdings(void)
     sn.memory_written = true;
 }
 
-/** @brief Turns the GPU profile, the per-draw timestamps and the call counts on for the window; arms the frame trace. */
-static void arm(uint64_t total)
+/**
+ * @brief Turns the GPU profile, the per-draw timestamps and the call counts on at the first present after the trigger.
+ * That present is a warm-up the window does not report: its batches are recorded with the profile on, and a present's
+ * batches are still running when its report is made, so the first present reported is one whose batches were all
+ * recorded with the profile on and had a present to finish.
+ */
+static void profile_on(void)
 {
-    char path[1300];
-    snprintf(path, sizeof path, "%s/gpu.txt", sn.dir);
-    sn.gpu = fopen(path, "w");
-    snprintf(path, sizeof path, "%s/batches.txt", sn.dir);
-    sn.batches = fopen(path, "w");
     sn.was_profile = rl_setting_bool("gpu.profile");
     const char *d = getenv("RELIFT_GPU_PROFILE_DRAWS");
     sn.old_draws = d ? strdup(d) : NULL;
@@ -197,6 +198,17 @@ static void arm(uint64_t total)
     nvn_gpuprof_reset();
     nvn_vk_count_on = 1;
     nvn_unlock();
+    atomic_store(&sn.state, SN_WARM);
+}
+
+/** @brief Opens the window's files, arms the frame trace and rebases the report on this present. */
+static void arm(uint64_t total)
+{
+    char path[1300];
+    snprintf(path, sizeof path, "%s/gpu.txt", sn.dir);
+    sn.gpu = fopen(path, "w");
+    snprintf(path, sizeof path, "%s/batches.txt", sn.dir);
+    sn.batches = fopen(path, "w");
     /* The frame trace: the next present whole, where the layer keeps its own folder layout (frame-<n>/trace.jsonl). */
     snprintf(path, sizeof path, "%s/trace", sn.dir);
     sn.trace_from = g.presents + 1;
@@ -252,6 +264,10 @@ void nvn_snapshot_step(uint64_t total)
     if (s == SN_IDLE || s == SN_DONE)
         return;
     if (s == SN_REQUESTED) {
+        profile_on();
+        return;
+    }
+    if (s == SN_WARM) {
         arm(total);
         return;
     }
@@ -269,7 +285,7 @@ static void snap_end(void *user, const char *dir)
 {
     (void)user, (void)dir;
     int s = atomic_load(&sn.state);
-    if (s == SN_REQUESTED) {
+    if (s == SN_REQUESTED || s == SN_WARM) {
         /* The layer never saw a present of the window (no NVN presents): nothing was armed. */
         atomic_store(&sn.state, SN_IDLE);
         return;
@@ -295,6 +311,8 @@ static void snap_end(void *user, const char *dir)
     atomic_store(&sn.state, SN_IDLE);
 }
 
+int nvn_snapshot_phase(void) { return atomic_load(&sn.state); }
+
 void nvn_snapshot_register(void)
 {
     rl_snapshot_provider p = { .name = "nvn", .begin = snap_begin, .ready = snap_ready, .end = snap_end };
@@ -303,6 +321,7 @@ void nvn_snapshot_register(void)
 
 #else
 
+int nvn_snapshot_phase(void) { return 0; }
 void nvn_snapshot_step(uint64_t total) { (void)total; }
 void nvn_snapshot_register(void) {}
 

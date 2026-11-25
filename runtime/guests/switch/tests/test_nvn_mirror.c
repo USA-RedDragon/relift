@@ -7,6 +7,8 @@
 #include "nvn/nvn_priv.h"
 #include "nvn/nvn_vk.h"
 #include "nvn/nvn_watch.h"
+#include "gdbstub.h"
+#include "snapshot.h"
 #include "tc.h"
 
 #include <relift/settings.h>
@@ -1201,6 +1203,41 @@ TEST(nvn_gpu_profile_draws_two_names_the_vertex_count_too)
     rl_settings_set("gpu.profile", "false");
     nvn_gpuprof_reset();
 }
+
+#if defined(RL_DEBUG_STUB)
+TEST(nvn_snapshot_turns_the_profile_on_one_present_before_it_reports)
+{
+    t_boot(NULL);
+    bool up = have_device();
+    CHECK(up || !getenv("RELIFT_VK_REQUIRE"));
+    if (!up)
+        return;
+    nvn_snapshot_register();
+    const char *dir = getenv("RELIFT_SDMC");
+    CHECK(dir != NULL);
+    rl_snapshot_set_root(dir);
+    CHECK_EQ(rl_settings_set("gpu.profile", "false"), RL_SETTING_OK);
+    CHECK_EQ(rl_settings_set("debug.snapshot", "3"), RL_SETTING_OK);
+    rl_snapshot_request();
+    rl_snapshot_present();
+    CHECK_EQ(nvn_snapshot_phase(), 1);
+    /* The first step after the trigger turns the profile on and reports nothing; the next arms the report. */
+    nvn_snapshot_step(1);
+    CHECK_EQ(nvn_snapshot_phase(), 2);
+    CHECK(rl_setting_bool("gpu.profile"));
+    nvn_snapshot_step(2);
+    CHECK_EQ(nvn_snapshot_phase(), 3);
+    for (uint64_t n = 3; n < 8 && nvn_snapshot_phase() == 3; n++) {
+        rl_snapshot_present();
+        nvn_snapshot_step(n);
+    }
+    for (int k = 0; k < 8 && rl_snapshot_active(); k++)
+        rl_snapshot_present();
+    CHECK(!rl_snapshot_active());
+    CHECK(!rl_setting_bool("gpu.profile"));
+    rl_snapshot_set_root(NULL);
+}
+#endif
 
 TEST(nvn_gpu_profile_parts_add_up_to_each_batch_span)
 {
