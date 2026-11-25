@@ -626,6 +626,7 @@ TEST(nvn_texset_a_bank_handle_rebound_while_an_earlier_batch_uses_it_gets_a_new_
         return;
     }
     uint64_t fl0, free0, fl, fr, taken0, exh0, taken, exh;
+    uint32_t high, size;
     uint32_t s1, s2, s3, kind, dim;
     c.x[1] = 31;
     c.x[3] = 0;
@@ -634,7 +635,7 @@ TEST(nvn_texset_a_bank_handle_rebound_while_an_earlier_batch_uses_it_gets_a_new_
     CHECK_EQ(nvn_texset_bind(&r, 31u, &kind, &dim, &s1), RL_OK);
     nvn_texset_uses_recorded();
     nvn_texset_rebinds(&fl0, &free0);
-    nvn_texset_ring_stats(&taken0, &exh0);
+    nvn_texset_ring_stats(&taken0, &exh0, &high, &size);
     vimg *ia = nvn_texset_slot_image(s1);
     CHECK(ia != NULL);
     /* another texture under the same id while the batch that bound the first is not finished: a new slot, no wait */
@@ -646,7 +647,8 @@ TEST(nvn_texset_a_bank_handle_rebound_while_an_earlier_batch_uses_it_gets_a_new_
     CHECK(s2 != s1);
     nvn_texset_rebinds(&fl, &fr);
     CHECK_EQ(fl, fl0);
-    nvn_texset_ring_stats(&taken, &exh);
+    nvn_texset_ring_stats(&taken, &exh, &high, &size);
+    CHECK(high <= size);
     CHECK_EQ(taken, taken0 + 1);
     CHECK_EQ(exh, exh0);
     /* what the first batch reads is untouched: slot s1 still holds the first image */

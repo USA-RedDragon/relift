@@ -102,6 +102,8 @@ static struct {
     uint64_t *slot_seq;
     uint32_t *dyn_of, *ring_owner;
     uint64_t ring_taken, ring_exhausted;
+    /** @brief The most ring slots held by unfinished batches at once, sampled at every 8th take, since the last nvn_texset_ring_stats. */
+    uint32_t ring_high;
     /** @brief The bind now being made reads its handle from a bank (nvn_texset_bind, nvn_texset_separate_texture): it may take a ring slot. */
     bool dynamic;
     /** @brief The kind of each texture id's bound view (its format's sampled type). */
@@ -780,7 +782,13 @@ static uint32_t ring_take(replay *r)
             if (t.ring_owner[sl])
                 t.dyn_of[t.ring_owner[sl] - 1] = 0;
             t.ring_owner[sl] = 0;
-            t.ring_taken++;
+            if ((t.ring_taken++ & 7u) == 0) {
+                uint32_t held = 0;
+                for (uint32_t k = 0; k < t.ring_n; k++)
+                    held += t.slot_seq[t.ring_lo + k] > finished;
+                if (held > t.ring_high)
+                    t.ring_high = held;
+            }
             return sl;
         }
         if (pass == 0) {
@@ -794,10 +802,13 @@ static uint32_t ring_take(replay *r)
 
 vimg *nvn_texset_slot_image(uint32_t slot) { return t.ok && slot < t.ntex ? t.tex_img[slot] : NULL; }
 
-void nvn_texset_ring_stats(uint64_t *taken, uint64_t *exhausted)
+void nvn_texset_ring_stats(uint64_t *taken, uint64_t *exhausted, uint32_t *high_water, uint32_t *size)
 {
     *taken = t.ring_taken;
     *exhausted = t.ring_exhausted;
+    *high_water = t.ring_high;
+    *size = t.ring_n;
+    t.ring_high = 0;
 }
 
 static int slot_for(replay *r, uint32_t id, bool image, uint32_t *slot)
@@ -1030,8 +1041,6 @@ static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_
         *slot = sl;
         t.dyn_of[id] = sl + 1;
         t.ring_owner[sl] = id + 1;
-        if (t.tex_img[sl])
-            t.why_texture++;
         t.tex_img[sl] = NULL;
         t.tex_guest[sl] = 0;
         t.img_done[sl] = false;

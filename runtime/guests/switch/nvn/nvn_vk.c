@@ -7062,9 +7062,12 @@ static void present_rate(uint64_t total)
         rl_log(RL_LOG_INFO, "nvn", "texture slot rewrites: %llu waited for the device, %llu did not (no unfinished work used the slot)",
                (unsigned long long)rb_flushed, (unsigned long long)rb_free);
         uint64_t ring_taken, ring_exh;
-        nvn_texset_ring_stats(&ring_taken, &ring_exh);
-        rl_log(RL_LOG_INFO, "nvn", "texture slot ring: %llu slots handed out, %llu times all in use by unfinished batches",
-               (unsigned long long)ring_taken, (unsigned long long)ring_exh);
+        uint32_t ring_high, ring_size;
+        nvn_texset_ring_stats(&ring_taken, &ring_exh, &ring_high, &ring_size);
+        rl_log(RL_LOG_INFO, "nvn",
+               "texture slot ring: %llu bank rewrites so far, %llu times all %u slots were in use by unfinished batches, "
+               "at most %u held at once since the last line",
+               (unsigned long long)ring_taken, (unsigned long long)ring_exh, ring_size, ring_high);
         uint64_t why_t, why_v, why_i, distinct;
         nvn_texset_rewrite_report(&why_t, &why_v, &why_i, &distinct);
         rl_log(RL_LOG_INFO, "nvn", "texture slot rewrites by cause: %llu other texture, %llu other view, %llu other host image; %llu distinct slots since the last line",

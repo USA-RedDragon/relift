@@ -1502,8 +1502,8 @@ void nvn_texset_image_gone(const vimg *v);
 void nvn_texset_uses_recorded(void);
 /** @brief How many slot rewrites waited for the device and how many did not because no unfinished work used the slot. */
 void nvn_texset_rebinds(uint64_t *flushed, uint64_t *free_of_wait);
-/** @brief The slots the bank-bind ring handed out since the start, and the times every one was in use by an unfinished batch (the device was waited for). */
-void nvn_texset_ring_stats(uint64_t *taken, uint64_t *exhausted);
+/** @brief The slots the bank-bind ring handed out since the start (each one a descriptor rewrite for a bank-named texture), the times every one was in use by an unfinished batch (the device was waited for), the most held by unfinished batches at once since the last call, and the ring size. */
+void nvn_texset_ring_stats(uint64_t *taken, uint64_t *exhausted, uint32_t *high_water, uint32_t *size);
 /** @brief The host image a texture slot holds (NULL: none); for tests. */
 vimg *nvn_texset_slot_image(uint32_t slot);
 /**
