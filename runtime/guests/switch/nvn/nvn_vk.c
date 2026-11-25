@@ -2362,6 +2362,20 @@ bool nvn_vk_recording(void) { return g_recording; }
 
 void nvn_vk_assume_recording(bool on) { g_recording = on; }
 
+/** @brief When the batch being recorded began (host clock, ns); chunked submission measures its age from here. */
+static int64_t g_batch_t0;
+
+/** @brief RELIFT_NVN_CHUNK_MS=<ms> (default 0, off): a command set's batch is submitted at the first render-pass boundary after it has recorded for this long, so the GPU starts a big set's work while the replay goes on. */
+static int64_t chunk_ns(void)
+{
+    static int64_t v = -1;
+    if (v < 0) {
+        const char *e = getenv("RELIFT_NVN_CHUNK_MS");
+        v = e ? (int64_t)(atof(e) * 1e6) : 0;
+    }
+    return v;
+}
+
 bool nvn_vk_begin(replay *r)
 {
     (void)r;
@@ -2376,6 +2390,7 @@ bool nvn_vk_begin(replay *r)
     if (VK(vkResetCommandBuffer)(g.cb, 0) != VK_SUCCESS || VK(vkBeginCommandBuffer)(g.cb, &bi) != VK_SUCCESS)
         return false;
     g_recording = true;
+    g_batch_t0 = now_ns();
     if (!gpu_ts.pool && !gpu_ts.failed && gpu_ts.period_ns > 0) {
         VkQueryPoolCreateInfo qi = { .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
                                      .queryType = VK_QUERY_TYPE_TIMESTAMP,
@@ -6272,6 +6287,9 @@ static int sched_exec(void *user, const nvn_cmd *e, const nvn_cmdset *s)
     int rc = run_cmd(r, e);
     if (nvn_trace_active)
         nvn_trace_command(r, e, true);
+    if (rc == RL_OK && g_recording && !open_pass.open && !open_cs.open && chunk_ns() > 0 &&
+        now_ns() - g_batch_t0 >= chunk_ns() && !nvn_vk_submit(r))
+        rc = nvn_vk_stop(r, "the host device failed a chunk submit after %s", nvn_cmd_name(e->op));
     if (rc == RL_OK && sync_each_command() && !nvn_vk_flush(r)) {
         rl_log(RL_LOG_ERROR, "nvn", "the host device failed after %s; last %s", nvn_cmd_name(e->op), nvn_draw_last());
         if (gpu_trace)
