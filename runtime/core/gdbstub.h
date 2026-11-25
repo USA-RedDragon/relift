@@ -1,5 +1,6 @@
 /**
  * @file gdbstub.h
+ * docgen:region overview
  * @brief A GDB remote-protocol server for guest state: gdb or lldb attach over
  * TCP and see guest threads, guest registers and guest memory by guest address
  * (.work/design/debug-stub.md). The core owns the protocol and the stop; a CPU
@@ -12,6 +13,7 @@
  * unless RL_NO_DEBUG_STUB is, which relift build sets for every player package
  * (an AppImage, a signed .app, an iOS app, a release-signed APK). Elsewhere
  * every call is an empty inline and the server is not in the program.
+ * docgen:end
  */
 #ifndef RELIFT_GDBSTUB_H
 #define RELIFT_GDBSTUB_H

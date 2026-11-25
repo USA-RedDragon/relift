@@ -1,5 +1,6 @@
 /**
  * @file gdb.c
+ * docgen:region registers
  * @brief The A64 registers for the GDB server (core/gdbstub.h), in gdb's own
  * aarch64 numbering: x0 to x30 (0 to 30), sp (31), pc (32), cpsr (33), v0 to v31
  * (34 to 65), fpsr (66), fpcr (67), and the read-only thread pointers tpidr_el0
@@ -8,6 +9,7 @@
  * pc is the guest address the context names: a system call's own address
  * (rl_svc_site) at a system call, the callee at an indirect call. NZCV is stored
  * only where docs/abi.md says, so cpsr can be stale.
+ * docgen:end
  */
 #include "arm64.h"
 

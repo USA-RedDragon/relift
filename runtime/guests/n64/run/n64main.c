@@ -512,6 +512,7 @@ int rl_n64_main(const rl_n64_program *p, int argc, char **argv)
     }
     H.run.dump = H.dump;
 #ifdef RL_N64_TRACE
+    /* RELIFT_N64_TRACE=<file>: a development trace of the first VI frame and cycle of every lifted call site, written to the file (in the build with RL_N64_TRACE). */
     const char *trace = getenv("RELIFT_N64_TRACE");
     if (trace && *trace)
         rl_n64_trace_calls(trace);

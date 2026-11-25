@@ -742,8 +742,10 @@ static void key_event(const SDL_Event *e)
         }
         return;
     }
+    /* docgen:region snapshot-key */
     if (e->key.scancode == SDL_SCANCODE_F12 && e->key.down && !e->key.repeat)
         rl_snapshot_request();
+    /* docgen:end */
     unsigned sc = (unsigned)e->key.scancode;
     if (sc >= 256)
         return;
@@ -797,11 +799,13 @@ static void publish(void)
         for (size_t b = 0; b < sizeof g_buttons / sizeof g_buttons[0]; b++)
             if (SDL_GetGamepadButton(g, g_buttons[b].sdl))
                 p->buttons |= 1u << g_buttons[b].rl;
+        /* docgen:region snapshot-chord */
         /* The diagnostic snapshot's chord: Minus held, then a click of the right stick. */
         bool chord = SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_BACK) && SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_RIGHT_STICK);
         if (chord && !g_chord[i])
             rl_snapshot_request();
         g_chord[i] = chord;
+        /* docgen:end */
         if (SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 16384)
             p->buttons |= 1u << RL_BTN_LEFT_TRIGGER;
         if (SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 16384)

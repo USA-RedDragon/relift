@@ -1,5 +1,6 @@
 /**
  * @file gdbstub.c
+ * docgen:region stops
  * @brief The GDB remote-protocol server (gdbstub.h, .work/design/debug-stub.md).
  *
  * All-stop. On attach and on an interrupt from the debugger, rl_gdb_stopping is
@@ -16,6 +17,7 @@
  * (the thread list says which). Memory is guest memory by guest address, read and
  * written as the kernel does (rl_vm_kernel_read and rl_vm_kernel_write), so a
  * page the guest cannot touch answers an error instead of faulting.
+ * docgen:end
  */
 #include "gdbstub.h"
 

@@ -1,3 +1,4 @@
+// docgen:region overview
 //! SPIR-V debug info (`Options::debug_info`): NonSemantic.Shader.DebugInfo.100
 //! whose source is the guest program's disassembly, one line per
 //! instruction (`/*pc*/ text ;`, line n for the instruction at byte
@@ -7,6 +8,7 @@
 //! `UP0`..`UP6`. RenderDoc's shader debugger then steps the guest program
 //! with the values of a capture. Programs on the software warp path get
 //! lines but no register values (each lane's registers are an array).
+// docgen:end
 
 use super::Ctx;
 use crate::spirv::{inst, op, str_words};

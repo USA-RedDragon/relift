@@ -379,6 +379,7 @@ static rl_audio_out *tap_open(const rl_audio_backend *b, uint32_t rate, uint32_t
     t->paused = true;
     t->min_queued = UINT32_MAX;
     t->opened_ns = t->last_report_ns = rl_clock_ns();
+    /* RELIFT_AUDIO_STATS=1 (anything but empty or 0): logs each stream's rate, frames written, underruns, drops and queue depth periodically. */
     const char *e = getenv("RELIFT_AUDIO_STATS");
     t->report = e && *e && strcmp(e, "0") != 0;
     const char *w = getenv("RELIFT_AUDIO_WAV");

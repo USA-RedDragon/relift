@@ -1,5 +1,6 @@
 /**
  * @file snapshot.h
+ * docgen:region overview
  * @brief The diagnostic snapshot, a complement to the GDB server for a development build: one trigger writes one
  * folder that says what the process held and did around that moment, without stopping it.
  *
@@ -18,6 +19,7 @@
  * is preloaded), threads_host.txt (every host thread and what it waits in). A guest registers a provider for its own
  * parts (a guest layer: guest threads, NVN batches, the GPU profile, a frame trace, the holdings of the
  * Vulkan layer); the core knows no guest, CPU or GPU concept.
+ * docgen:end
  */
 #ifndef RELIFT_CORE_SNAPSHOT_H
 #define RELIFT_CORE_SNAPSHOT_H

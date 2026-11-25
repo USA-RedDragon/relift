@@ -243,6 +243,7 @@ picture the game makes itself; no image is scaled by relift",
         .max_float = 1.0,
         .step_float = 0.05,
     },
+    /* docgen:region debug-settings */
     {
         .key = "renderdoc.capture",
         .type = RL_SETTING_STRING,
@@ -315,6 +316,7 @@ picture the game makes itself; no image is scaled by relift",
         .min_int = 0,
         .max_int = 600,
     },
+    /* docgen:end */
     {
         .key = "text_entry.text",
         .type = RL_SETTING_STRING,

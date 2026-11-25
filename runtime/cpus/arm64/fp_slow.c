@@ -751,6 +751,7 @@ static void stat_count(uint32_t insn, uint32_t fpcr)
 {
     int on = atomic_load_explicit(&g_stat_on, memory_order_relaxed);
     if (on < 0) {
+        /* RELIFT_FP_SLOW_STATS (set to any value): counts the floating point instructions that take the slow exact path and prints the 16 most called, with their FPCR, at exit and every 16 million calls. */
         on = getenv("RELIFT_FP_SLOW_STATS") != NULL;
         atomic_store(&g_stat_on, on);
         if (on)

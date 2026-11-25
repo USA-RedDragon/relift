@@ -493,6 +493,7 @@ void nvn_trace_present(replay *r)
         tr.parsed = true;
         if (!nvn_trace_parse(getenv("RELIFT_NVN_TRACE"), tr.dir, sizeof tr.dir, &tr.from, &tr.frames))
             tr.from = UINT64_MAX;
+        /* RELIFT_NVN_TRACE_GBUFFER (set to any value): with RELIFT_NVN_TRACE, trace only the presents whose frame drew a wide-target pass (the G-buffer pass of a deferred renderer). */
         tr.gbuffer = getenv("RELIFT_NVN_TRACE_GBUFFER") != NULL;
         const char *w = getenv("RELIFT_NVN_TRACE_WATCH");
         char *end = NULL;

@@ -176,8 +176,10 @@ bool nvn_diff_on(void)
     df.dir[n] = 0;
     df.zband = strstr(det, "zband") != NULL;
     df.jump = strstr(det, "jump") != NULL;
+    /* RELIFT_NVN_DIFF_MIB=<n>: the arena that keeps each of the last two frames' dispatch inputs, in MiB (default 1536). */
     const char *mib = getenv("RELIFT_NVN_DIFF_MIB");
     df.budget = (mib && atoll(mib) > 0 ? (uint64_t)atoll(mib) : 1536ull) << 20;
+    /* RELIFT_NVN_DIFF_MAX=<n>: the most captures one run saves (default 3). */
     const char *mx = getenv("RELIFT_NVN_DIFF_MAX");
     df.max_saves = mx && atoi(mx) > 0 ? (uint32_t)atoi(mx) : 3u;
     const char *keys = getenv("RELIFT_NVN_DIFF_KEYS");

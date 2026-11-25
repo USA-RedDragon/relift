@@ -1,11 +1,13 @@
 /**
  * @file nvn_label.c
+ * docgen:region overview
  * @brief Debug labels and object names for a capture tool (RenderDoc): with VK_EXT_debug_utils on (the core turns it
  * on only when a capture tool is in the process, rlvk_dev.debug_utils), each draw and dispatch the layer replays gets
  * a label that names the guest command (its command set and index in the set, as the game recorded it) and the
  * programs it runs, and each host image made for a guest texture or render target gets a name with its guest GPU
  * address, format and size. A capture then lists the draws as the game issued them and the images by the game's own
  * addresses. Without the extension every call returns at once.
+ * docgen:end
  */
 #include "nvn_vk.h"
 #include "vkdev.h"
