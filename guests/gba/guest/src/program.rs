@@ -155,8 +155,131 @@ fn landings(
 
 type Lifts = Vec<(u64, Result<Block, LiftFailure>, u64)>;
 
-/// A function to emit: entry, instructions, span and jump tables.
-type Lifting = (Loc, Lifts, u64, BTreeMap<u64, Vec<u64>>);
+/// A function to emit: entry, instructions, span, jump tables and the
+/// functions it holds as more entries ([`absorb`]).
+type Lifting = (
+    Loc,
+    Lifts,
+    u64,
+    BTreeMap<u64, Vec<u64>>,
+    BTreeMap<u64, String>,
+);
+
+/// A function the analysis found, with its layer ([`lift`]).
+struct Planned<'a> {
+    entry: Loc,
+    f: &'a relift_gba_analyze::Function,
+    layer: usize,
+}
+
+/// Gives the functions in RAM their layers: the functions of one copy in
+/// one state share a layer, the lowest in which no copy that has a function
+/// at one of the same addresses is (a unit holds one function per address).
+/// Layering by address instead would put the functions of one copy in as
+/// many layers as other copies overlap it at some address, and nothing
+/// could be held in another function of its copy.
+fn color(plan: &mut [Planned<'_>]) {
+    type Node = (Option<u16>, bool);
+    let mut at: BTreeMap<u32, Vec<(Option<u16>, bool)>> = BTreeMap::new();
+    for p in plan
+        .iter()
+        .filter(|p| crate::frontend::in_ram(p.entry.addr))
+    {
+        let v = at.entry(p.entry.addr).or_default();
+        let node = (p.entry.copy, p.entry.thumb);
+        if !v.contains(&node) {
+            v.push(node);
+        }
+    }
+    let mut conflicts: BTreeMap<Node, BTreeSet<Node>> = BTreeMap::new();
+    for nodes in at.values() {
+        for a in nodes {
+            for b in nodes {
+                if a != b {
+                    conflicts.entry(*a).or_default().insert(*b);
+                }
+            }
+        }
+    }
+    let mut layer: BTreeMap<Node, usize> = BTreeMap::new();
+    for p in plan
+        .iter()
+        .filter(|p| crate::frontend::in_ram(p.entry.addr))
+    {
+        let node = (p.entry.copy, p.entry.thumb);
+        if layer.contains_key(&node) {
+            continue;
+        }
+        let used: BTreeSet<usize> = conflicts
+            .get(&node)
+            .into_iter()
+            .flatten()
+            .filter_map(|n| layer.get(n).copied())
+            .collect();
+        layer.insert(node, (0..).find(|k| !used.contains(k)).unwrap_or(0));
+    }
+    for p in plan.iter_mut() {
+        if let Some(k) = layer.get(&(p.entry.copy, p.entry.thumb)) {
+            p.layer = *k;
+        }
+    }
+}
+
+/// The jump targets a function gives by instruction: its tables and its
+/// tail and pointer transfers.
+fn transfers(f: &relift_gba_analyze::Function) -> BTreeSet<(u32, u32)> {
+    let tables = f
+        .tables
+        .iter()
+        .flat_map(|t| t.targets.iter().map(|x| (t.site.addr, x.addr)));
+    let edges = f
+        .edges
+        .iter()
+        .filter(|e| matches!(e.kind, EdgeKind::Tail | EdgeKind::Pointer))
+        .map(|e| (e.site.addr, e.target.addr));
+    tables.chain(edges).collect()
+}
+
+/// The functions in RAM that another one in the same layer and copy holds
+/// whole, by index into `plan`: a function found at an entry inside another
+/// one's instructions, with only instructions and jump targets that one has
+/// too, is lifted once, in the larger one, which enters at both addresses.
+/// Discovery makes an entry of each instruction of code a store may
+/// rewrite, and each entry's function runs on to the end of the straight
+/// code after it, so without this the instructions lifted grow with the
+/// square of the length of such code.
+fn absorb(plan: &[Planned<'_>]) -> Vec<Option<usize>> {
+    let mut owner = vec![None; plan.len()];
+    let mut groups: BTreeMap<(usize, Option<u16>, bool), Vec<usize>> = BTreeMap::new();
+    for (i, p) in plan.iter().enumerate() {
+        if p.entry.copy.is_some() {
+            groups
+                .entry((p.layer, p.entry.copy, p.entry.thumb))
+                .or_default()
+                .push(i);
+        }
+    }
+    for mut group in groups.into_values() {
+        group.sort_by_key(|&i| std::cmp::Reverse(plan[i].f.instructions.len()));
+        let mut roots: Vec<usize> = Vec::new();
+        for i in group {
+            let b = plan[i].f;
+            let holder = roots.iter().copied().find(|&r| {
+                let a = plan[r].f;
+                a.instructions.contains_key(&plan[i].entry)
+                    && b.instructions
+                        .keys()
+                        .all(|l| a.instructions.contains_key(l))
+                    && transfers(b).is_subset(&transfers(a))
+            });
+            match holder {
+                Some(r) => owner[i] = Some(r),
+                None => roots.push(i),
+            }
+        }
+    }
+    owner
+}
 
 /// Lifts every function of `report` (the analysis of `rom`) into one unit
 /// and emits it; `image_id` identifies the ROM to the runtime.
@@ -175,6 +298,7 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
     let mut lifted: Vec<(usize, Lifting)> = Vec::new();
     let mut ram = Vec::new();
     let mut instructions = BTreeSet::new();
+    let mut absorbed = 0usize;
     let rewrite = |l: Loc| {
         l.copy
             .and_then(|c| report.copies.get(usize::from(c)))
@@ -182,6 +306,7 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
     };
     let mut order: Vec<(&Loc, &relift_gba_analyze::Function)> = report.functions.iter().collect();
     order.sort_by_key(|(l, _)| rewrite(**l));
+    let mut plan: Vec<Planned<'_>> = Vec::new();
     for (entry, f) in order {
         if f.instructions.is_empty() || !matches!(entry.addr >> 24, 0x02 | 0x03 | 0x08..=0x0D) {
             continue;
@@ -198,13 +323,17 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
         } else {
             None
         };
-        let layer = layers.entry(entry.addr).or_insert(0);
-        if *layer > 0 && !in_ram {
-            shadowed.push(*entry);
-            continue;
-        }
-        let k = *layer;
-        *layer += 1;
+        let k = if in_ram {
+            0
+        } else {
+            let layer = layers.entry(entry.addr).or_insert(0);
+            if *layer > 0 {
+                shadowed.push(*entry);
+                continue;
+            }
+            *layer += 1;
+            0
+        };
         if let Some(unit) = first {
             ram.push(RamEntry {
                 at: entry.addr | u32::from(entry.thumb),
@@ -212,6 +341,26 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
                 name: host_name(*entry),
             });
         }
+        plan.push(Planned {
+            entry: *entry,
+            f,
+            layer: k,
+        });
+    }
+    color(&mut plan);
+    let owner = absorb(&plan);
+    for (i, p) in plan.iter().enumerate() {
+        let (entry, f, k) = (&p.entry, p.f, p.layer);
+        if owner[i].is_some() {
+            continue;
+        }
+        let more: BTreeMap<u64, String> = plan
+            .iter()
+            .zip(&owner)
+            .filter(|(_, o)| **o == Some(i))
+            .map(|(b, _)| (u64::from(b.entry.addr), host_name(b.entry)))
+            .collect();
+        absorbed += more.len();
         let mut blocks: BTreeMap<u64, (Result<Block, LiftFailure>, u64)> = BTreeMap::new();
         let mut end = u64::from(entry.addr);
         for &l in f.instructions.keys() {
@@ -269,13 +418,22 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
                 blocks.into_iter().map(|(pc, (r, w))| (pc, r, w)).collect(),
                 span,
                 tables,
+                more,
             ),
         ));
     }
     ram.sort();
     let layer_count = lifted.iter().map(|(k, _)| k + 1).max().unwrap_or(1);
     let mut outputs = (0..layer_count).map(|k| {
-        let fns = functions(lifted.iter().filter(|(l, _)| *l == k).map(|(_, f)| f));
+        let mut layer: Vec<&Lifting> = lifted
+            .iter()
+            .filter(|(l, _)| *l == k)
+            .map(|(_, f)| f)
+            .collect();
+        // The emitter's function maps need the entries in address order; the
+        // functions of the copies come after those of the ROM in `lifted`.
+        layer.sort_by_key(|f| (f.0.addr, f.0.thumb, f.0.copy));
+        let fns = functions(layer.into_iter());
         let opts = Options {
             unit_name: if k == 0 {
                 "rom".into()
@@ -297,7 +455,7 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
     let variants: Vec<(usize, Output)> = outputs.collect();
     Lifted {
         output,
-        functions: functions + variants.iter().map(|v| v.0).sum::<usize>(),
+        functions: functions + absorbed + variants.iter().map(|v| v.0).sum::<usize>(),
         variants: variants.into_iter().map(|v| v.1).collect(),
         ram,
         instructions: instructions.len(),
@@ -309,7 +467,7 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
 /// The functions to emit for `lifted`.
 fn functions<'a>(lifted: impl Iterator<Item = &'a Lifting>) -> Vec<Function<'a>> {
     lifted
-        .map(|(entry, l, span, tables)| Function {
+        .map(|(entry, l, span, tables, more)| Function {
             entry: u64::from(entry.addr),
             name: host_name(*entry),
             guest_name: None,
@@ -327,7 +485,7 @@ fn functions<'a>(lifted: impl Iterator<Item = &'a Lifting>) -> Vec<Function<'a>>
             tables: tables.clone(),
             guesses: Default::default(),
             pads: BTreeSet::new(),
-            entries: BTreeMap::new(),
+            entries: more.clone(),
         })
         .collect()
 }
@@ -509,6 +667,55 @@ mod tests {
         );
         let tables = BTreeMap::from([(u64::from(base), vec![u64::from(base) + 4])]);
         assert!(landings(&blocks, base, &tables).is_empty());
+    }
+
+    fn ram_function(entry: u32, last: u32, copy: u16) -> (Loc, relift_gba_analyze::Function) {
+        let at = |a: u32| Loc {
+            addr: a,
+            thumb: false,
+            copy: Some(copy),
+        };
+        let f = relift_gba_analyze::Function {
+            entry: at(entry),
+            origin: relift_gba_analyze::Origin::Rewritten,
+            instructions: (entry..=last).step_by(4).map(|a| (at(a), 4)).collect(),
+            edges: Vec::new(),
+            tables: Vec::new(),
+            returns: true,
+            linked: BTreeSet::new(),
+        };
+        (at(entry), f)
+    }
+
+    /// Code in RAM that a store may rewrite has an entry at each
+    /// instruction, and each entry's function runs on to the end: the
+    /// functions that another holds whole are lifted in it, so the work
+    /// stays linear in the length of the code.
+    #[test]
+    fn functions_inside_another_in_the_same_copy_are_absorbed() {
+        let base = 0x0200_0000u32;
+        let n = 500u32;
+        let mut fns: Vec<(Loc, relift_gba_analyze::Function)> = (0..n)
+            .map(|i| ram_function(base + 4 * i, base + 4 * (n - 1), 3))
+            .collect();
+        fns.push(ram_function(base + 4 * n, base + 4 * n + 8, 3));
+        fns.push(ram_function(base + 0x40, base + 4 * (n - 1), 4));
+        let plan: Vec<Planned<'_>> = fns
+            .iter()
+            .map(|(l, f)| Planned {
+                entry: *l,
+                f,
+                layer: 0,
+            })
+            .collect();
+        let owner = absorb(&plan);
+        let roots: Vec<usize> = (0..plan.len()).filter(|&i| owner[i].is_none()).collect();
+        let total: usize = roots.iter().map(|&i| plan[i].f.instructions.len()).sum();
+        // The first entry holds the others of its copy that its code
+        // covers; the function after it and the other copy's stay apart.
+        assert_eq!(roots, [0, 500, 501], "{owner:?}");
+        assert!(owner[1..500].iter().all(|o| *o == Some(0)), "{owner:?}");
+        assert_eq!(total, 500 + 3 + 484, "{total} instructions lifted");
     }
 
     #[test]

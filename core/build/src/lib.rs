@@ -61,12 +61,47 @@ pub fn compile_memory(source_bytes: u64) -> u64 {
 }
 
 /// The memory the system can give new processes now (`MemAvailable` on
-/// Linux), or `None` where it is not known.
+/// Linux), or `None` where it is not known. On Linux a cgroup limit on this
+/// process or one of its parents (a service or `systemd-run` scope with
+/// `MemoryMax`) lowers it to what is left under that limit, so the compiles
+/// are sized to the memory the build may use, not the whole machine's.
 pub fn available_memory() -> Option<u64> {
     let t = std::fs::read_to_string("/proc/meminfo").ok()?;
     let line = t.lines().find(|l| l.starts_with("MemAvailable:"))?;
     let kb: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
-    Some(kb.saturating_mul(1024))
+    let machine = kb.saturating_mul(1024);
+    Some(cgroup_room().map_or(machine, |r| r.min(machine)))
+}
+
+/// What is left under the tightest memory limit of this process's cgroup
+/// and its parents (cgroup v2), or `None` with no limit.
+fn cgroup_room() -> Option<u64> {
+    let own = std::fs::read_to_string("/proc/self/cgroup").ok()?;
+    let rel = own.lines().find_map(|l| l.strip_prefix("0::"))?;
+    let root = Path::new("/sys/fs/cgroup");
+    let mut dir = root.join(rel.trim_start_matches('/'));
+    let mut room: Option<u64> = None;
+    loop {
+        let max = std::fs::read_to_string(dir.join("memory.max")).ok();
+        let current = std::fs::read_to_string(dir.join("memory.current")).ok();
+        if let (Some(max), Some(current)) = (max, current)
+            && let Some(r) = limit_room(&max, &current)
+        {
+            room = Some(room.map_or(r, |o| o.min(r)));
+        }
+        if dir == root || !dir.pop() {
+            break;
+        }
+    }
+    room
+}
+
+/// The bytes left under a cgroup's `memory.max` given its `memory.current`;
+/// `None` for no limit (`max`) or unreadable values.
+fn limit_room(max: &str, current: &str) -> Option<u64> {
+    let max: u64 = max.trim().parse().ok()?;
+    let current: u64 = current.trim().parse().ok()?;
+    Some(max.saturating_sub(current))
 }
 
 /// One stage of a [`Schedule`]: compiles that run in a pool together.
@@ -728,6 +763,13 @@ pub fn find_tool(name: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cgroup_limit_leaves_its_limit_less_what_it_holds() {
+        assert_eq!(limit_room("8589934592\n", "1073741824\n"), Some(7 << 30));
+        assert_eq!(limit_room("1000", "2000"), Some(0));
+        assert_eq!(limit_room("max\n", "2000"), None);
+    }
 
     fn plan() -> Plan {
         Plan {
