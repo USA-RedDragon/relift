@@ -55,7 +55,7 @@ static struct {
     /** @brief The window is open (read without the lock by rl_snapshot_active). */
     _Atomic int active;
     uint32_t window, seen;
-    uint64_t present_no, started_ns;
+    uint64_t trigger_no, present_no, started_ns;
     _Atomic uint64_t presents, last_poll_ns;
     char dir[1100], last_dir[1100], root[1024];
     file_note files[MAX_FILES];
@@ -157,7 +157,7 @@ static void write_build(void)
     FILE *f = out_file("build.txt", "The build stamp: the version, the game, the code mods and the build digest the program registered.");
     if (!f)
         return;
-    fprintf(f, "snapshot present %llu, window %u presents\n", (unsigned long long)S.present_no, S.window);
+    fprintf(f, "snapshot triggered at present %llu, window %u presents\n", (unsigned long long)S.trigger_no, S.window);
     rl_report_info_each(put_info, f);
     fclose(f);
 }
@@ -356,8 +356,8 @@ static void write_index(void)
     FILE *f = fopen(path, "w");
     if (!f)
         return;
-    fprintf(f, "relift diagnostic snapshot, present %llu, covering the %u presents after the trigger.\n"
-               "Folder: %s\n\nFiles:\n", (unsigned long long)S.present_no, S.window, S.dir);
+    fprintf(f, "relift diagnostic snapshot, triggered at present %llu, covering the %u presents after it.\n"
+               "Folder: %s\n\nFiles:\n", (unsigned long long)S.trigger_no, S.window, S.dir);
     fprintf(f, "  index.txt\n      This list.\n");
     for (uint32_t i = 0; i < S.nfiles; i++)
         fprintf(f, "  %s\n      %s\n", S.files[i].name, S.files[i].what);
@@ -373,6 +373,7 @@ static void begin_window(void)
     localtime_r(&t, &tm);
     strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", &tm);
     uint64_t pn = S.present_no;
+    S.trigger_no = pn;
     snprintf(S.dir, sizeof S.dir, "%s/snapshots/%s-p%llu", root, stamp, (unsigned long long)pn);
     make_dirs(S.dir);
     S.window = (uint32_t)rl_setting_int("debug.snapshot");
