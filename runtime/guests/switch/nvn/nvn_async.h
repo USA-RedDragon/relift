@@ -21,4 +21,10 @@ bool nvn_async_on_worker(void);
 /** @brief Items posted and not finished. */
 uint32_t nvn_async_pending(void);
 
+struct rl_ctx;
+/** @brief The guest address just above the worker's scratch stack (0 until the layer reserved it). */
+void nvn_async_set_stack(uint64_t top);
+/** @brief A copy of the guest context for a queued item, its stack pointer on the worker's own stack; free it after. */
+struct rl_ctx *nvn_async_snapshot(const struct rl_ctx *c);
+
 #endif

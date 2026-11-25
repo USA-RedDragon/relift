@@ -4,6 +4,10 @@
  * presents, handed out in turn by AcquireTexture.
  */
 #include "nvn_priv.h"
+#include "nvn_async.h"
+
+#include <stdlib.h>
+#include <string.h>
 
 /** @brief Most textures an NVN window holds. */
 #define WINDOW_TEXTURES 4u
@@ -71,6 +75,20 @@ uint64_t nvnh_nvnWindowFinalize(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
+/** @brief The acquire's wait for a free texture: on the game's thread, or queued behind the earlier items of the replay worker, where it holds the later sets back as the sync's queue wait does on the console. */
+static void acquire_wait_run(void *arg)
+{
+    nvn_pace_acquire((uint32_t)(uintptr_t)arg);
+}
+
+static void acquire_wait(uint32_t textures)
+{
+    if (nvn_async_enabled() && nvn_async_post(acquire_wait_run, (void *)(uintptr_t)textures))
+        return;
+    nvn_async_drain();
+    nvn_pace_acquire(textures);
+}
+
 static nvn_window *win_of(rl_ctx *c, uint64_t a, const char *proc)
 {
     nvn_window *w = (nvn_window *)nvn_obj_get(a, NVN_WINDOW);
@@ -89,7 +107,7 @@ uint64_t nvnh_nvnWindowAcquireTexture(rl_ctx *c, uint8_t *mem)
     if (!w)
         return RL_PENDING;
     nvn_evlog("AcquireTexture", c->x[1]);
-    nvn_pace_acquire(w->active);
+    acquire_wait(w->active);
     nvn_evlog("AcquireTexture returned", c->x[1]);
     nvn_sync_signal(c->x[1]);
     rl_st32(mem, c->x[2], w->next);
@@ -109,7 +127,7 @@ uint64_t nvnh_nvnQueueAcquireTexture(rl_ctx *c, uint8_t *mem)
     nvn_window *w = win_of(c, c->x[1], "nvnQueueAcquireTexture");
     if (!w)
         return RL_PENDING;
-    nvn_pace_acquire(w->active);
+    acquire_wait(w->active);
     rl_st32(mem, c->x[2], w->next);
     w->next = (w->next + 1) % w->active;
     c->x[0] = ACQUIRE_SUCCESS;
@@ -240,6 +258,45 @@ bool nvn_crop_rect(const int32_t crop[4], uint32_t width, uint32_t height, uint3
  * the window's crop rectangle of the texture, as the console's display does
  * (a game may render a 1920x1080 picture into larger window textures).
  */
+/** @brief A present queued for the replay worker, behind the sets submitted before it. */
+typedef struct async_present {
+    rl_ctx *c;
+    uint8_t *mem;
+    uint64_t queue, texture;
+    int32_t crop[4];
+    uint32_t interval;
+} async_present;
+
+static void async_present_run(void *arg)
+{
+    async_present *a = arg;
+    int rc = nvn_present(a->c, a->mem, a->queue, a->texture, a->crop, a->interval);
+    if (rc != RL_OK)
+        rl_log(RL_LOG_ERROR, "nvn", "a present run on the worker returned %d", rc);
+    free(a->c);
+    free(a);
+}
+
+static bool present_posted(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const nvn_window *w)
+{
+    if (!nvn_async_enabled())
+        return false;
+    async_present *a = malloc(sizeof *a);
+    if (!a)
+        return false;
+    a->c = nvn_async_snapshot(c);
+    a->mem = mem;
+    a->queue = queue;
+    a->texture = texture;
+    memcpy(a->crop, w->crop, sizeof a->crop);
+    a->interval = w->interval;
+    if (a->c && nvn_async_post(async_present_run, a))
+        return true;
+    free(a->c);
+    free(a);
+    return false;
+}
+
 uint64_t nvnh_nvnQueuePresentTexture(rl_ctx *c, uint8_t *mem)
 {
     nvn_window *w = win_of(c, c->x[1], "nvnQueuePresentTexture");
@@ -249,7 +306,7 @@ uint64_t nvnh_nvnQueuePresentTexture(rl_ctx *c, uint8_t *mem)
     if (idx >= w->n)
         return (uint64_t)rl_guest_fatal(c, "nvn", "nvnQueuePresentTexture of texture %u of %u", idx, w->n);
     nvn_evlog("PresentTexture", c->x[2]);
-    int rc = nvn_present(c, mem, c->x[0], w->textures[idx], w->crop, w->interval);
+    int rc = present_posted(c, mem, c->x[0], w->textures[idx], w) ? RL_OK : (nvn_async_drain(), nvn_present(c, mem, c->x[0], w->textures[idx], w->crop, w->interval));
     if (rc != RL_OK)
         return (uint64_t)rc;
     if (w->presents++ == 0)

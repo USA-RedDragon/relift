@@ -6,6 +6,7 @@
  * worker to be idle.
  */
 #include "nvn_async.h"
+#include "nvn_priv.h"
 
 #include <pthread.h>
 #include <stdatomic.h>
@@ -106,3 +107,19 @@ void nvn_async_drain(void)
 bool nvn_async_on_worker(void) { return t_worker; }
 
 uint32_t nvn_async_pending(void) { return atomic_load_explicit(&A.pending, memory_order_acquire); }
+
+static uint64_t g_stack_top;
+
+void nvn_async_set_stack(uint64_t top) { g_stack_top = top; }
+
+rl_ctx *nvn_async_snapshot(const rl_ctx *c)
+{
+    rl_ctx *snap = malloc(sizeof *snap);
+    if (!snap)
+        return NULL;
+    *snap = *c;
+    /* The worker's own guest stack: the game's thread goes on using the one it had. */
+    if (g_stack_top)
+        snap->sp = g_stack_top;
+    return snap;
+}

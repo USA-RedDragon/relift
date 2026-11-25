@@ -50,7 +50,8 @@ static bool async_whitelisted(const char *name)
 {
     return !strncmp(name, "nvnCommandBuffer", 16) || !strcmp(name, "nvnQueueSubmitCommands") ||
            !strcmp(name, "nvnQueuePresentTexture") || !strcmp(name, "nvnQueueFenceSync") ||
-           !strcmp(name, "nvnQueueWaitSync");
+           !strcmp(name, "nvnQueueWaitSync") || !strcmp(name, "nvnWindowAcquireTexture") ||
+           !strcmp(name, "nvnQueueAcquireTexture");
 }
 
 #define NVN_ENTRY(name) { #name, nvnh_##name, NVN_STATS_IMPL, drained_##name },
@@ -521,6 +522,16 @@ static int hook_start(void *user, uint64_t *code_free)
         .fns = nvn.cb_entries,
         .name = "nvn-dlss-callbacks",
     };
+    if (nvn_async_enabled()) {
+        uint64_t sbytes = 4 * HOS_PAGE;
+        if (rl_hos_reserve_at(*code_free, sbytes) != KR_SUCCESS ||
+            rl_hos_reserved_set(*code_free, sbytes, RL_VM_RW, RL_VM_FRESH) != 0) {
+            rl_log(RL_LOG_ERROR, "nvn", "no guest address space for the replay worker's stack");
+            return -1;
+        }
+        nvn_async_set_stack(*code_free + sbytes - 64);
+        *code_free += sbytes;
+    }
     const rl_unit *cu = &nvn.cb_unit;
     if (rl_units_register(&cu, 1) != 0)
         return -1;

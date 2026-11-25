@@ -19,6 +19,7 @@
  * A command or format the layer does not handle stops the game with its name.
  */
 #include "nvn_astc.h"
+#include "nvn_async.h"
 #include "nvn_vk.h"
 #include "nvn_sched.h"
 #include "hostlib.h"
@@ -6197,7 +6198,7 @@ static __thread int64_t lock_since;
 
 void nvn_core_leave(void)
 {
-    if (core_left)
+    if (core_left || nvn_async_on_worker())
         return;
     core_left = true;
     hos_sched_leave();
@@ -6205,7 +6206,7 @@ void nvn_core_leave(void)
 
 void nvn_core_return(void)
 {
-    if (!core_left)
+    if (!core_left || nvn_async_on_worker())
         return;
     core_left = false;
     int64_t t0 = nvn_gpuprof_on() ? now_ns() : 0;

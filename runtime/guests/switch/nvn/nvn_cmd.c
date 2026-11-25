@@ -11,6 +11,7 @@
  * command set and returns its handle.
  */
 #include "nvn_priv.h"
+#include "nvn_async.h"
 
 #include <pthread.h>
 #include <stdatomic.h>
@@ -789,6 +790,24 @@ const char *nvn_cmd_name(uint32_t op)
 NVN_RECORDED(NVN_RECORDER)
 #undef NVN_RECORDER
 
+/** @brief A submit queued for the replay worker: the guest context as the game's thread had it, and what to replay. */
+typedef struct async_submit {
+    rl_ctx *c;
+    uint8_t *mem;
+    uint64_t queue;
+    const nvn_cmdset *s;
+} async_submit;
+
+static void async_submit_run(void *arg)
+{
+    async_submit *a = arg;
+    int rc = nvn_vk_run(a->c, a->mem, a->queue, a->s);
+    if (rc != RL_OK)
+        rl_log(RL_LOG_ERROR, "nvn", "a submit replayed on the worker returned %d", rc);
+    free(a->c);
+    free(a);
+}
+
 int nvn_cmd_submit(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t handle)
 {
     const nvn_cmdset *s = nvn_cmdset_acquire(handle);
@@ -803,6 +822,19 @@ int nvn_cmd_submit(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t handle)
                    (unsigned long long)s->cmds[i].x[5]);
     if (nvn_set_log_on())
         rl_log(RL_LOG_INFO, "nvn", "set %u submitted at %.3f ms", (unsigned)(handle & 0xffffffffu), (double)rl_clock_ns() / 1e6);
+    if (nvn_async_enabled()) {
+        async_submit *a = malloc(sizeof *a);
+        if (a && (a->c = nvn_async_snapshot(c)) != NULL) {
+            a->mem = mem;
+            a->queue = queue;
+            a->s = s;
+            if (nvn_async_post(async_submit_run, a))
+                return RL_OK;
+            free(a->c);
+        }
+        free(a);
+        nvn_async_drain();
+    }
     int64_t t0 = rl_clock_ns();
     int rc = nvn_vk_run(c, mem, queue, s);
     if (nvn_set_log_on())

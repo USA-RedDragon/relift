@@ -3,6 +3,7 @@
  * @brief relift's NVN2 procs called as lifted code calls them: texture
  * layout, device queries, syncs and command recording.
  */
+#include "nvn/nvn_async.h"
 #include "nvn/nvn_priv.h"
 #include "nvn/nvn_slots.h"
 #include "nvn/nvn_watch.h"
@@ -171,6 +172,42 @@ TEST(nvn_warm_gate_counts_a_nested_compile_once)
     nvn_gate_leave();
     nvn_gate_leave();
     CHECK_EQ(nvn_gate_high_water(), 1u);
+}
+
+/** @brief The replay worker: items run in the order they were posted, a drain waits for all of them, and a drain made by the worker itself returns. */
+static _Atomic uint32_t async_seen[64];
+static _Atomic uint32_t async_n;
+
+static void async_item(void *arg)
+{
+    struct timespec ts = { 0, 2 * 1000 * 1000 };
+    nanosleep(&ts, NULL);
+    atomic_store(&async_seen[atomic_fetch_add(&async_n, 1)], (uint32_t)(uintptr_t)arg);
+}
+
+static void async_nested(void *arg)
+{
+    (void)arg;
+    nvn_async_drain();
+    atomic_store(&async_seen[atomic_fetch_add(&async_n, 1)], 999);
+}
+
+TEST(nvn_async_worker_runs_items_in_order_and_drains)
+{
+    atomic_store(&async_n, 0);
+    for (uintptr_t i = 1; i <= 20; i++)
+        CHECK(nvn_async_post(async_item, (void *)i));
+    nvn_async_drain();
+    CHECK_EQ(nvn_async_pending(), 0u);
+    CHECK_EQ(atomic_load(&async_n), 20u);
+    for (uint32_t i = 0; i < 20; i++)
+        CHECK_EQ(atomic_load(&async_seen[i]), i + 1);
+    CHECK(nvn_async_post(async_nested, NULL));
+    CHECK(nvn_async_post(async_item, (void *)7));
+    nvn_async_drain();
+    CHECK_EQ(atomic_load(&async_n), 22u);
+    CHECK_EQ(atomic_load(&async_seen[20]), 999u);
+    CHECK_EQ(atomic_load(&async_seen[21]), 7u);
 }
 
 TEST(nvn_warm_makes_the_rest_of_the_table_after_the_record_in_the_background)

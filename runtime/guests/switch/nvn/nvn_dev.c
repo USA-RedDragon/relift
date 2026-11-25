@@ -12,6 +12,7 @@
  * addresses. Without either a pool's GPU address is its guest address.
  */
 #include "nvn_priv.h"
+#include "nvn_async.h"
 #include "nvn_watch.h"
 #include "vkdev.h"
 #include "services.h"
@@ -781,6 +782,41 @@ uint64_t nvnh_nvnQueueSubmitCommands(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
+/** @brief A queue's fence or wait sync queued for the replay worker, behind the sets submitted before it. */
+typedef struct async_sync {
+    rl_ctx *c;
+    uint8_t *mem;
+    uint64_t queue, sync;
+    bool wait;
+} async_sync;
+
+static void async_sync_run(void *arg)
+{
+    async_sync *a = arg;
+    int rc = nvn_vk_queue_sync(a->c, a->mem, a->queue, a->sync, a->wait);
+    if (rc != RL_OK)
+        rl_log(RL_LOG_ERROR, "nvn", "a queue sync run on the worker returned %d", rc);
+    free(a->c);
+    free(a);
+}
+
+static bool queue_sync_posted(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t sync, bool wait)
+{
+    async_sync *a = malloc(sizeof *a);
+    if (!a)
+        return false;
+    a->c = nvn_async_snapshot(c);
+    a->mem = mem;
+    a->queue = queue;
+    a->sync = sync;
+    a->wait = wait;
+    if (a->c && nvn_async_post(async_sync_run, a))
+        return true;
+    free(a->c);
+    free(a);
+    return false;
+}
+
 /** @brief nvnQueueFenceSync(NVNqueue *, NVNsync *, NVNsyncCondition, int flags): signaled once the work submitted so far finished. */
 uint64_t nvnh_nvnQueueFenceSync(rl_ctx *c, uint8_t *mem)
 {
@@ -790,6 +826,9 @@ uint64_t nvnh_nvnQueueFenceSync(rl_ctx *c, uint8_t *mem)
         return (uint64_t)rl_guest_fatal(c, "nvn", "nvnQueueFenceSync with 0x%llx, not a sync",
                                         (unsigned long long)c->x[1]);
     nvn_trace_order("queue", "nvnQueueFenceSync", c->x[0], 0, 0, &c->x[1], 3, 0, true);
+    if (nvn_async_enabled() && queue_sync_posted(c, mem, c->x[0], c->x[1], false))
+        return nvn_ret(c);
+    nvn_async_drain();
     int rc = nvn_vk_queue_sync(c, mem, c->x[0], c->x[1], false);
     if (rc != RL_OK)
         return (uint64_t)rc;
@@ -804,6 +843,11 @@ uint64_t nvnh_nvnQueueWaitSync(rl_ctx *c, uint8_t *mem)
 {
     nvn_evlog("QueueWaitSync", c->x[1]);
     nvn_trace_order("queue", "nvnQueueWaitSync", c->x[0], 0, 0, &c->x[1], 1, 0, true);
+    if (nvn_async_enabled() && queue_sync_posted(c, mem, c->x[0], c->x[1], true)) {
+        c->x[0] = 1;
+        return nvn_ret(c);
+    }
+    nvn_async_drain();
     int rc = nvn_vk_queue_sync(c, mem, c->x[0], c->x[1], true);
     if (rc != RL_OK)
         return (uint64_t)rc;
