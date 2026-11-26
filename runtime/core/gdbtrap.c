@@ -4,16 +4,18 @@
  * Linux on x86-64 and 64-bit Arm. The host CPU's trap instruction, signal context and step method live here, not in
  * gdbstub.c.
  */
+#include "gdbstub.h"
 #include "gdbtrap.h"
 
+#if defined(RL_DEBUG_STUB)
+
+#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
-#include <unistd.h>
-
-#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
 #include <ucontext.h>
+#include <unistd.h>
 
 static const rl_gdbtrap_hooks *g_hooks;
 
@@ -348,5 +350,7 @@ void rl_gdbtrap_disarm(uint8_t *host, uint32_t orig)
     (void)host;
     (void)orig;
 }
+
+#endif
 
 #endif
