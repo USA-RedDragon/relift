@@ -3,13 +3,13 @@
 # docs/reference/snapshot.md (a docgen:output exec= marker). Each row is a
 # call of rl_snapshot_file or out_file with a literal name in the runtime: the
 # name, the layer that writes it (the folder of the source file) and the
-# description the snapshot's own index.txt gives.
+# description the snapshot's own index.txt gives.  Sorted in the C locale so the order is the same on every host.
 set -eu
 
 cd "$(dirname "$0")/../.."
 [ -f runtime/core/snapshot.c ] || { echo "snapshot-files.sh: runtime/core/snapshot.c is missing" >&2; exit 1; }
 
-rows=$(git grep -E '(rl_snapshot_file|out_file)\("[^"]+", "' -- runtime ':!*/tests/*' | sort || true)
+rows=$(git grep -E '(rl_snapshot_file|out_file)\("[^"]+", "' -- runtime ':!*/tests/*' | LC_ALL=C sort || true)
 [ -n "$rows" ] || { echo "snapshot-files.sh: no snapshot files found" >&2; exit 1; }
 
 echo "| File | Written by | What index.txt says it is |"

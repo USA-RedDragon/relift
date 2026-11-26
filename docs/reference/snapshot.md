@@ -126,17 +126,17 @@ program, and the Switch 2 graphics layer's where it draws.
 ```text
 | File | Written by | What index.txt says it is |
 |---|---|---|
+| `heap.txt` | core | The heapsample dump: the call sites that hold the most live heap bytes (read it with tools/heapsample/report.py). |
+| `picture.png` | core | The picture the window showed when the snapshot ended. |
 | `build.txt` | core | The build stamp: the version, the game, the code mods and the build digest the program registered. |
 | `heap.txt` | core | Heap call sites: not available in this run (the heapsample library was not preloaded). |
 | `log_tail.txt` | core | The last 500 log lines before the snapshot ended, oldest first. |
 | `memory.txt` | core | The process's memory from the host: the kernel's totals, its mappings by resident size and the allocator's counters. |
 | `settings.txt` | core | Every setting's effective value and where it came from (default, env or set). |
 | `threads_host.txt` | core | Every host thread: its id, name, kernel state, what it sleeps in and the CPU time it used. |
-| `heap.txt` | core | The heapsample dump: the call sites that hold the most live heap bytes (read it with tools/heapsample/report.py). |
-| `picture.png` | core | The picture the window showed when the snapshot ended. |
+| `memory_nvn.txt` | Switch 2 graphics layer | What the NVN layer holds: pipelines, pipeline libraries, shader modules, command sets, mirrors, staging buffers, and the textures by size with the largest listed. |
 | `batches.txt` | Switch 2 graphics layer | Per present: how many batches there were and where each ended (the call that forced the batch out), the NVN commands replayed and the host Vulkan calls by command, in total and per draw. |
 | `gpu.txt` | Switch 2 graphics layer | The GPU profile of each present of the window: time per render pass and per draw (named by its programs and target size), dispatches, copies and the layer's own work, plus the gaps between batches and the presenter's own GPU time. |
-| `memory_nvn.txt` | Switch 2 graphics layer | What the NVN layer holds: pipelines, pipeline libraries, shader modules, command sets, mirrors, staging buffers, and the textures by size with the largest listed. |
 | `threads_guest.txt` | Switch layer | Every guest thread: state, core, priority, the lifted function at its saved pc and what it waits on (svc, address, event), as the GDB server's info threads gives, taken without stopping the guest. |
 ```
 <!-- /docgen:output -->
