@@ -79,9 +79,10 @@ for _ in $(seq 1 200); do
   sleep 0.05
 done
 "$gdb_bin" -batch -nx -iex "set debuginfod enabled off" -ex "set architecture gbz80" \
+  -ex "source $root/runtime/tools/gdb/relift_guest.py" \
   -ex "target remote 127.0.0.1:$port" -ex 'info threads' -ex 'p/x $af' -ex 'p/x $bc' -ex 'p/x $pc' \
   -ex 'x/8xb 0x155' \
-  -ex 'maint packet P1=ed77' -ex 'set {char}0xC000 = 0x55' -ex 'p/x {char}0xC000' \
+  -ex 'maint packet P1=ed77' -ex 'set {char}0xC000 = 0x55' -ex 'p/x {char}0xC000' -ex bt \
   -ex 'set {char}0x4000 = 1' -ex 'set {char}0xFF40 = 1' -ex detach >"$work/gdb.log" 2>&1 || true
 # A second attach after the program ran on: the cart read the byte into e, and b kept the value written.
 sleep 0.5
@@ -95,6 +96,9 @@ expect() {
   grep -q "$2" "$1" || { echo "gdb-gb: $(basename "$1") lacks: $2"; fail=1; }
 }
 expect "$work/gdb.log" 'Thread 1 '
+# The backtrace after the writes is the one frame: gdb 15's own gbz80 unwinder asserts there, so the script's unwinder answers.
+expect "$work/gdb.log" '^#0  0x0*15[0-9a-f] in'
+if grep -q '^#1 ' "$work/gdb.log"; then echo "gdb-gb: bt shows a caller frame"; fail=1; fi
 expect "$work/gdb.log" '^\$1 = 0x42[0-9a-f][0-9a-f]$'
 expect "$work/gdb.log" '^\$2 = 0x13[0-9a-f][0-9a-f]$'
 expect "$work/gdb.log" '0x155:.0x3e.0x42.0x06.0x13.0x21.0x00.0xc0.0x5e'

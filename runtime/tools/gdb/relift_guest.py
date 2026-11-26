@@ -18,6 +18,8 @@ from gdb.FrameDecorator import FrameDecorator
 
 # Frames per thread for the current stop: {thread number: [(pc, sp, fp, name), ...]}.
 _cache = {}
+# Thread numbers whose connection answered qRelift.frames at all (an error reply counts): relift's server.
+_server = set()
 
 
 def _forget(*_):
@@ -43,6 +45,8 @@ def _frames(thread):
             reply = b""
         if isinstance(reply, bytes):
             reply = reply.decode("ascii", "replace")
+        if reply:
+            _server.add(thread.num)
         if reply and reply[0] != "E":
             frames = []
             for f in reply.split(";"):
@@ -82,7 +86,10 @@ class ReliftGuestUnwinder(gdb.unwinder.Unwinder):
         super().__init__("relift guest")
 
     def __call__(self, pending):
-        if pending.architecture().name() != "aarch64":
+        arch = pending.architecture().name()
+        if arch == "gbz80":
+            return self._outermost(pending)
+        if arch != "aarch64":
             return None
         thread = gdb.selected_thread()
         frames = _cache.get(thread.num) if thread else None
@@ -118,6 +125,27 @@ class ReliftGuestUnwinder(gdb.unwinder.Unwinder):
                     pass
             return info
         return None
+
+
+    def _outermost(self, pending):
+        """A Game Boy thread is its own outermost frame: the program keeps no frame records, and gdb 15's gbz80
+        unwinder asserts (trad-frame.h, 'addr') when it computes a frame's id or caller after a register or memory
+        write; gdb 16 and later fixed it. Skipped off relift's server, which gdb's own unwinder then handles."""
+        thread = gdb.selected_thread()
+        if not thread or thread.num not in _server:
+            return None
+        pcv = pending.read_register("pc")
+        spv = pending.read_register("sp")
+        info = pending.create_unwind_info(_FrameId(int(spv), int(pcv)))
+        # A zero return address ends the backtrace; the registers the cart keeps pass through.
+        info.add_saved_register("pc", gdb.Value(0).cast(pcv.type))
+        info.add_saved_register("sp", spv)
+        for name in ("af", "bc", "de", "hl"):
+            try:
+                info.add_saved_register(name, pending.read_register(name))
+            except gdb.error:
+                pass
+        return info
 
 
 gdb.unwinder.register_unwinder(None, ReliftGuestUnwinder(), replace=True)
