@@ -1343,9 +1343,10 @@ TEST(nvn_placed_pool_gpu_writes_reach_the_write_watches_over_them)
     uint8_t *m = t_mem();
     CHECK(nvn_pool_make(pool, at, size, 0));
     uint64_t gpu = nvn_pool_gpu(pool);
-    /* A texture's storage watched, as the layer watches texture storage, then written by the GPU only. */
+    /* A texture's storage watched, as the layer watches texture storage, then written by the GPU only. The written
+     * range is the pool's first 8 host pages (at most 0x20000 bytes) and the other watch is clear of it. */
     nvn_watch w, other;
-    CHECK(nvn_watch_start(&w, at + 0x20000, 8 * hp));
+    CHECK(nvn_watch_start(&w, at, 8 * hp));
     CHECK(nvn_watch_start(&other, at + 0x30000, 4 * hp));
     replay r;
     memset(&r, 0, sizeof r);
@@ -1353,13 +1354,13 @@ TEST(nvn_placed_pool_gpu_writes_reach_the_write_watches_over_them)
     r.mem = m;
     void *buf = NULL;
     uint64_t off = 0;
-    CHECK(nvn_guest_buffer(at + 0x20000, 8 * hp, &buf, &off));
+    CHECK(nvn_guest_buffer(at, 8 * hp, &buf, &off));
     CHECK(nvn_vk_begin(&r));
     VK(vkCmdFillBuffer)(g.cb, (VkBuffer)buf, off, 8 * hp, 0x5a5a5a5au);
     nvn_vk_barrier(g.cb);
-    nvn_vk_mark_write_range(at + 0x20000, 8 * hp);
+    nvn_vk_mark_write_range(at, 8 * hp);
     CHECK(nvn_vk_flush(&r));
-    CHECK_EQ(rl_ld32(m, at + 0x20000 + 4 * hp), 0x5a5a5a5au);
+    CHECK_EQ(rl_ld32(m, at + 4 * hp), 0x5a5a5a5au);
     CHECK(nvn_watch_changed(&w));
     CHECK(!nvn_watch_changed(&other));
     (void)gpu;
