@@ -245,7 +245,7 @@ static void submit_handed_to(uint64_t v)
  * retire thread waits for each fence in order and signals the same value from the host: every waiter (reports,
  * pacing, the presenter) sees the same values, never before the batch's fence.
  *
- * Which one is a fact of the driver, found by tl_probe on a thread at bring-up: a batch held on a host-set event
+ * Which one is a fact of the driver, found by tl_probe on a thread at bring-up: a batch held on a host-signaled semaphore
  * signals a probe timeline, and a second signal of it is submitted; when that submit does not return while the first
  * is held, timeline signals wait for the GPU. Until the probe ends the host signals; it moves to the GPU only when no
  * host signal is still to come, so the values stay in order. RELIFT_NVN_TIMELINE=gpu or host sets it.
@@ -370,51 +370,52 @@ static void *tl_probe_signal(void *arg)
 /** @brief How long the probe holds its first batch for the second submit to return: far above a submit's cost. */
 #define TL_PROBE_NS 10000000ll
 
-/** @brief Finds whether a timeline signal waits for the GPU (see tl), from its own pool, semaphore and event. */
+/** @brief Lets the probe's held batch go: signals the semaphore it waits on (legal while the batch is pending). */
+static void tl_probe_release(VkSemaphore hold)
+{
+    VkSemaphoreSignalInfo si = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO, .semaphore = hold, .value = 1 };
+    VK(vkSignalSemaphore)(g.dev, &si);
+}
+
+/**
+ * @brief Finds whether a timeline signal waits for the GPU (see tl), from its own two timeline semaphores. The held
+ * batch waits on a timeline semaphore the host signals: a command buffer waiting on a host-set event while it is
+ * pending is invalid usage (VUID-vkSetEvent-event-09543), and under GPU contention the NVIDIA driver faulted on it
+ * (Xid 13 and 32).
+ */
 static void *tl_probe(void *arg)
 {
     (void)arg;
     int found = TL_HOST;
-    VkCommandPool pool = NULL;
-    VkCommandBuffer cb = NULL;
-    VkEvent ev = NULL;
+    VkSemaphore hold = NULL;
     VkSemaphoreTypeCreateInfo ti = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
                                      .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE };
     VkSemaphoreCreateInfo sci = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &ti };
-    VkCommandPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .queueFamilyIndex = g.family };
-    VkCommandBufferAllocateInfo cai = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-                                        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-                                        .commandBufferCount = 1 };
-    VkEventCreateInfo eci = { .sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO };
-    VkCommandBufferBeginInfo cbi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-                                     .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
     tlp.queue = g.queue;
     if (VK(vkCreateSemaphore)(g.dev, &sci, NULL, &tlp.sem) != VK_SUCCESS ||
-        VK(vkCreateCommandPool)(g.dev, &pci, NULL, &pool) != VK_SUCCESS ||
-        (cai.commandPool = pool, VK(vkAllocateCommandBuffers)(g.dev, &cai, &cb)) != VK_SUCCESS ||
-        VK(vkCreateEvent)(g.dev, &eci, NULL, &ev) != VK_SUCCESS || VK(vkBeginCommandBuffer)(cb, &cbi) != VK_SUCCESS)
+        VK(vkCreateSemaphore)(g.dev, &sci, NULL, &hold) != VK_SUCCESS)
         goto out;
-    VK(vkCmdWaitEvents)(cb, 1, &ev, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, NULL, 0, NULL, 0,
-                        NULL);
-    if (VK(vkEndCommandBuffer)(cb) != VK_SUCCESS)
-        goto out;
-    uint64_t one = 1;
+    uint64_t one = 1, wait_one = 1;
+    VkPipelineStageFlags stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
     VkTimelineSemaphoreSubmitInfo tsi = { .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+                                          .waitSemaphoreValueCount = 1,
+                                          .pWaitSemaphoreValues = &wait_one,
                                           .signalSemaphoreValueCount = 1,
                                           .pSignalSemaphoreValues = &one };
-    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .pNext = &tsi, .commandBufferCount = 1,
-                        .pCommandBuffers = &cb, .signalSemaphoreCount = 1, .pSignalSemaphores = &tlp.sem };
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .pNext = &tsi, .waitSemaphoreCount = 1,
+                        .pWaitSemaphores = &hold, .pWaitDstStageMask = &stage, .signalSemaphoreCount = 1,
+                        .pSignalSemaphores = &tlp.sem };
     rl_vkdev_guest_queue_lock();
     VkResult vr = VK(vkQueueSubmit)(tlp.queue, 1, &si, NULL);
     rl_vkdev_guest_queue_unlock();
     if (vr != VK_SUCCESS) {
-        VK(vkSetEvent)(g.dev, ev);
+        tl_probe_release(hold);
         goto out;
     }
     int64_t t0 = now_ns();
     pthread_t th;
     if (pthread_create(&th, NULL, tl_probe_signal, NULL) != 0) {
-        VK(vkSetEvent)(g.dev, ev);
+        tl_probe_release(hold);
         uint64_t v = 1;
         VkSemaphoreWaitInfo wi = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .semaphoreCount = 1,
                                    .pSemaphores = &tlp.sem, .pValues = &v };
@@ -432,7 +433,7 @@ static void *tl_probe(void *arg)
     bool returned = tlp.done;
     pthread_mutex_unlock(&tlp.mu);
     tl.probe_ns = returned ? now_ns() - t0 : -1;
-    VK(vkSetEvent)(g.dev, ev);
+    tl_probe_release(hold);
     pthread_join(th, NULL);
     uint64_t two = 2;
     VkSemaphoreWaitInfo wi = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .semaphoreCount = 1,
@@ -440,10 +441,8 @@ static void *tl_probe(void *arg)
     VK(vkWaitSemaphores)(g.dev, &wi, UINT64_MAX);
     found = returned ? TL_GPU : TL_HOST;
 out:
-    if (ev)
-        VK(vkDestroyEvent)(g.dev, ev, NULL);
-    if (pool)
-        VK(vkDestroyCommandPool)(g.dev, pool, NULL);
+    if (hold)
+        VK(vkDestroySemaphore)(g.dev, hold, NULL);
     if (tlp.sem)
         VK(vkDestroySemaphore)(g.dev, tlp.sem, NULL);
     if (found == TL_GPU)
@@ -470,6 +469,31 @@ static bool tl_start_retire(void)
     return true;
 }
 
+/**
+ * @brief Whether the driver is a desktop one (NVIDIA, AMD, Intel, RADV, NVK) whose timeline signals never wait for
+ * the GPU: the emulated timelines the probe looks for are Mesa's on kgsl. The probe holds a batch pending on the
+ * queue, and NVIDIA's driver faulted under GPU contention while one was held (Xid 13 and 32), so it does not run
+ * where the answer is known.
+ */
+static bool tl_desktop_driver(void)
+{
+    VkPhysicalDeviceVulkan12Properties p12 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES };
+    VkPhysicalDeviceProperties2 pp = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &p12 };
+    VK(vkGetPhysicalDeviceProperties2)(g.phys, &pp);
+    switch (p12.driverID) {
+    case VK_DRIVER_ID_AMD_PROPRIETARY:
+    case VK_DRIVER_ID_AMD_OPEN_SOURCE:
+    case VK_DRIVER_ID_MESA_RADV:
+    case VK_DRIVER_ID_NVIDIA_PROPRIETARY:
+    case VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS:
+    case VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA:
+    case VK_DRIVER_ID_MESA_NVK:
+        return true;
+    default:
+        return false;
+    }
+}
+
 /** @brief Sets who signals the timeline from RELIFT_NVN_TIMELINE, else starts the probe; at bring-up. */
 static void tl_start(void)
 {
@@ -479,6 +503,11 @@ static void tl_start(void)
     if (e && (!strcmp(e, "gpu") || !strcmp(e, "host"))) {
         tl.found = tl.mode = !strcmp(e, "gpu") ? TL_GPU : TL_HOST;
         rl_log(RL_LOG_INFO, "nvn", "the timeline is signaled by the %s (RELIFT_NVN_TIMELINE)", e);
+        return;
+    }
+    if (tl_desktop_driver()) {
+        tl.found = tl.mode = TL_GPU;
+        rl_log(RL_LOG_INFO, "nvn", "the timeline is signaled by the GPU (a desktop driver: no probe)");
         return;
     }
     pthread_t th;
