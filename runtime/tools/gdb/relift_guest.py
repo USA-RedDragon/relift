@@ -101,9 +101,21 @@ class ReliftGuestUnwinder(gdb.unwinder.Unwinder):
             else:
                 # The outermost guest frame: a zero return address ends the backtrace.
                 npc, nsp, nfp = 0, sp, 0
+            # The caller's link register is the return address of the frame after next (0 past the outermost).
+            nlr = frames[i + 2][0] if i + 2 < len(frames) else 0
             info.add_saved_register("pc", gdb.Value(npc).cast(pcv.type))
             info.add_saved_register("sp", gdb.Value(nsp).cast(spv.type))
             info.add_saved_register("x29", gdb.Value(nfp).cast(fpv.type))
+            info.add_saved_register("x30", gdb.Value(nlr).cast(fpv.type))
+            # The callee-saved registers a guest call keeps: the server's walk does not track them, so the caller
+            # has the values this frame has. Every register the next frame's unwind may read is then saved, which
+            # gdb versions that read x19 to x28 or the link register of a frame need.
+            for n in range(19, 29):
+                name = "x%d" % n
+                try:
+                    info.add_saved_register(name, pending.read_register(name))
+                except gdb.error:
+                    pass
             return info
         return None
 
