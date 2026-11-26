@@ -404,12 +404,21 @@ static bool gask(int fd, const char *pkt, char *out, size_t n)
 static void *gclient_run(void *arg)
 {
     gclient *s = arg;
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in sa = { .sin_family = AF_INET, .sin_port = htons((uint16_t)s->port) };
     sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    /* The server may not be listening yet. A socket whose connect failed cannot connect again on macOS (the retry
+     * fails at once), so each attempt gets its own. */
+    int fd = -1;
     bool up = false;
-    for (int i = 0; i < 300 && !up; i++)
-        up = connect(fd, (struct sockaddr *)&sa, sizeof sa) == 0 || (usleep(10000), false);
+    for (int i = 0; i < 300 && !up; i++) {
+        fd = socket(AF_INET, SOCK_STREAM, 0);
+        up = fd >= 0 && connect(fd, (struct sockaddr *)&sa, sizeof sa) == 0;
+        if (!up) {
+            if (fd >= 0)
+                close(fd);
+            usleep(10000);
+        }
+    }
     char r[2048];
     s->ok = up && gask(fd, "qXfer:features:read:target.xml:0,7ff", r, sizeof r);
     snprintf(s->xml, sizeof s->xml, "%s", strstr(r, "<architecture>") ? strstr(r, "<architecture>") : "");
