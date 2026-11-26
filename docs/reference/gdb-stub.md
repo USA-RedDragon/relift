@@ -269,7 +269,7 @@ static int break_set(uint64_t a, bool on)
         if (G.bp[i].on && G.bp[i].guest == a) {
             if (!on) {
                 G.bp[i].on = false;
-                poke_code(G.bp[i].host, G.bp[i].orig);
+                rl_gdbtrap_disarm(G.bp[i].host, G.bp[i].orig);
             }
             return 0;
         }
@@ -286,9 +286,8 @@ static int break_set(uint64_t a, bool on)
     breakpoint *b = &G.bp[free_slot];
     b->guest = a;
     b->host = (uint8_t *)(uintptr_t)h.fn->fn;
-    b->orig = code_at(b->host);
+    b->orig = rl_gdbtrap_arm(b->host);
     b->on = true;
-    poke_code(b->host, TRAP_INSN);
     return 0;
 }
 ```
@@ -355,7 +354,7 @@ address itself:
 ```c
 * @brief The address argument of a monitor command. gdb sends the text after `monitor` as typed, without evaluating
 * it, so the server reads it here: a hex number (0x optional), or a register of the current thread by its name in the
-* target description, with or without `$` (`$pc`, `x30`), either one optionally followed by `+` or `-` and a hex
+* target description, with or without `$` (`$pc`, `r0`), either one optionally followed by `+` or `-` and a hex
 * number. False when the text is none of these.
 ```
 <!-- /docgen:code -->
