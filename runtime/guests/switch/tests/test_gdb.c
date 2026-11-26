@@ -53,15 +53,17 @@ static int free_port(void)
 
 static int fd_of(int port)
 {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in sa = { .sin_family = AF_INET, .sin_port = htons((uint16_t)port) };
     sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    /* A socket whose connect was refused cannot connect again on macOS, so each try gets its own. */
     for (int i = 0; i < 200; i++) {
-        if (connect(fd, (struct sockaddr *)&sa, sizeof sa) == 0)
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (fd >= 0 && connect(fd, (struct sockaddr *)&sa, sizeof sa) == 0)
             return fd;
+        if (fd >= 0)
+            close(fd);
         usleep(10000);
     }
-    close(fd);
     return -1;
 }
 

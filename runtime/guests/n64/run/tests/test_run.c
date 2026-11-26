@@ -371,12 +371,20 @@ static bool mask(int fd, const char *pkt, char *out, size_t n)
 static void *mclient_run(void *arg)
 {
     mclient *s = arg;
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    int fd = -1;
     struct sockaddr_in sa = { .sin_family = AF_INET, .sin_port = htons((uint16_t)s->port) };
     sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    /* A socket whose connect was refused cannot connect again on macOS, so each try gets its own. */
     bool up = false;
-    for (int i = 0; i < 300 && !up; i++)
-        up = connect(fd, (struct sockaddr *)&sa, sizeof sa) == 0 || (usleep(10000), false);
+    for (int i = 0; i < 300 && !up; i++) {
+        fd = socket(AF_INET, SOCK_STREAM, 0);
+        up = fd >= 0 && connect(fd, (struct sockaddr *)&sa, sizeof sa) == 0;
+        if (!up) {
+            if (fd >= 0)
+                close(fd);
+            usleep(10000);
+        }
+    }
     char r[4096];
     s->ok = up && mask(fd, "qXfer:features:read:target.xml:0,fff", r, sizeof r);
     snprintf(s->xml, sizeof s->xml, "%s", strstr(r, "<architecture>") ? strstr(r, "<architecture>") : "");
