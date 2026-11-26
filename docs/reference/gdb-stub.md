@@ -43,7 +43,7 @@ unsupported. What is host-specific is the trap instruction (`int3`, or
 one host instruction is stepped: the x86-64 trap flag, or on arm64, which
 has no flag a signal handler can set:
 
-<!-- docgen:code file=runtime/core/gdbstub.c region=arm64-step -->
+<!-- docgen:code file=runtime/core/gdbtrap.c region=arm64-step -->
 ```c
 * arm64 has no trap flag a signal handler can set (single-step is ptrace's), so one host instruction is stepped by
 * planting a second trap at every instruction that can run after it: the next one, or for a branch its targets from
