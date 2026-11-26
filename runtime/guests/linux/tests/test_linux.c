@@ -568,6 +568,36 @@ TEST(a_kill_reaches_a_forked_child_through_its_own_signal_thread)
     CHECK_EQ(wait_status(c, pid), L_SIGTERM);
 }
 
+/** @brief A system call made with the signals in mask blocked, so a signal the helper thread queues meanwhile is not delivered at its return. */
+static int64_t set_blocked_sys(rl_ctx *c, uint32_t nr, uint64_t mask, uint64_t a0, uint64_t a1)
+{
+    uint64_t saved = lx_cur()->blocked;
+    lx_cur()->blocked |= mask;
+    int64_t r = sys(c, nr, 0, a0, a1, 0, 0, 0);
+    lx_cur()->blocked = saved;
+    return r;
+}
+
+TEST(a_signal_queued_before_a_system_call_returns_is_held_while_it_is_blocked)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    lx.sig[L_SIGALRM].handler = 0x400000;
+    int64_t it[4] = { 0, 1000, 0, 1000 };
+    rl_vm_kernel_write(&lx.vm, 0x401000, it, sizeof it);
+    CHECK_EQ(sys(c, NR_setitimer, 0, 0x401000, 0, 0, 0, 0), 0);
+    uint64_t t0 = rl_clock_ns();
+    while (!__atomic_load_n(&lx_cur()->pending[L_SIGALRM].queued, __ATOMIC_ACQUIRE) && rl_clock_ns() - t0 < 2000000000ull)
+        rl_sleep_ns(1000000);
+    CHECK(lx_cur()->pending[L_SIGALRM].queued);
+    memset(it, 0, sizeof it);
+    rl_vm_kernel_write(&lx.vm, 0x401000, it, sizeof it);
+    CHECK_EQ(set_blocked_sys(c, NR_setitimer, 1ull << (L_SIGALRM - 1), 0x401000, 0x401100), 0);
+    CHECK(lx_cur()->pending[L_SIGALRM].queued);
+    lx_cur()->pending[L_SIGALRM].queued = false;
+    lx.sig[L_SIGALRM].handler = 0;
+}
+
 TEST(an_interval_timer_fires_on_time_and_interrupts_a_blocking_pipe_write)
 {
     rl_ctx *c = boot();
@@ -588,7 +618,8 @@ TEST(an_interval_timer_fires_on_time_and_interrupts_a_blocking_pipe_write)
     CHECK(fired >= 3 && fired <= 6);
     memset(it, 0, sizeof it);
     rl_vm_kernel_write(&lx.vm, 0x401000, it, sizeof it);
-    CHECK_EQ(sys(c, NR_setitimer, 0, 0x401000, 0x401100, 0, 0, 0), 0);
+    /* The timer still runs: a SIGALRM landing before this call returns would run the handler (no code at 0x400000). */
+    CHECK_EQ(set_blocked_sys(c, NR_setitimer, 1ull << (L_SIGALRM - 1), 0x401000, 0x401100), 0);
     int64_t old[4];
     memcpy(old, rl_mem_base() + 0x401100, sizeof old);
     CHECK(old[1] == 20000 && old[2] == 0 && old[3] > 0 && old[3] <= 20000);
