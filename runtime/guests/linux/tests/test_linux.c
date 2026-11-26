@@ -346,6 +346,9 @@ TEST(identity_and_information_calls)
     CHECK_EQ(sys(c, NR_futex, 0x401000, L_FUTEX_WAIT | L_FUTEX_PRIVATE, 12345, 0, 0, 0), -L_EAGAIN);
 }
 
+/** @brief A pid no host has: Linux's pid_max is at most 2^22 and macOS's 99999, so kill never finds a process (lx.pid + 1000 could be one: -EPERM). */
+#define NO_SUCH_PID 2000000000ull
+
 TEST(signal_masks_and_actions_round_trip_and_default_actions_end_the_process)
 {
     rl_ctx *c = boot();
@@ -371,7 +374,7 @@ TEST(signal_masks_and_actions_round_trip_and_default_actions_end_the_process)
     CHECK_EQ(prev[0], L_SIG_DFL);
     CHECK_EQ(sys(c, NR_rt_sigaction, L_SIGKILL, 0x401040, 0, 8, 0, 0), -L_EINVAL);
     CHECK_EQ(sys(c, NR_rt_sigaction, 65, 0x401040, 0, 8, 0, 0), -L_EINVAL);
-    CHECK_EQ(sys(c, NR_kill, (uint64_t)lx.pid + 1000, L_SIGUSR1, 0, 0, 0, 0), -L_ESRCH);
+    CHECK_EQ(sys(c, NR_kill, NO_SUCH_PID, L_SIGUSR1, 0, 0, 0, 0), -L_ESRCH);
     uint64_t none = 0;
     rl_vm_kernel_write(&lx.vm, 0x401000, &none, 8);
     CHECK_EQ(sys(c, NR_rt_sigprocmask, L_SIG_SETMASK, 0x401000, 0, 8, 0, 0), 0);
