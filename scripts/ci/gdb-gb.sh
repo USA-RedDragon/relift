@@ -10,6 +10,8 @@
 . "$(dirname "$0")/lib.sh"
 root=$ROOT
 relift=${1:-${CARGO_TARGET_DIR:-$root/target}/debug/relift}
+# The builds below run in project directories, so the binary must be named by an absolute path.
+relift=$(cd "$(dirname "$relift")" && pwd)/$(basename "$relift")
 # A distribution's plain gdb may know the host only; gdb-multiarch knows gbz80. GDB=<program> overrides the search.
 gdb_bin=${GDB:-}
 if [ -z "$gdb_bin" ]; then
@@ -56,7 +58,7 @@ EOF
 build_cart() { # rom, project dir: prints the program path
   (cd "$2" && "$relift" import "$1" --cache-dir "$work/cache" >"$2/import.log" 2>&1 &&
     "$relift" build --dev --cache-dir "$work/cache" --runtime-dir "$root/runtime" --package.appimage never >"$2/build.log" 2>&1) ||
-    { cat "$2/import.log" "$2/build.log" 2>/dev/null; return 1; }
+    { echo "gdb-gb: building $1 failed:" >&2; cat "$2/import.log" "$2/build.log" >&2 2>/dev/null; return 1; }
   sed -n 's/^  output: //p' "$2/build.log"
 }
 prog=$(build_cart "$work/loop.gb" "$work/proj") || exit 1
