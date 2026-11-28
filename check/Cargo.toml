@@ -18,7 +18,7 @@ relift-diff = { path = "../core/diff" }
 relift-guest = { path = "../core/guest" }
 relift-ir = { path = "../core/ir" }
 relift-proc = { path = "../core/proc" }
-rustyboi-core = { git = "https://github.com/USA-RedDragon/rustyboi", rev = "14acecf35f6bfc8589a09ce7affbf7c1be3854a0" }
+rustyboi-core = { git = "https://github.com/USA-RedDragon/rustyboi", rev = "b6687f38120bd81c2251519e54f1c40f6002c9ef" }
 unicorn-engine = { version = "=2.1.5", default-features = false, features = ["arch_aarch64"] }
 
 [lints.rust]
