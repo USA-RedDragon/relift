@@ -38,7 +38,7 @@ required-features = ["interpreter"]
 
 [dependencies]
 rustyboi-core = { git = "https://github.com/USA-RedDragon/rustyboi", rev = "b6687f38120bd81c2251519e54f1c40f6002c9ef", default-features = false }
-flate2 = "=1.1.9"
+flate2 = "=1.1.11"
 
 [profile.release]
 opt-level = 3
